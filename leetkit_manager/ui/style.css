@@ -299,6 +299,29 @@ body {
 /* 문제 트리거 — 카드 안에서 펼치지 않는다(길이가 들쭉날쭉해져 스크롤이 생기는 걸
    막기 위해). 눌러도 카드 높이가 절대 안 바뀌게, 항상 별도 모달(#detail-backdrop)을 연다. */
 
+/* 문제를 읽고 나서 바로 누를 수 있는 해결 버튼 — 명령어를 복사해 터미널에 붙여넣는
+   단계를 없앤다. 40-50대 대상에서 그 단계가 사실상 벽이었다. */
+.check-resolve-btn {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ok);
+  background: none;
+  border: 1px solid var(--ok);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.check-resolve-btn:hover:not(:disabled) {
+  background: rgba(95, 212, 192, 0.12);
+}
+
+.check-resolve-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* "호환되지 않는 Lens 버전"처럼 원인이 안 보이던 상태의 실제 근거. 막다른 길로
    느껴지지 않게 카드 안에서 바로 읽히도록 둔다(모달을 또 열게 하지 않는다). */
 .problem-detail {

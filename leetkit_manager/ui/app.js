@@ -218,12 +218,47 @@ const CHECK_ID_LABEL = {
   UPDATE_CHECK_REACHABLE: "업데이트 확인",
 };
 
-function renderCheckItem(c) {
+// 이 체크는 앱 안에서 바로 처리할 수 있다 — 어떤 흐름으로 보낼지의 표.
+// 조치 문구를 그대로 터미널에서 실행하는 방식은 쓰지 않는다: 실제 문구 대부분이
+// `<라이선스-키>`·`{claude-desktop|...}` 같은 자리표시자를 담고 있어서 그대로는
+// 실행이 안 되고(직접 확인함), 키 입력·대상 선택·전화번호 인증은 이미 전용 모달이
+// 제대로 처리하고 있다. 임의 문자열을 셸에 넘기지 않으니 더 안전하기도 하다.
+const CHECK_RESOLVER = {
+  MCP_CONFIG_VALID: "register",
+  MCP_CONFIG_DESKTOP: "register",
+  MCP_CONFIG_CODE: "register",
+  MCP_CONFIG_CODEX: "register",
+  LICENSE_ACTIVE: "activate",
+  DART_API_KEY: "activate",
+  TELEGRAM_LOGIN: "telegram-login",
+};
+
+function checkResolverFor(c) {
+  if (c.repairable && c.repair_id) return "repair"; // Lens가 스스로 고칠 수 있는 항목
+  return CHECK_RESOLVER[c.id] || null;
+}
+
+function renderCheckItem(c, lensName) {
   const detailLines = (c.details && c.details.lines) || [];
   const linesHtml = detailLines.length
     ? `<ul class="check-detail-lines">${detailLines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>`
     : "";
-  const actionHtml = c.action
+
+  const resolver = checkResolverFor(c);
+  // 가이드의 예시 카드는 실제 Lens가 아니다 — 버튼 모양은 그대로 보여주되 누르면
+  // 없는 Lens를 호출하게 되므로 비활성으로 둔다.
+  const isExample = lensName === EXAMPLE_LENS_DATA.name;
+  const actionHtml = resolver && isExample
+    ? `<div class="check-action">
+         <button class="check-resolve-btn" disabled title="예시 화면입니다">지금 해결하기</button>
+       </div>`
+    : resolver
+    ? `<div class="check-action">
+         <button class="check-resolve-btn" data-action="resolve-check" data-lens="${escapeAttr(lensName || "")}"
+                 data-check-id="${escapeAttr(c.id)}" data-resolver="${resolver}"
+                 data-repair-id="${escapeAttr(c.repair_id || "")}">지금 해결하기</button>
+       </div>`
+    : c.action
     ? `<div class="check-action"><span class="check-action-label">조치</span><span class="check-action-cmd" data-action="copy-cmd" data-cmd="${escapeAttr(c.action)}" title="눌러서 복사">${escapeHtml(c.action)}</span></div>`
     : "";
   const cls = c.status === "active" ? "check-item active" : "check-item";
@@ -241,10 +276,10 @@ function renderDetailModal(lens) {
   // "진행중"은 문제가 아니므로 별도 섹션으로 — 둘 다 있을 때만 "문제" 소제목을 붙여
   // 구분하고, 하나만 있으면 굳이 소제목으로 나누지 않는다.
   const progressHtml = inProgress.length
-    ? `<div class="detail-progress"><div class="detail-section-label">진행중</div>${inProgress.map(renderCheckItem).join("")}</div>`
+    ? `<div class="detail-progress"><div class="detail-section-label">진행중</div>${inProgress.map((c) => renderCheckItem(c, lens.name)).join("")}</div>`
     : "";
   const problemsHtml = problems.length
-    ? `${inProgress.length ? `<div class="detail-section-label">문제</div>` : ""}${problems.map(renderCheckItem).join("")}`
+    ? `${inProgress.length ? `<div class="detail-section-label">문제</div>` : ""}${problems.map((c) => renderCheckItem(c, lens.name)).join("")}`
     : `<div class="check-item">문제 없음</div>`;
 
   document.getElementById("detail-title").textContent = `${lens.display_name} 상세`;
@@ -484,6 +519,52 @@ function replaceCard(lensName, lensData) {
   const card = grid.querySelector(`[data-card="${lensName}"]`);
   if (card) card.outerHTML = renderCard(lensData);
   recomputeSummaryFromCache();
+  verifyPendingResolve(lensName);
+}
+
+// "지금 해결하기"로 시작한 조치가 실제로 문제를 없앴는지 끝까지 확인해준다 —
+// 조치를 하고도 "이게 된 건가?" 하고 다시 진단을 눌러봐야 하면 절반만 해준 셈이다.
+// 모든 흐름이 끝나면 카드를 새로 그리므로(replaceCard) 그 시점에 확인한다.
+let pendingResolveVerify = null; // {lensName, checkId}
+
+function verifyPendingResolve(replacedLensName) {
+  if (!pendingResolveVerify) return;
+  const { lensName, checkId } = pendingResolveVerify;
+  // 다른 Lens 카드가 갱신된 것뿐이면 건드리지 않는다 — 안 그러면 A의 조치를 취소해두고
+  // B를 만졌을 때 A에 대한 엉뚱한 알림이 뜬다.
+  if (replacedLensName && replacedLensName !== lensName) return;
+  const lens = lensDataCache[lensName];
+  if (!lens || !lens.checks) return;
+  pendingResolveVerify = null;
+
+  const label = CHECK_ID_LABEL[checkId] || checkId;
+  const check = lens.checks.find((c) => c.id === checkId);
+  const solved = !check || ["ok", "active", "skip", "info-skip"].includes(check.status);
+  showToast(solved ? `${label} — 해결됐습니다.` : `${label} — 아직 남아 있습니다.`);
+}
+
+async function resolveCheck(lensName, checkId, resolver, repairId) {
+  if (!lensName) return;
+  pendingResolveVerify = { lensName, checkId };
+  closeDetailModal(); // 조치 화면을 가리지 않게 상세 모달은 접는다
+
+  if (resolver === "repair") {
+    await runAction("repair", lensName, repairId);
+    return; // runAction이 카드를 새로 그리며 verifyPendingResolve까지 태운다
+  }
+  if (resolver === "register") {
+    openRegisterModal(lensName);
+    return;
+  }
+  if (resolver === "activate") {
+    openActivateModal(lensName);
+    return;
+  }
+  if (resolver === "telegram-login") {
+    openTelegramLoginModal(lensName);
+    return;
+  }
+  pendingResolveVerify = null; // 처리할 방법이 없으면 확인 예약도 취소
 }
 
 // 복구/설치/개별 진단 후에는 지금까지 card 하나만 새로 그리고 상단 "N개 중 M개 정상"
@@ -632,6 +713,7 @@ document.getElementById("modal-install-btn").addEventListener("click", async () 
 function closeActivateModal(completed = false) {
   document.getElementById("modal-backdrop").hidden = true;
   activateTargetLens = null;
+  if (!completed) pendingResolveVerify = null;  // 취소했으면 나중에 엉뚱한 알림이 뜨지 않게
   if (completed) {
     onboardingHandleModalClosed("license");
   } else if (onboardingActive && onboardingSubStep === "license") {
@@ -760,6 +842,7 @@ async function openRegisterModal(lensName) {
 function closeRegisterModal(completed = false) {
   document.getElementById("register-backdrop").hidden = true;
   registerTargetLens = null;
+  if (!completed) pendingResolveVerify = null;
   if (completed) {
     onboardingHandleModalClosed("register");
   } else if (onboardingActive && onboardingSubStep === "register") {
@@ -994,6 +1077,7 @@ function closeTelegramLoginModal(completed = false) {
   document.getElementById("telegram-login-backdrop").hidden = true;
   window.pywebview.api.telegram_login_cancel();
   telegramLoginTargetLens = null;
+  if (!completed) pendingResolveVerify = null;
   telegramLoginStep = null;
   if (completed) {
     onboardingHandleModalClosed("telegram-login");
@@ -1049,6 +1133,10 @@ document.addEventListener("click", (e) => {
   }
   if (action === "register") {
     openRegisterModal(lensName);
+    return;
+  }
+  if (action === "resolve-check") {
+    resolveCheck(btn.dataset.lens, btn.dataset.checkId, btn.dataset.resolver, btn.dataset.repairId);
     return;
   }
   if (action === "uninstall") {
