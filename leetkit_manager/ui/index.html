@@ -11,6 +11,10 @@
       <button class="refresh-btn" id="guide-btn">가이드</button>
       <button class="refresh-btn" id="patchnotes-btn">패치노트</button>
       <button class="refresh-btn" id="support-btn">지원 문의</button>
+      <!-- MCP 등록·설치를 반영하려면 Claude Desktop을 껐다 켜야 한다. 예전엔 마법사
+           완료 화면 등에서만 이 버튼이 떠서, 정작 가장 흔한 상황("도구가 안 보인다")에
+           진입점이 없었다. Claude Desktop이 깔려 있으면 항상 보이게 둔다. -->
+      <button class="refresh-btn" id="restart-claude-btn" hidden>Claude 다시 시작</button>
       <button class="refresh-btn" id="refresh-btn">진단 재실행</button>
     </div>
   </div>
@@ -26,6 +30,16 @@
   <div class="modal">
     <div class="modal-title" id="modal-title">라이선스 활성화</div>
     <input type="password" id="modal-key-input" placeholder="라이선스 키를 붙여넣으세요" autocomplete="off">
+    <div class="modal-field" id="modal-apikey-field" hidden>
+      <div class="field-label">DART API 키</div>
+      <ol class="credential-help-steps">
+        <li>열린 페이지에서 회원가입/로그인</li>
+        <li>"인증키 신청" → 이용 목적 등 간단히 입력</li>
+        <li>발급된 인증키를 아래에 붙여넣기(이메일로도 발송됨)</li>
+      </ol>
+      <button type="button" class="action-btn" id="modal-apikey-reopen-signup">opendart.fss.or.kr 다시 열기</button>
+      <input type="password" id="modal-apikey-input" placeholder="DART API 키를 붙여넣으세요" autocomplete="off">
+    </div>
     <div class="modal-msg" id="modal-msg"></div>
     <div class="modal-actions">
       <button class="action-btn" id="modal-cancel">취소</button>
@@ -59,6 +73,30 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="telegram-login-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-title">텔레그램 로그인</div>
+    <div class="modal-msg" id="telegram-login-msg"></div>
+    <div id="telegram-login-fields"></div>
+    <div class="modal-actions">
+      <button class="action-btn" id="telegram-login-cancel">취소</button>
+      <button class="action-btn primary" id="telegram-login-next">다음</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="register-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-title" id="register-title">MCP 등록 대상</div>
+    <div class="register-targets" id="register-targets"></div>
+    <div class="modal-msg" id="register-msg"></div>
+    <div class="modal-actions">
+      <button class="action-btn" id="register-cancel">취소</button>
+      <button class="action-btn primary" id="register-confirm">등록</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="detail-backdrop" hidden>
   <div class="modal detail-modal">
     <div class="modal-title" id="detail-title"></div>
@@ -88,6 +126,23 @@
       <button class="action-btn primary" id="tour-next">다음</button>
     </div>
   </div>
+</div>
+
+<div class="onboarding-banner" id="onboarding-banner" hidden>
+  <div class="onboarding-steps" id="onboarding-steps"></div>
+  <div class="onboarding-progress-track">
+    <div class="onboarding-progress-fill" id="onboarding-progress-fill"></div>
+  </div>
+  <div class="onboarding-banner-text" id="onboarding-banner-text"></div>
+  <div class="onboarding-banner-actions" id="onboarding-banner-actions"></div>
+</div>
+
+<!-- 설치처럼 오래 걸리는 작업 중 뒤쪽 버튼을 물리적으로 못 누르게 막는다.
+     "되는 겨 안 되는 겨" 하며 다른 걸 누르다 상태가 꼬이는 걸 방지. -->
+<div class="busy-overlay" id="busy-overlay" hidden>
+  <div class="busy-spinner" aria-hidden="true"></div>
+  <div class="busy-text" id="busy-text"></div>
+  <div class="busy-hint">잠시만 기다려주세요 — 최대 1분 정도 걸릴 수 있습니다.</div>
 </div>
 
 <div class="toast" id="toast" hidden></div>

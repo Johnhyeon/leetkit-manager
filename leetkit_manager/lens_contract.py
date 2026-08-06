@@ -25,6 +25,11 @@ class LensSpec:
     # 라이선스 키 외에 추가로 필요한 자격증명 종류. DartLens만 "dart_api"를 가진다 —
     # doctor JSON의 최상위 `dart_api` 확장 필드와 setup의 `--api-key-stdin`에 대응.
     extra_credentials: tuple[str, ...] = field(default_factory=tuple)
+    # 설치 직후 사용자가 굳이 버튼을 안 눌러도 되는, 부작용 없는 1회성 repair_id만
+    # 여기 올린다(예: DartLens의 corp code 캐시 최초 다운로드) — repair_ids의 부분집합
+    # 이어야 한다. TelegramLens의 "daemon"처럼 Claude Desktop 실행 여부 등 외부 상태에
+    # 의존하거나 부작용이 있는 복구는 여기 넣지 않는다(사용자가 카드에서 직접 눌러야 함).
+    auto_repair_after_install: tuple[str, ...] = field(default_factory=tuple)
 
 
 STOCKLENS = LensSpec(
@@ -46,6 +51,7 @@ DARTLENS = LensSpec(
     activate_cmd="dartlens-activate",
     repair_ids=("corp-code-cache",),
     extra_credentials=("dart_api",),
+    auto_repair_after_install=("corp-code-cache",),
 )
 
 TELEGRAMLENS = LensSpec(

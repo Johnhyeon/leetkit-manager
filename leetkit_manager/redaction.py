@@ -18,9 +18,14 @@ import re
 
 _HEX_TOKEN_RE = re.compile(r"\b[0-9a-fA-F]{24,}\b")
 _BASE32_TOKEN_RE = re.compile(r"\b[A-Z2-7]{40,}\b")
-_PHONE_RE = re.compile(r"(\+?82[-\s]?1[0-9]|01[0-9])[-\s]?\d{3,4}[-\s]?\d{4}\b")
-_WIN_USER_RE = re.compile(r"(C:\\Users\\)([^\\]+)(\\)", re.IGNORECASE)
-_NIX_USER_RE = re.compile(r"(/home/)([^/]+)(/)")
+# 점 구분(010.1234.5678)까지 포함 — 실제 로그에서 관찰되는 표기 변형.
+_PHONE_RE = re.compile(r"(\+?82[-.\s]?1[0-9]|01[0-9])[-.\s]?\d{3,4}[-.\s]?\d{4}\b")
+# 드라이브 문자는 C에 한정하지 않고(D:\Users\... 등), 구분자는 역슬래시·슬래시 둘 다
+# 받는다(로그·JSON에는 C:/Users/... 형태가 흔하다). 경로 끝(구분자 없이 끝나는 경우)도
+# 잡히도록 마지막 구분자를 선택적으로 둔다 — 예전 규칙은 이 셋 다 놓쳤다.
+_WIN_USER_RE = re.compile(r"([A-Za-z]:[\\/]Users[\\/])([^\\/\s]+)")
+# macOS(`/Users/<name>`)도 지원 대상이다(support_bundle이 darwin 경로를 수집한다).
+_NIX_USER_RE = re.compile(r"((?:/home|/Users)/)([^/\s]+)")
 
 
 def _mask_span(s: str, keep: int = 4) -> str:
@@ -48,8 +53,8 @@ def redact_phone_numbers(text: str) -> str:
 
 
 def redact_home_username(text: str) -> str:
-    text = _WIN_USER_RE.sub(lambda m: f"{m.group(1)}<user>{m.group(3)}", text)
-    text = _NIX_USER_RE.sub(lambda m: f"{m.group(1)}<user>{m.group(3)}", text)
+    text = _WIN_USER_RE.sub(lambda m: f"{m.group(1)}<user>", text)
+    text = _NIX_USER_RE.sub(lambda m: f"{m.group(1)}<user>", text)
     return text
 
 

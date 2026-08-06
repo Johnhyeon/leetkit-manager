@@ -7,5 +7,7 @@ venv/
 .ruff_cache/
 dist/
 build/
+dist_exe/
+build_exe/
 *.spec
 .env

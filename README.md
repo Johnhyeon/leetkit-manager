@@ -26,6 +26,20 @@ leetkit-manager
 인자 없이 실행하면 대시보드 창이 뜹니다. 최초 실행 시 바탕화면에 바로가기가
 자동으로 만들어져서, 다음부터는 명령어 없이 아이콘 더블클릭으로 켤 수 있습니다.
 
+### 독립 실행 exe (명령어 없이 배포)
+
+컴퓨터·명령줄에 익숙하지 않은 사용자에게는 `uv tool install` 대신 exe 파일
+하나를 바로 건넬 수도 있습니다. Python/uv 설치 여부와 무관하게 더블클릭으로
+바로 실행됩니다.
+
+```
+pip install -e ".[build]"
+powershell -File packaging\build_exe.ps1
+```
+
+`dist_exe\LeetKitManager.exe` 하나가 나옵니다. 서명되지 않은 exe라 스마트스크린
+경고가 뜰 수 있으니, 실제 배포 전에는 코드사이닝 인증서 적용을 검토하세요.
+
 ## 요구 사항
 
 - Python 3.11+

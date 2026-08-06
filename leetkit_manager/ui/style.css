@@ -155,6 +155,9 @@ body {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
+  /* 줄 높이를 모두 같게 — 아래 줄(TelegramLens)은 카드가 하나뿐이라 내용이 덜 접혀
+     위 두 카드보다 짧아 보였다. 세 카드의 세로 높이를 맞춘다. */
+  grid-auto-rows: 1fr;
   gap: 14px;
   padding: 18px 22px 24px;
   width: 100%;
@@ -296,6 +299,18 @@ body {
 /* 문제 트리거 — 카드 안에서 펼치지 않는다(길이가 들쭉날쭉해져 스크롤이 생기는 걸
    막기 위해). 눌러도 카드 높이가 절대 안 바뀌게, 항상 별도 모달(#detail-backdrop)을 연다. */
 
+/* "호환되지 않는 Lens 버전"처럼 원인이 안 보이던 상태의 실제 근거. 막다른 길로
+   느껴지지 않게 카드 안에서 바로 읽히도록 둔다(모달을 또 열게 하지 않는다). */
+.problem-detail {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  background: var(--fail-dim);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  word-break: break-word;
+}
+
 .check-toggle {
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -415,6 +430,11 @@ body {
   color: var(--warn);
 }
 
+.action-btn.danger {
+  border-color: var(--fail);
+  color: var(--fail);
+}
+
 /* ---------- 라이선스 활성화 모달 ---------- */
 
 .modal-backdrop {
@@ -475,6 +495,87 @@ body {
   outline: 2px solid var(--ok);
   outline-offset: 1px;
   border-color: transparent;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-field[hidden] {
+  display: none;
+}
+
+.register-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#telegram-login-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#telegram-login-fields:empty {
+  display: none;
+}
+
+/* 텔레그램/DART 등 발급 안내 — 줄글로 붙여쓰지 않고 번호 목록으로 한 줄에 하나씩,
+   눈으로 훑기 쉽게. 세로 여백을 줘서 항목 사이가 붙어 보이지 않게 한다. */
+.credential-help-steps {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.credential-help-steps li {
+  margin-bottom: 6px;
+}
+
+.credential-help-steps li:last-child {
+  margin-bottom: 0;
+}
+
+.register-target-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14.5px;
+  cursor: pointer;
+}
+
+.register-target-row.disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.register-target-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ok);
+}
+
+/* 아직 없는 앱을 "받으러 가기"로 연결 — 비활성 행에서도 이 버튼만은 또렷하게 보여야
+   한다(막다른 길이 아니라 다음 할 일을 주는 자리이므로). */
+.target-install-link {
+  margin-left: auto;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--ok);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.target-install-link:hover {
+  border-color: var(--ok);
 }
 
 .modal-msg {
@@ -648,7 +749,184 @@ body {
   gap: 8px;
 }
 
+/* ---------- 온보딩 마법사 배너 ----------
+   투어(설명만 하는 스포트라이트)와 다르게 실제 동작(설치·등록·활성화)을 대신 진행하는
+   자동 진행자라, 전체를 가리는 오버레이가 아니라 화면 아래 한쪽에 조용히 떠서 지금
+   무슨 단계인지만 알려준다 — 실제 상호작용은 각 기능이 이미 갖고 있는 모달(활성화/
+   등록 대상 선택/텔레그램 로그인)이 그대로 담당한다. */
+
+.onboarding-banner {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  width: 340px;
+  background: var(--panel-raised);
+  border: 1px solid var(--ok);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 36;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.onboarding-banner[hidden] {
+  display: none;
+}
+
+/* 스텝 인디케이터 — 지금 3개 중 몇 번째인지, 지나온 건 체크로 확정됐다는 걸
+   한눈에. 아래 프로그레스 바가 "얼마나 왔는지"를 매끄럽게 보여주는 것과 역할을
+   나눠서(이산적 단계 vs 연속적 진행률) 같은 정보를 두 번 겹쳐 보여주지 않는다. */
+.onboarding-steps {
+  display: flex;
+  justify-content: space-between;
+}
+
+.onboarding-steps:empty {
+  display: none;
+}
+
+.onboarding-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.onboarding-step-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  border: 1.5px solid var(--hairline);
+  color: var(--text-dim);
+  background: transparent;
+  transition: all 0.25s ease;
+}
+
+.onboarding-step.active .onboarding-step-dot {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: var(--ok-dim);
+  box-shadow: 0 0 0 3px var(--ok-dim);
+}
+
+.onboarding-step.done .onboarding-step-dot {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: var(--bg);
+  transform: scale(1.05);
+}
+
+.onboarding-step-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.onboarding-step.active .onboarding-step-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.onboarding-step.done .onboarding-step-label {
+  color: var(--text-muted);
+}
+
+/* 연속 진행률 — 스텝 사이(설치→등록→라이선스→[텔레그램 로그인]) 세부 진행도
+   부드럽게 채워져서 "여기까지 왔다"는 감각을 준다. 완료 시 성취감을 위한
+   포인트라 트랜지션에 살짝 시간을 준다(딱딱 끊기지 않게). */
+.onboarding-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+
+.onboarding-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--ok);
+  border-radius: 3px;
+  transition: width 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.onboarding-banner-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.onboarding-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ---------- 토스트(간단 안내) ---------- */
+
+/* ---------- 작업 중 차단 오버레이 ---------- */
+/* 설치는 수십 초 걸린다 — 그동안 사용자가 "되는 건가?" 하며 다른 버튼을 누르면
+   상태가 꼬인다. 모달(z-index 30)보다 위에 덮어 물리적으로 막는다. */
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 13, 15, 0.82);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  z-index: 50;
+}
+
+.busy-overlay[hidden] {
+  display: none;
+}
+
+.busy-spinner {
+  width: 54px;
+  height: 54px;
+  border: 4px solid var(--hairline);
+  border-top-color: var(--ok);
+  border-radius: 50%;
+  animation: busy-spin 0.9s linear infinite;
+}
+
+@keyframes busy-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 40-50대 대상 — 이 문구가 지금 화면에서 제일 중요한 정보라 크고 또렷하게. */
+.busy-text {
+  font-size: 17px;
+  color: var(--text);
+  text-align: center;
+  max-width: 78%;
+  line-height: 1.5;
+}
+
+.busy-hint {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner { animation-duration: 3s; }
+}
 
 .toast {
   position: fixed;

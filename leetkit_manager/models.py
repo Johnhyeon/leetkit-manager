@@ -27,6 +27,11 @@ class CheckResult:
     repairable: bool = False
     repair_id: str | None = None
     action: str | None = None
+    # StockLens만 이 필드를 낸다 — "치명적이지 않은 실패"(예: 엑셀 출력 폴더 쓰기 불가)를
+    # 전체 fail이 아니라 degraded로 낮추는 근거다. Manager가 이 값을 안 읽으면 그 실패는
+    # 상단 요약의 "조치 필요"에 영영 안 잡힌다. 내지 않는 Lens는 True로 본다
+    # (그쪽은 fail이면 이미 전체를 fail로 올리므로 의미가 같다).
+    critical: bool = True
 
     @classmethod
     def from_json(cls, payload: dict) -> "CheckResult":
@@ -38,6 +43,7 @@ class CheckResult:
             repairable=bool(payload.get("repairable", False)),
             repair_id=payload.get("repair_id"),
             action=payload.get("action"),
+            critical=bool(payload.get("critical", True)),
         )
 
 

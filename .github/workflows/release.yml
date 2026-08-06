@@ -1,9 +1,10 @@
 name: Release
 
 # 태그 푸시(v*) 시 자동:
-# 1. Python 빌드 (wheel + sdist)
-# 2. PyPI 업로드
-# 3. GitHub Release 생성 + dist 자산 첨부
+# 1. Python 빌드 (wheel + sdist) — Ubuntu
+# 2. 독립 실행 Windows exe 빌드(LeetKitManager.exe) — Windows 러너(PyInstaller는
+#    빌드하는 OS의 실행 파일만 만들 수 있어서 이 작업만 별도 러너가 필요하다)
+# 3. PyPI 업로드 + GitHub Release 생성(wheel/tar.gz/exe 전부 첨부)
 
 on:
   push:
@@ -11,11 +12,8 @@ on:
       - 'v*'  # v0.1.0, v0.2.0 등
 
 jobs:
-  release:
+  build-wheel:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # GitHub Release 생성용
-      id-token: write  # PyPI Trusted Publishing (OIDC) 용
     steps:
       - uses: actions/checkout@v4
 
@@ -44,13 +42,76 @@ jobs:
           python -m pip install --upgrade twine
           twine check dist/*
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+  build-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        run: python -m pip install -e ".[build]"
+
+      # 구매자에게 "exe 하나만 받으면 끝"을 실제로 제공하는 핵심 산출물 — 지금까지는
+      # 이 작업 자체가 워크플로에 없어서 GitHub Release에 exe가 절대 안 올라갔다.
+      - name: Build standalone exe
+        shell: pwsh
+        run: .\packaging\build_exe.ps1
+
+      # 자체 업데이트는 실행 중인 exe를 통째로 교체한다 — 받은 파일이 여기서 빌드된
+      # 그 파일이 맞는지 앱이 대조할 수 있게 체크섬을 같이 올린다(package_service의
+      # fetch_expected_sha256/sha256_of_file이 이 파일을 읽는다).
+      - name: Write exe checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist_exe\LeetKitManager.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  LeetKitManager.exe" | Out-File -FilePath dist_exe\LeetKitManager.exe.sha256 -Encoding ascii -NoNewline
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: |
+            dist_exe/LeetKitManager.exe
+            dist_exe/LeetKitManager.exe.sha256
+
+  release:
+    needs: [build-wheel, build-exe]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # GitHub Release 생성용
+      id-token: write  # PyPI Trusted Publishing (OIDC) 용
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-dist
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: dist_exe
+
       # Trusted Publishing (OIDC) — PyPI에 등록된 publisher가 자동 인증
       # https://docs.pypi.org/trusted-publishers/
       # 설정: PyPI > Account > Publishing > Add pending publisher
       #   Project: leetkit-manager / Owner: Johnhyeon / Repo: leetkit-manager
       #   Workflow: release.yml / Environment: (비워둠)
+      # PyPI 업로드가 실패해도(예: pending publisher 미등록, 이미 올라간 버전) 아래
+      # GitHub Release는 반드시 만들어져야 한다 — 구매자가 실제로 받는 건 거기 붙는
+      # exe이고, PyPI는 명령줄 사용자용 부가 경로다. 실패는 워크플로에 경고로 남는다.
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
+        continue-on-error: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -58,17 +119,33 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
+            dist_exe/LeetKitManager.exe
+            dist_exe/LeetKitManager.exe.sha256
           generate_release_notes: true
           body: |
             > StockLens/DartLens/TelegramLens 설치·진단·업데이트를 한 창에서. 별도 라이선스 키 없이 무료로 씁니다.
 
             ---
 
-            ## 📥 설치 / 업그레이드 (한 줄)
+            ## 📥 설치
 
+            **Windows · 명령줄이 익숙하지 않다면** — 아래 `LeetKitManager.exe`를 받아 더블클릭하면 바로 실행됩니다. Lens 설치·업데이트에 필요한 `uv`가 없으면 자동으로 설치합니다.
+
+            **macOS** — 현재 전용 앱이 없어 명령줄로 설치합니다.
+            ```
+            uv tool install leetkit-manager
+            leetkit-manager gui
+            ```
+
+            **Windows에서도 명령줄이 편하다면**
             ```
             uv tool install leetkit-manager
             ```
+
+            > **처음 실행할 때 경고가 뜰 수 있습니다.** 서명 안 된 프로그램이라 그렇습니다.
+            > - SmartScreen: "추가 정보" → "실행"
+            > - 백신이 차단하는 경우: 오탐입니다. 예외 등록 방법은 [백신 안내](https://github.com/Johnhyeon/leetkit-manager/blob/main/packaging/ANTIVIRUS_GUIDE.md) 참고
+            > - 파일이 맞는지 확인하려면 위 `LeetKitManager.exe.sha256`의 값과 대조하세요
 
             ## 📚 링크
             - [stocklens-mcp](https://github.com/Johnhyeon/stocklens-mcp)

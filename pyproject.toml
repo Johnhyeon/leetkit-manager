@@ -25,6 +25,10 @@ dependencies = [
     "pywin32>=306; sys_platform == 'win32'",
 ]
 
+[project.optional-dependencies]
+# PyPI 배포에는 필요 없음 — packaging/build_exe.ps1로 독립 exe를 만들 때만.
+build = ["pyinstaller>=6.0"]
+
 [project.urls]
 Homepage = "https://github.com/Johnhyeon/leetkit-manager"
 Repository = "https://github.com/Johnhyeon/leetkit-manager"

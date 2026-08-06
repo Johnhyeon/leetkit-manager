@@ -128,9 +128,28 @@ def create_bundle(dest_dir: Path | None = None) -> Path:
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("summary.txt", _summary_text())
         for arcname, path in _safe_files():
-            zf.write(path, arcname)
+            zf.writestr(arcname, _redacted_file_text(path))
 
     return zip_path
+
+
+def _redacted_file_text(path: Path) -> str:
+    """번들에 담기 전에 로그 본문도 마스킹한다.
+
+    예전엔 summary.txt만 redact하고 로그 파일은 `zf.write()`로 원문 그대로 담았다 —
+    확인된 유출 경로: DART API 호출이 HTTP 오류를 내면 httpx 예외 문자열에 쿼리스트링
+    (`?crtfc_key=<40자리>`)이 통째로 들어가고, 그게 Claude Desktop의 MCP 서버 로그에
+    남아 번들에 그대로 실려 나갔다. 그 외에도 로그엔 전화번호와 `C:\\Users\\<실명>`
+    경로가 흔하다. 번들은 고객이 이메일로 밖에 보내는 물건이므로 원문으로 담으면 안 된다.
+
+    바이너리이거나 읽을 수 없는 파일은 마스킹을 보장할 수 없으니 아예 제외한다
+    (안전한 쪽으로 실패) — 지금 안전 목록은 전부 텍스트 로그/JSON이라 실제로는
+    걸릴 일이 없다."""
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return f"(이 파일을 읽지 못해 번들에서 제외했습니다: {type(e).__name__})"
+    return redaction.redact(raw)
 
 
 def reveal_in_file_manager(path: Path) -> None:
