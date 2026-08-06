@@ -1,6 +1,6 @@
 [project]
 name = "leetkit-manager"
-version = "0.1.1"
+version = "0.1.2"
 description = "StockLens/DartLens/TelegramLens 통합 설치·진단·업데이트 Manager"
 readme = "README.md"
 license = { text = "Proprietary" }

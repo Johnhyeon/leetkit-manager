@@ -78,6 +78,38 @@ class TestFallbackLockFile:
         with patch.object(single_instance, "_lock_path", return_value=lock):
             assert single_instance.is_already_running() is True
 
+    def _live_lock(self, tmp_path):
+        lock = tmp_path / "app.lock"
+        my_pid = os.getpid()
+        real_start = psutil.Process(my_pid).create_time()
+        lock.write_text(f'{{"pid": {my_pid}, "started_at": {real_start}}}', encoding="utf-8")
+        return lock
+
+    def test_alive_process_without_window_does_not_block(self, tmp_path):
+        """macOS 예방 — Windows에서 실제로 겪은 잠김(창 없이 남은 프로세스가 소유권을
+        쥐고 있어 앱을 영영 못 엶)이 여기서도 성립한다. 창이 확인될 때만 막는다."""
+        lock = self._live_lock(tmp_path)
+        with patch.object(single_instance, "_lock_path", return_value=lock), \
+             patch.object(single_instance, "_pid_has_onscreen_window", return_value=False):
+            assert single_instance.is_already_running() is False
+
+    def test_alive_process_with_window_blocks(self, tmp_path):
+        lock = self._live_lock(tmp_path)
+        with patch.object(single_instance, "_lock_path", return_value=lock), \
+             patch.object(single_instance, "_pid_has_onscreen_window", return_value=True):
+            assert single_instance.is_already_running() is True
+
+    def test_when_window_check_unavailable_falls_back_to_process_liveness(self, tmp_path):
+        """Quartz를 못 쓰는 환경에서는 확인할 방법이 없으니 기존 판정을 유지한다."""
+        lock = self._live_lock(tmp_path)
+        with patch.object(single_instance, "_lock_path", return_value=lock), \
+             patch.object(single_instance, "_pid_has_onscreen_window", return_value=None):
+            assert single_instance.is_already_running() is True
+
+    def test_pid_has_onscreen_window_returns_none_off_darwin(self):
+        """Windows/Linux에서는 이 경로를 타지 않는다(뮤텍스·기존 판정이 담당)."""
+        assert single_instance._pid_has_onscreen_window(os.getpid()) is None
+
 
 @pytest.mark.skipif(sys.platform != "win32", reason="명명된 뮤텍스는 Windows 전용")
 class TestNamedMutex:
@@ -109,6 +141,21 @@ class TestNamedMutex:
         single_instance.is_already_running()
         single_instance.release()
         single_instance.release()  # 두 번째 호출이 터지면 안 된다
+
+    def test_mutex_held_but_no_window_does_not_block_launch(self):
+        """실사용에서 실제로 걸린 상황: 창 없이 남은 프로세스가 뮤텍스를 쥐고 있으면
+        사용자 눈엔 아무것도 안 떠 있는데 "이미 실행 중"만 반복돼 앱을 영영 못 열었다.
+        뮤텍스만 믿고 막으면 안 된다 — 진짜 창이 있을 때만 막는다."""
+        assert single_instance.is_already_running() is False  # 소유권 확보
+        with patch.object(single_instance, "_find_manager_window", return_value=None):
+            # 뮤텍스는 이미 존재하는 상태(위에서 만들었음)인데 창이 없다 → 실행 허용
+            assert single_instance.is_already_running() is False
+
+    def test_mutex_held_and_window_present_blocks_launch(self):
+        """진짜로 창이 떠 있으면 두 번째 인스턴스는 막아야 한다."""
+        assert single_instance.is_already_running() is False
+        with patch.object(single_instance, "_find_manager_window", return_value=12345):
+            assert single_instance.is_already_running() is True
 
 
 class TestNotifyAlreadyRunning:

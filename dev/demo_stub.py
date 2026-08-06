@@ -81,10 +81,16 @@ def _install_from_local_repo(package_name: str, _version: str, *, timeout=None):
 
 
 def main() -> None:
-    from leetkit_manager import package_service
+    from leetkit_manager import package_service, single_instance
     from leetkit_manager.ui import app
 
-    with patch.object(package_service, "install_version", side_effect=_install_from_local_repo):
+    # 중복 실행 방지용 뮤텍스 이름을 데모 전용으로 바꾼다. 안 그러면 데모와 실제
+    # Manager가 같은 이름을 놓고 서로를 막아서 둘 중 하나만 뜬다 — 가이드용 화면을
+    # 찍으려고 둘 다 띄워야 할 때 곤란하고, 실제로 데모가 떠 있는 줄 모른 채 실제
+    # Manager가 "이미 실행 중"만 반복하는 상황도 겪었다. HOME은 이미 격리돼 있어
+    # 락 파일은 안 겹치고, 남은 건 이 전역 이름 하나뿐이다.
+    with patch.object(single_instance, "_MUTEX_NAME", "Local\\LeetKitManager-Demo"), \
+         patch.object(package_service, "install_version", side_effect=_install_from_local_repo):
         app.run()
 
 

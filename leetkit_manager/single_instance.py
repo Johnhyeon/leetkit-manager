@@ -60,16 +60,14 @@ def _try_acquire_mutex() -> bool | None:
         return None
 
 
-def focus_existing_window() -> bool:
-    """이미 떠 있는 창을 앞으로 가져온다. 중복 실행 시 "아무 반응 없음"이 아니라
-    기존 창이 뜨는 게 사용자가 기대하는 동작이다(아이콘을 다시 눌렀을 때)."""
+def _find_manager_window():
+    """떠 있는 Manager 창의 핸들. 없으면 None. (Windows 전용 — 창을 앞으로 가져올 때 씀)"""
     if sys.platform != "win32":
-        return False
+        return None
     try:
-        import win32con
         import win32gui
     except Exception:
-        return False
+        return None
 
     found = []
 
@@ -79,9 +77,48 @@ def focus_existing_window() -> bool:
 
     try:
         win32gui.EnumWindows(_enum, None)
-        if not found:
-            return False
-        hwnd = found[0]
+    except Exception:
+        return None
+    return found[0] if found else None
+
+
+def _pid_has_onscreen_window(pid: int) -> bool | None:
+    """이 PID가 화면에 창을 갖고 있는지. 확인 자체가 불가능하면 None.
+
+    macOS에서 잠김을 막기 위한 확인 수단 — Windows의 "창이 있을 때만 차단"과 같은 역할.
+    창 *제목*을 읽으려면 화면 기록 권한이 필요하지만, 창의 소유 PID(kCGWindowOwnerPID)는
+    권한 없이도 읽을 수 있어서 이쪽을 쓴다. Quartz는 pywebview가 macOS에서 이미
+    의존하는 패키지라 별도 설치가 필요 없다.
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        from Quartz import (  # type: ignore[import-not-found]
+            CGWindowListCopyWindowInfo,
+            kCGNullWindowID,
+            kCGWindowListOptionOnScreenOnly,
+        )
+    except Exception:
+        return None  # 확인 불가 — 호출자가 "막지 않는" 쪽으로 처리한다
+    try:
+        for window in CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID) or []:
+            if window.get("kCGWindowOwnerPID") == pid:
+                return True
+        return False
+    except Exception:
+        return None
+
+
+def focus_existing_window() -> bool:
+    """이미 떠 있는 창을 앞으로 가져온다. 중복 실행 시 "아무 반응 없음"이 아니라
+    기존 창이 뜨는 게 사용자가 기대하는 동작이다(아이콘을 다시 눌렀을 때)."""
+    hwnd = _find_manager_window()
+    if hwnd is None:
+        return False
+    try:
+        import win32con
+        import win32gui
+
         if win32gui.IsIconic(hwnd):
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         win32gui.SetForegroundWindow(hwnd)
@@ -120,18 +157,34 @@ def notify_already_running() -> None:
 
 
 def is_already_running() -> bool:
-    """다른 인스턴스가 떠 있는지. Windows에서는 뮤텍스 생성 결과가 곧 답이며,
-    이 호출이 성공하면 소유권까지 확보한 상태라 별도 acquire가 필요 없다."""
+    """다른 인스턴스가 떠 있는지. Windows에서는 뮤텍스로 판단하되, **뮤텍스만 믿고
+    실행을 막지는 않는다.**
+
+    실사용에서 실제로 걸린 상황: 창 없이 남은(멎었거나 창만 닫힌) 프로세스가 뮤텍스를
+    쥐고 있으면, 사용자 눈에는 아무것도 안 떠 있는데 "이미 실행 중"만 반복되면서
+    앱을 영영 못 연다. 숨은 프로세스를 찾아 죽이라고 할 수도 없는 노릇이다.
+
+    그래서 뮤텍스가 이미 있더라도 **진짜 창이 있는지 한 번 더 확인**하고, 창이 없으면
+    그 뮤텍스는 신뢰하지 않고 그냥 실행한다. 최악의 경우 창이 두 개 뜰 수 있지만,
+    그건 사용자가 닫으면 그만이다 — 영영 못 여는 것보다 훨씬 낫다.
+    """
     acquired = _try_acquire_mutex()
-    if acquired is not None:
-        return not acquired
-    return _stale_safe_lock_says_running()
+    if acquired is None:
+        return _stale_safe_lock_says_running()
+    if acquired:
+        return False  # 내가 첫 인스턴스
+    return _find_manager_window() is not None
 
 
 def _stale_safe_lock_says_running() -> bool:
-    """뮤텍스를 못 쓰는 환경용 폴백. PID만 보던 예전 방식의 오탐(=앱이 영영 안 뜸)을
-    줄이려고 프로세스 생성 시각까지 대조한다 — PID가 재사용됐다면 생성 시각이
-    락을 남긴 시점보다 뒤이므로 다른 프로세스임을 알 수 있다."""
+    """뮤텍스를 못 쓰는 환경(macOS 등)용 폴백. PID만 보던 예전 방식의 오탐(=앱이 영영
+    안 뜸)을 줄이려고 프로세스 생성 시각까지 대조한다 — PID가 재사용됐다면 생성 시각이
+    락을 남긴 시점보다 뒤이므로 다른 프로세스임을 알 수 있다.
+
+    여기에 더해, 그 프로세스가 실제로 **창을 갖고 있을 때만** 차단한다. Windows에서
+    실제로 겪은 잠김(창 없이 남은 프로세스가 소유권을 쥐고 있어 앱을 영영 못 여는 상황)이
+    macOS에서도 똑같이 성립하기 때문. 창 확인이 불가능한 환경이면 차단하지 않는다 —
+    중복 창 하나가 뜨는 편이 영영 못 여는 것보다 낫다."""
     path = _lock_path()
     if not path.exists():
         return False
@@ -148,9 +201,15 @@ def _stale_safe_lock_says_running() -> bool:
         if started_at is not None and abs(proc.create_time() - started_at) > 1.0:
             return False  # PID는 같지만 다른(나중에 뜬) 프로세스 — 잔재로 본다
         name = proc.name().lower()
-        return "python" in name or "leetkit" in name
+        if not ("python" in name or "leetkit" in name):
+            return False
     except Exception:
         return False
+
+    has_window = _pid_has_onscreen_window(pid)
+    if has_window is None:
+        return True  # 창 확인 수단이 없는 환경 — 기존 판정(프로세스 살아있음)을 따른다
+    return has_window
 
 
 def acquire() -> None:
