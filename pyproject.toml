@@ -1,0 +1,47 @@
+[project]
+name = "leetkit-manager"
+version = "0.1.0"
+description = "StockLens/DartLens/TelegramLens 통합 설치·진단·업데이트 Manager"
+readme = "README.md"
+license = { text = "Proprietary" }
+authors = [
+    { name = "Johnhyeon" }
+]
+keywords = ["mcp", "claude", "stocklens", "dartlens", "telegramlens", "manager"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Natural Language :: Korean",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "pywebview>=5.0",
+    "psutil>=5.9",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.urls]
+Homepage = "https://github.com/Johnhyeon/leetkit-manager"
+Repository = "https://github.com/Johnhyeon/leetkit-manager"
+Issues = "https://github.com/Johnhyeon/leetkit-manager/issues"
+
+[project.scripts]
+leetkit-manager = "leetkit_manager.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["leetkit_manager"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: 실제 전역 uv tool 설치를 호출하는 통합 테스트 (기본 스위트에서 제외 권장: -m 'not integration')",
+]

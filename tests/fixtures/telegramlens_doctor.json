@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "product": "telegramlens",
+  "package_name": "telegramlens-mcp",
+  "installed_version": "0.4.4",
+  "latest_version": null,
+  "update_available": null,
+  "overall": "fail",
+  "checked_at": "2026-08-06T14:32:00+09:00",
+  "online": true,
+  "license": {"status": "active", "license_id_masked": "****1C60"},
+  "targets": ["claude-desktop", "claude-code"],
+  "checks": [
+    {
+      "id": "LICENSE_ACTIVE",
+      "status": "ok",
+      "summary": "Activated (license_id: ****1C60)",
+      "details": {"lines": ["Source: license.key"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null
+    },
+    {
+      "id": "TELEGRAM_LOGIN",
+      "status": "ok",
+      "summary": "실제 연결 및 인증 확인 성공",
+      "details": {"lines": ["API_ID: 27047508"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null
+    },
+    {
+      "id": "DAEMON_COLLECTOR",
+      "status": "fail",
+      "summary": "수집 데몬이 실행되고 있지 않습니다.",
+      "details": {"lines": ["Lock held: False"]},
+      "repairable": true,
+      "repair_id": "daemon",
+      "action": "telegramlens-doctor --repair daemon"
+    },
+    {
+      "id": "BACKFILL",
+      "status": "ok",
+      "summary": "진행 중인 백필 없음",
+      "details": {"lines": ["State: idle"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null
+    }
+  ]
+}

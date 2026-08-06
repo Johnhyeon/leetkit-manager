@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "product": "dartlens",
+  "package_name": "dartlens-mcp",
+  "installed_version": "0.6.2",
+  "latest_version": "0.6.2",
+  "update_available": false,
+  "overall": "fail",
+  "checked_at": "2026-08-06T14:32:00+09:00",
+  "online": false,
+  "license": {"status": "active", "license_id_masked": "****2D1B"},
+  "targets": [],
+  "checks": [
+    {
+      "id": "PACKAGE_IMPORTABLE",
+      "status": "ok",
+      "summary": "dartlens-mcp is importable",
+      "details": {"lines": ["Location: D:\\project\\stocklens\\mcp-dart\\dartlens"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null
+    },
+    {
+      "id": "MCP_CONFIG_VALID",
+      "status": "fail",
+      "summary": "dartlens not registered in any MCP client (Claude Desktop / Code)",
+      "details": {"lines": ["dartlens not registered in any MCP client (Claude Desktop / Code)"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": "dartlens-setup --target {claude-desktop|claude-code|both}"
+    },
+    {
+      "id": "DART_API_KEY",
+      "status": "ok",
+      "summary": "DART API 키가 등록되어 있습니다.",
+      "details": {"lines": ["Storage: os-keychain", "Tail: ****cebf"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null
+    },
+    {
+      "id": "LICENSE_ACTIVE",
+      "status": "ok",
+      "summary": "라이선스가 활성화되어 있습니다.",
+      "details": {"lines": ["License ID: ****2D1B"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null
+    },
+    {
+      "id": "CORP_CODE_CACHE",
+      "status": "warn",
+      "summary": "캐시가 오래되었습니다 (TTL 7일 초과)",
+      "details": {"lines": ["Last updated: 2026-07-20T00:00:00"]},
+      "repairable": true,
+      "repair_id": "corp-code-cache",
+      "action": "dartlens-doctor --repair corp-code-cache --yes"
+    }
+  ],
+  "dart_api": {"status": "valid", "storage": "os-keychain", "key_tail_masked": "****cebf"},
+  "corp_code_cache": {
+    "exists": true, "last_updated": "2026-07-20T00:00:00", "is_fresh": false,
+    "entry_count": 118583, "parseable": true, "writable": true,
+    "error_code": "CORP_CODE_CACHE_STALE"
+  }
+}

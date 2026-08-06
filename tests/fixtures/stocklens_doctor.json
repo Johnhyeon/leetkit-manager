@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "product": "stocklens",
+  "package_name": "stocklens-mcp",
+  "installed_version": "0.5.2",
+  "latest_version": null,
+  "update_available": null,
+  "overall": "degraded",
+  "checked_at": "2026-08-06T14:32:00+09:00",
+  "online": false,
+  "duration_ms": 15.0,
+  "license": {"status": "active", "license_id_masked": "****3972"},
+  "targets": ["claude-desktop"],
+  "checks": [
+    {
+      "id": "PACKAGE_IMPORTABLE",
+      "status": "ok",
+      "summary": "stocklens-mcp import 가능",
+      "details": {"lines": ["위치: D:\\project\\stocklens\\mcp\\stock_mcp_server"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null,
+      "critical": true
+    },
+    {
+      "id": "MCP_CONFIG_VALID",
+      "status": "ok",
+      "summary": "Claude Desktop에 정상 등록됨",
+      "details": {"lines": ["등록된 타겟: claude-desktop"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null,
+      "critical": true
+    },
+    {
+      "id": "LICENSE_ACTIVE",
+      "status": "ok",
+      "summary": "라이선스 활성화됨",
+      "details": {"lines": ["license_id_masked: ****3972"]},
+      "repairable": false,
+      "repair_id": null,
+      "action": null,
+      "critical": true
+    },
+    {
+      "id": "CACHE_WRITABLE",
+      "status": "fail",
+      "summary": "캐시/출력 폴더에 쓸 수 없습니다.",
+      "details": {"error_code": "CACHE_NOT_WRITABLE", "impact": "Excel 내보내기, 메트릭 로그 저장이 실패합니다."},
+      "repairable": false,
+      "repair_id": null,
+      "action": "폴더 권한 확인 또는 STOCKLENS_HOME 환경변수로 다른 경로 지정",
+      "critical": false
+    }
+  ]
+}

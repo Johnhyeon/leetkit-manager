@@ -1,0 +1,95 @@
+<title>LeetKit Manager</title>
+<link rel="stylesheet" href="style.css">
+
+<div class="topbar">
+  <div class="brand-row">
+    <div>
+      <span class="brand">LEETKIT MANAGER</span><span class="brand-sub">Lens 진단·설치</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="refresh-btn update" id="self-update-btn" hidden>업데이트</button>
+      <button class="refresh-btn" id="guide-btn">가이드</button>
+      <button class="refresh-btn" id="patchnotes-btn">패치노트</button>
+      <button class="refresh-btn" id="support-btn">지원 문의</button>
+      <button class="refresh-btn" id="refresh-btn">진단 재실행</button>
+    </div>
+  </div>
+  <div class="readout" id="readout">
+    <div class="readout-dots" id="readout-dots"></div>
+    <span id="readout-text">진단 중…</span>
+  </div>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="modal-backdrop" id="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-title" id="modal-title">라이선스 활성화</div>
+    <input type="password" id="modal-key-input" placeholder="라이선스 키를 붙여넣으세요" autocomplete="off">
+    <div class="modal-msg" id="modal-msg"></div>
+    <div class="modal-actions">
+      <button class="action-btn" id="modal-cancel">취소</button>
+      <button class="action-btn primary" id="modal-install-btn" hidden>설치</button>
+      <button class="action-btn primary" id="modal-confirm">활성화</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="support-backdrop" hidden>
+  <div class="modal support-modal">
+    <div class="modal-title">지원 문의 보내기</div>
+    <div class="modal-msg" id="support-status">번들을 만드는 중…</div>
+    <div class="support-field">
+      <div class="field-label">받는사람</div>
+      <div class="support-value" id="support-to"></div>
+    </div>
+    <div class="support-field">
+      <div class="field-label">제목</div>
+      <div class="support-value" id="support-subject"></div>
+    </div>
+    <div class="support-field">
+      <div class="field-label">내용</div>
+      <div class="support-value support-body" id="support-body"></div>
+    </div>
+    <p class="support-hint">방금 열린 폴더에 있는 zip 파일을 메일에 첨부해서 보내주세요.</p>
+    <div class="modal-actions">
+      <button class="action-btn" id="support-close">닫기</button>
+      <button class="action-btn primary" id="support-copy">메일 내용 복사</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="detail-backdrop" hidden>
+  <div class="modal detail-modal">
+    <div class="modal-title" id="detail-title"></div>
+    <div class="detail-body" id="detail-body"></div>
+    <div class="modal-actions">
+      <button class="action-btn" id="detail-copy">결과 복사</button>
+      <button class="action-btn primary" id="detail-close">닫기</button>
+    </div>
+  </div>
+</div>
+
+<div class="tour-overlay" id="tour-overlay" hidden>
+  <div class="tour-highlight" id="tour-highlight"></div>
+</div>
+
+<!-- tour-overlay 밖의 형제 요소 — 데모로 실제 모달(#detail-backdrop 등)을 같이 띄우는
+     단계에서도 이 툴팁(다음/이전 버튼 포함)이 그 모달보다 위에 남아있어야 하기 때문
+     (같은 부모 안에 있으면 tour-overlay 전체의 z-index에 갇혀 모달에 가려짐). -->
+<div class="tour-tooltip" id="tour-tooltip" hidden>
+  <div class="tour-step-label" id="tour-step-label">1 / 6</div>
+  <div class="tour-title" id="tour-title"></div>
+  <div class="tour-desc" id="tour-desc"></div>
+  <div class="tour-nav">
+    <button class="action-btn" id="tour-skip">건너뛰기</button>
+    <div class="tour-nav-right">
+      <button class="action-btn" id="tour-prev">이전</button>
+      <button class="action-btn primary" id="tour-next">다음</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>

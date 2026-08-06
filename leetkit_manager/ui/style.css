@@ -1,0 +1,688 @@
+/* LeetKit Manager — 계측기 패널 톤. Lens(광학)·Doctor(진단) 은유를 팔레트·타이포로 표현.
+   컬러: 그래파이트 바디 + 코팅 렌즈 유리색 틸 액센트. 상태 3색은 조리개 경고등처럼 또렷하게. */
+
+:root {
+  --bg: #16181b;
+  --panel: #1e2124;
+  --panel-raised: #262a2e;
+  --hairline: #34383d;
+  --text: #f1efe9;
+  --text-muted: #adb2b9;
+  --text-dim: #83888f;
+
+  --ok: #5fd4c0;
+  --ok-dim: rgba(95, 212, 192, 0.16);
+  --warn: #e3a855;
+  --warn-dim: rgba(227, 168, 85, 0.16);
+  --fail: #e2584f;
+  --fail-dim: rgba(226, 88, 79, 0.16);
+  --neutral: #5c6066;
+  --neutral-dim: rgba(92, 96, 102, 0.16);
+
+  --font-display: "Segoe UI Semibold", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  /* 워드마크 전용 — DIN 계열 계측 명판 느낌의 그로테스크(Windows 내장, 별도 설치 불필요).
+     한글은 못 그리므로 폭 넓게 쓰는 곳(영문 워드마크)에만 한정해서 쓴다. */
+  --font-brand: "Bahnschrift", var(--font-display);
+
+  --radius: 3px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 상단 바 ---------- */
+
+.topbar {
+  padding: 18px 28px 16px;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.brand-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.brand {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: 23px;
+  letter-spacing: 0.1em;
+  color: var(--text);
+}
+
+.brand-sub {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-left: 10px;
+  text-transform: uppercase;
+}
+
+.refresh-btn {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.refresh-btn:hover {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.refresh-btn.update {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: var(--ok-dim);
+}
+
+.refresh-btn.update[hidden] {
+  display: none;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 계측 판독줄 — "2/3 정상" 등, 조리개 경고등처럼 점 3개 + 텍스트 */
+
+.readout {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+.readout-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.readout-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--neutral);
+  transition: background-color 0.2s ease;
+}
+
+.readout-dot.ok { background: var(--ok); }
+.readout-dot.warn { background: var(--warn); }
+.readout-dot.fail { background: var(--fail); }
+
+/* ---------- 카드 그리드 ---------- */
+
+.grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  padding: 18px 22px 24px;
+  width: 100%;
+  align-content: start;
+}
+
+/* 3개 중 마지막 카드는 남는 칸에 혼자 두지 않고 아래 줄 전체를 쓴다. */
+.card:last-child {
+  grid-column: 1 / -1;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  width: 100%;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 시그니처 엘리먼트 — 포커스 링. 상태에 따라 색이 바뀌고, 정상일 때만 안쪽 점이 찬다.
+   진단 새로고침마다 살짝 스냅되는 스케일 펄스 하나만 준다(과한 애니메이션 지양). */
+
+.focus-ring {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+.focus-ring circle.track {
+  fill: none;
+  stroke: var(--hairline);
+  stroke-width: 2;
+}
+
+.focus-ring circle.arc {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke 0.2s ease, stroke-dasharray 0.3s ease;
+}
+
+.focus-ring circle.dot {
+  transition: opacity 0.2s ease, fill 0.2s ease;
+}
+
+.focus-ring.snap {
+  animation: snap 0.32s ease;
+}
+
+@keyframes snap {
+  0% { transform: scale(0.85); }
+  60% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.card-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
+}
+
+.card-version {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.card-readiness {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.card-readiness.ok { color: var(--ok); background: var(--ok-dim); }
+.card-readiness.warn { color: var(--warn); background: var(--warn-dim); }
+.card-readiness.fail { color: var(--fail); background: var(--fail-dim); }
+.card-readiness.neutral { color: var(--neutral); background: var(--neutral-dim); }
+
+/* 필드 목록 — 라벨은 트래킹 넓은 소문자 캡스, 값은 모노(계측 눈금 느낌) */
+
+.field-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.field-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.field-value {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.field-value.emph { color: var(--text); }
+
+/* 문제 트리거 — 카드 안에서 펼치지 않는다(길이가 들쭉날쭉해져 스크롤이 생기는 걸
+   막기 위해). 눌러도 카드 높이가 절대 안 바뀌게, 항상 별도 모달(#detail-backdrop)을 연다. */
+
+.check-toggle {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: var(--fail);
+  cursor: pointer;
+  border-top: 1px solid var(--hairline);
+  padding-top: 8px;
+}
+
+.check-toggle .chevron {
+  display: inline-block;
+  margin-right: 5px;
+}
+
+/* 진행중(백필 등) — 문제가 아니므로 경고색(--fail)이 아니라 정상색(--ok)으로 구분한다. */
+.check-toggle.progress {
+  color: var(--ok);
+}
+
+.check-item {
+  font-size: 14.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.check-item .check-id {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--fail);
+  letter-spacing: 0.03em;
+  margin-right: 6px;
+}
+
+/* 진행중 항목은 문제가 아니므로 id 라벨도 경고색이 아니라 정상색으로. */
+.check-item.active .check-id {
+  color: var(--ok);
+}
+
+.check-item .check-detail-lines {
+  margin: 4px 0 0;
+  padding-left: 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* 조치 명령 — 이 명령어 텍스트만 굵게+1pt 키워서 강조한다(라벨·주변 글자는 그대로). */
+.check-action {
+  margin-top: 6px;
+  font-size: 13px; /* check-detail-lines와 동일 — 여긴 키우지 않음 */
+  overflow-wrap: anywhere;
+}
+
+.check-action-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin-right: 5px;
+}
+
+.check-action-cmd {
+  font-family: var(--font-mono);
+  font-size: 14px; /* 명령어만 1pt 키움 */
+  font-weight: 700;
+  color: var(--ok);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.check-action-cmd:hover {
+  color: var(--text);
+}
+
+/* 동작 버튼 */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+.action-btn {
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.action-btn:hover {
+  border-color: var(--ok);
+}
+
+.action-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.action-btn.primary {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.action-btn.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* ---------- 라이선스 활성화 모달 ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 11, 12, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 가이드 투어 데모 단계에서 실제 모달을 같이 띄우므로 tour-overlay(30)보다 위 —
+     단, tour-tooltip(34)은 그 모달 위에 남아 있어야 다음/이전 버튼을 계속 누를 수 있다. */
+  z-index: 32;
+}
+
+/* 가이드 데모 중에는 모달을 좌상단으로 밀어서, 우하단에 놓이는 가이드 설명과
+   물리적으로 겹칠 공간 자체가 안 생기게 한다(화면이 좁아 동적 배치로는 항상
+   피할 수 없었음 — 아예 자리를 나눠 쓴다). */
+.modal-backdrop.demo-position {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 28px;
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 22px;
+  width: 400px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.modal input[type="password"], .modal input[type="text"] {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 10px 11px;
+  width: 100%;
+}
+
+.modal input:focus {
+  outline: 2px solid var(--ok);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.modal-msg {
+  font-size: 14px;
+  color: var(--text-muted);
+  min-height: 16px;
+}
+
+.modal-msg.fail { color: var(--fail); }
+.modal-msg.ok { color: var(--ok); }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------- 지원 문의 모달 ---------- */
+
+.support-modal {
+  width: 440px;
+}
+
+.support-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.support-value {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.support-body {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.support-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ---------- 상세 모달 — 카드 자체는 절대 안 늘어나고, 자세히 볼 건 여기서만 ---------- */
+
+.detail-modal {
+  width: 500px;
+  max-height: 78vh;
+}
+
+.detail-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-right: 2px;
+}
+
+.detail-body .field-list {
+  gap: 8px;
+}
+
+.detail-body .field-value {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  overflow-wrap: anywhere;
+}
+
+.detail-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.detail-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.detail-section-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* ---------- 단계별 가이드 투어(스포트라이트) ---------- */
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+.tour-overlay[hidden] {
+  display: none;
+}
+
+.tour-highlight {
+  position: fixed;
+  border: 2px solid var(--ok);
+  border-radius: 6px;
+  box-shadow: 0 0 0 9999px rgba(10, 11, 12, 0.8);
+  transition: left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease;
+  pointer-events: none;
+}
+
+.tour-tooltip {
+  position: fixed;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  width: 300px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  /* modal-backdrop(32)보다 위 — 데모로 실제 모달이 같이 떠도 다음/이전 버튼이 안 가려짐. */
+  z-index: 34;
+}
+
+.tour-tooltip[hidden] {
+  display: none;
+}
+
+.tour-step-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--ok);
+}
+
+.tour-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  margin-top: 6px;
+}
+
+.tour-desc {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+.tour-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+
+.tour-nav-right {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- 토스트(간단 안내) ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  background: var(--panel-raised);
+  border: 1px solid var(--ok);
+  color: var(--text);
+  font-size: 14px;
+  padding: 10px 18px;
+  border-radius: var(--radius);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  z-index: 40;
+  animation: toast-in 0.2s ease;
+}
+
+.toast[hidden] {
+  display: none;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* 접근성: 키보드 포커스 항상 보이게, reduced-motion 존중 */
+
+button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--ok);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-ring.snap { animation: none; }
+  * { transition-duration: 0.01ms !important; }
+}
