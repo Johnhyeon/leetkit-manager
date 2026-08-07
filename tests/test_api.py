@@ -196,3 +196,24 @@ class TestReviewPrompt:
              patch.object(review_prompt, "mark_asked"):
             result = api.review_prompt(True)
         assert result["has_url"] is True
+
+
+class TestPurchasePage:
+    def test_purchase_url_matches_the_lenses(self):
+        """CLI 활성화 안내(각 Lens licensing.py의 PURCHASE_URL)와 Manager 모달이
+        다른 주소를 가리키면, 같은 제품인데 경로에 따라 다른 곳으로 보내게 된다."""
+        from leetkit_manager.ui.api import PURCHASE_URL
+
+        assert PURCHASE_URL == "https://litt.ly/leetkey_lab/sale/hzGHnRY"
+
+    def test_purchase_url_is_in_the_open_url_allowlist(self):
+        from leetkit_manager.ui.api import _ALLOWED_EXTERNAL_URLS, PURCHASE_URL
+
+        assert PURCHASE_URL in _ALLOWED_EXTERNAL_URLS
+
+    def test_open_purchase_page_opens_the_browser(self):
+        from leetkit_manager.ui.api import PURCHASE_URL
+
+        with patch("webbrowser.open") as mock_open:
+            assert Api().open_purchase_page() is True
+        mock_open.assert_called_once_with(PURCHASE_URL)

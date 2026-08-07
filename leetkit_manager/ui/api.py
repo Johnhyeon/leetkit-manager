@@ -27,8 +27,14 @@ DART_API_SIGNUP_URL = "https://opendart.fss.or.kr"
 CLAUDE_DESKTOP_DOWNLOAD_URL = "https://claude.ai/download"
 CLAUDE_CODE_DOWNLOAD_URL = "https://claude.ai/code"
 CODEX_DOWNLOAD_URL = "https://developers.openai.com/codex/cli/"
+
+# 라이선스 키를 넣으려다 "아직 없다"는 걸 깨닫는 자리에서 살 곳을 알려준다. CLI로
+# 활성화하면 이미 이 주소를 안내하는데(각 Lens licensing.py의 PURCHASE_URL) Manager
+# 모달에는 없어서, 같은 제품인데 경로에 따라 안내가 달랐다. 세 Lens가 같은 LP를 쓴다.
+PURCHASE_URL = "https://litt.ly/leetkey_lab/sale/hzGHnRY"
+
 _ALLOWED_EXTERNAL_URLS = frozenset(
-    {CLAUDE_DESKTOP_DOWNLOAD_URL, CLAUDE_CODE_DOWNLOAD_URL, CODEX_DOWNLOAD_URL}
+    {CLAUDE_DESKTOP_DOWNLOAD_URL, CLAUDE_CODE_DOWNLOAD_URL, CODEX_DOWNLOAD_URL, PURCHASE_URL}
 )
 
 
@@ -387,6 +393,11 @@ class Api:
         zip_path = support_bundle.create_bundle()
         support_bundle.reveal_in_file_manager(zip_path)
         return support_bundle.mail_compose_info(zip_path)
+
+    def open_purchase_page(self) -> bool:
+        """구매 페이지 열기 — 라이선스 모달의 "아직 없으신가요?"에서만 부른다."""
+        webbrowser.open(PURCHASE_URL)
+        return True
 
     def review_prompt(self, ready: bool) -> dict | None:
         """지금 후기를 물어볼 때면 표시할 내용, 아니면 None.

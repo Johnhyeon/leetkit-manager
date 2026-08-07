@@ -1001,6 +1001,31 @@ body {
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* ---------- 구매 안내 (라이선스 모달) ---------- */
+
+/* CLI로 활성화하면 "아직 구매 전이라면 → (주소)"가 나오는데 Manager 모달에는 그
+   안내가 없어서, 같은 제품인데 경로에 따라 안내가 달랐다. 키를 넣으려다 없다는 걸
+   깨닫는 그 자리가 살 곳을 알려줄 유일한 순간이다. */
+.modal-buy {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: var(--ok);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--text);
+}
+
 /* ---------- 후기 요청 모달 ---------- */
 
 .review-modal {

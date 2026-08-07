@@ -631,6 +631,10 @@ function renderActivateModalState(lens, displayName) {
   const needsApiKey = !!(lens && lens.extra_credentials && lens.extra_credentials.includes("dart_api"));
   apiKeyField.hidden = !needsApiKey;
 
+  // 이미 활성화된 사람에게 "구매하세요"는 광고일 뿐이다 — 키가 없거나 유효하지
+  // 않을 때만 보여준다. 그 순간이 살 곳을 알려줄 유일한 타이밍이기도 하다.
+  document.getElementById("modal-buy").hidden = !!(lens && lens.license_status === "active");
+
   if (lens && lens.not_installed) {
     msgEl.textContent = `${displayName}가 아직 설치되지 않았습니다. 먼저 설치해야 활성화할 수 있어요.`;
     msgEl.className = "modal-msg fail";
@@ -1189,6 +1193,12 @@ async function copyDiagnosticText(lensName, btn) {
 }
 
 document.getElementById("modal-cancel").addEventListener("click", () => closeActivateModal());
+
+// 모달은 열어둔 채로 브라우저만 띄운다 — 결제하고 메일로 받은 키를 바로 여기 붙여넣게.
+document.getElementById("modal-buy-btn").addEventListener("click", async () => {
+  await window.pywebview.api.open_purchase_page();
+  showToast("브라우저에서 구매 페이지를 열었습니다.");
+});
 document.getElementById("modal-confirm").addEventListener("click", confirmActivate);
 document.getElementById("modal-apikey-reopen-signup").addEventListener("click", () => {
   window.pywebview.api.open_dart_api_signup();
