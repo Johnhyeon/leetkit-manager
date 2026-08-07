@@ -66,7 +66,8 @@ _DEFAULTS = {
     "min_launches": 2,    # 설치하느라 연 첫 실행 말고 한 번은 더 열어봤어야 한다
     "snooze_days": 7,     # "나중에" 이후 다시 묻기까지
     "max_asks": 3,        # 이 횟수를 넘기면 영영 안 묻는다
-    "deadline_days": 21,  # 첫 실행 후 이만큼 지나면 아예 안 묻는다(후기 기간 만료)
+    "deadline_days": 21,  # 활성화 후 이만큼 지나면 아예 안 묻는다(후기 기간 만료)
+    "urgent_days": 7,     # 마감까지 이만큼 이하로 남으면 실행 횟수 문턱을 없앤다
 
     # 화면에 "앞으로 며칠 남았다"를 보여줄 때 쓰는 실제 규칙(리틀리 기준 약 한 달).
     # 위 deadline_days와 일부러 다르다 — deadline_days는 "언제까지 물어볼까"라서
@@ -189,8 +190,6 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
     asks = int(state.get("asks", 0))
     if asks >= _int(config, "max_asks"):
         return None
-    if int(state.get("launches", 0)) < _int(config, "min_launches"):
-        return None
 
     # 라이선스를 활성화한 적이 없으면 산 적이 없는 사람이다 — 후기를 물어볼 대상이
     # 아니고, 애초에 리틀리 후기란은 구매자에게만 열린다.
@@ -199,8 +198,7 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
         return None
 
     now = time.time() if now is None else now
-    if now - activated_at < _int(config, "min_days") * _DAY:
-        return None
+    elapsed_days = (now - activated_at) / _DAY
 
     # 후기 기간이 끝났으면 묻지 않는다. 리틀리 후기란은 파일 받는 기간이 만료되면
     # 같이 사라져서, 지난 뒤의 요청은 누를 데 없는 안내가 된다.
@@ -208,7 +206,22 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
     # 활성화 시각은 구매 직후라 구매일에 가깝지만 같지는 않다(메일을 며칠 뒤에 열어
     # 활성화하는 사람이 있다). 그만큼 실제 기한은 이미 줄어든 상태이므로, 마감선을
     # 한 달이 아니라 그보다 짧게 잡아 여유를 둔다.
-    if now - activated_at > _int(config, "deadline_days") * _DAY:
+    days_to_deadline = _int(config, "deadline_days") - elapsed_days
+    if days_to_deadline < 0:
+        return None
+
+    if elapsed_days < _int(config, "min_days"):
+        return None
+
+    # 실행 횟수 문턱 — 마감이 코앞이면 낮춘다.
+    #
+    # Manager는 매일 여는 앱이 아니다. 산 지 19일 된 사람이 오늘 처음 켜면 두 번째
+    # 실행을 기다리게 되는데, 그 사람이 다시 여는 게 마감 뒤일 수 있다. 그러면 물어볼
+    # 기회가 있었는데도 한 번도 못 묻고 끝난다. 여유가 있을 때만 "한 번은 더 써보고"를
+    # 요구하고, 코앞이면 지금이 마지막 기회이므로 그 자리에서 묻는다.
+    urgent = days_to_deadline <= _int(config, "urgent_days")
+    min_launches = 1 if urgent else _int(config, "min_launches")
+    if int(state.get("launches", 0)) < min_launches:
         return None
 
     last_ask = state.get("last_ask_at")

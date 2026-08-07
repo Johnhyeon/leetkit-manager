@@ -409,3 +409,57 @@ class TestFetchConfig:
             "review_window_days",
         ):
             assert key in data
+
+
+class TestUrgentRelaxesThreshold:
+    """마감이 코앞이면 실행 횟수 문턱을 없앤다. Manager는 매일 여는 앱이 아니라,
+    "한 번 더 열어보면 묻겠다"고 미루면 그 다음이 마감 뒤일 수 있다."""
+
+    def test_late_first_run_is_asked_immediately(self, _isolated_state):
+        """산 지 19일 된 사람이 오늘 Manager를 처음 켠 경우 — 두 번째 실행을
+        기다리면 마감(21일)이 먼저 온다. 지금이 마지막 기회다."""
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now, launches=1)
+        with _activated_days_ago(19):
+            prompt = review_prompt.pending_prompt(
+                _config(min_launches=2, urgent_days=7), ready=True, now=now
+            )
+        assert prompt is not None
+
+    def test_launch_threshold_still_applies_when_there_is_time(self, _isolated_state):
+        """여유가 있으면 "한 번은 더 써보고"를 그대로 요구한다 — 설치하자마자
+        후기를 달라고 하는 게 이 문턱의 존재 이유다."""
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now, launches=1)
+        with _activated_days_ago(5):
+            prompt = review_prompt.pending_prompt(
+                _config(min_launches=2, urgent_days=7), ready=True, now=now
+            )
+        assert prompt is None
+
+    def test_urgency_does_not_override_the_deadline(self, _isolated_state):
+        """마감이 지났으면 임박도 뭣도 없다."""
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now, launches=1)
+        with _activated_days_ago(30):
+            assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
+
+    def test_urgency_does_not_override_the_snooze(self, _isolated_state):
+        """방금 물어봤으면 마감이 가까워도 연달아 띄우지 않는다 — 그건 재촉이 아니라
+        고장으로 읽힌다."""
+        now = time.time()
+        _state(
+            _isolated_state,
+            first_launch_at=now - 18 * 86400,
+            launches=10,
+            asks=1,
+            last_ask_at=now - 86400,
+        )
+        with _activated_days_ago(18):
+            assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
+
+    def test_urgency_does_not_override_already_reviewed(self, _isolated_state):
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now, launches=1, done=True)
+        with _activated_days_ago(19):
+            assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
