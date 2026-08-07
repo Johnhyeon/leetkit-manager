@@ -356,14 +356,43 @@ def uninstall_version(package_name: str, *, timeout: float = _INSTALL_TIMEOUT) -
     return run_cli([resolve_uv_command(), "tool", "uninstall", package_name], timeout=timeout)
 
 
+def _version_tuple(value: str) -> tuple[int, ...] | None:
+    """"0.1.6" → (0, 1, 6). 숫자로 안 읽히는 부분이 있으면 None."""
+    parts = []
+    for chunk in (value or "").strip().split("."):
+        digits = ""
+        for ch in chunk:
+            if not ch.isdigit():
+                break
+            digits += ch
+        if not digits:
+            return None
+        parts.append(int(digits))
+    return tuple(parts) or None
+
+
 def version_gt(latest: str, current: str) -> bool:
-    """semver 비교. 실패 시 단순 문자열 비교 fallback(각 Lens의 update-check 로직과 동일)."""
+    """`latest`가 `current`보다 정말로 새 버전인가.
+
+    폴백이 예전엔 `latest != current`였다 — "다르면 새 버전"이라는 뜻이라, 최신을 쓰는
+    사람에게 **옛 버전으로 내려가라고** 권했다. 실제로 0.1.6을 쓰는데 "0.1.5로
+    업데이트하세요"가 떴다(PyPI 인덱스 반영이 잠깐 늦어 latest가 0.1.5로 읽힌 순간).
+
+    폴백을 탄 이유는 packaging이 의존성에 없어서였다. 그건 따로 선언해서 고쳤지만,
+    없을 때도 안전해야 하므로 숫자 비교로 바꾼다. 그것마저 안 되면 False다 —
+    잘못된 업데이트 안내보다 안내를 안 하는 쪽이 낫다."""
+    if not latest:
+        return False
     try:
         from packaging.version import Version
 
         return Version(latest) > Version(current)
     except Exception:
-        return bool(latest) and latest != current
+        pass
+    latest_parts, current_parts = _version_tuple(latest), _version_tuple(current)
+    if latest_parts is None or current_parts is None:
+        return False
+    return latest_parts > current_parts
 
 
 # Claude Code CLI가 놓이는 위치들 — 여기 있는 `claude.exe`는 무슨 일이 있어도

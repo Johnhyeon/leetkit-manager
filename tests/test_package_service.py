@@ -601,3 +601,67 @@ class TestFrozenExeSelfUpdate:
              patch.object(package_service.sys, "executable", str(current_exe)):
             package_service.cleanup_old_exe_backup()
         assert not backup.exists()
+
+
+class TestVersionComparison:
+    """폴백이 예전엔 "다르면 새 버전"이었다 — 최신을 쓰는 사람에게 옛 버전으로
+    내려가라고 권했다(0.1.6을 쓰는데 "0.1.5로 업데이트하세요"가 실제로 떴다)."""
+
+    def test_newer_is_newer(self):
+        assert package_service.version_gt("0.1.6", "0.1.5") is True
+
+    def test_older_is_not_newer(self):
+        assert package_service.version_gt("0.1.5", "0.1.6") is False
+
+    def test_same_is_not_newer(self):
+        assert package_service.version_gt("0.1.6", "0.1.6") is False
+
+    def test_empty_latest_is_not_newer(self):
+        """PyPI 조회 실패 시 None/빈 문자열이 온다 — 그걸로 업데이트를 권하면 안 된다."""
+        assert package_service.version_gt("", "0.1.6") is False
+
+    def test_double_digit_segments_compare_numerically(self):
+        """문자열 비교로는 "0.1.10" < "0.1.9"가 된다."""
+        assert package_service.version_gt("0.1.10", "0.1.9") is True
+        assert package_service.version_gt("0.1.9", "0.1.10") is False
+
+    def test_still_correct_without_packaging(self):
+        """packaging은 이제 의존성에 있지만, 없는 환경에서도 안전해야 한다 —
+        없어서 폴백을 탄 게 애초에 이 버그의 원인이었다."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_packaging(name, *args, **kwargs):
+            if name.startswith("packaging"):
+                raise ImportError("packaging 없음")
+            return real_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", no_packaging):
+            assert package_service.version_gt("0.1.5", "0.1.6") is False
+            assert package_service.version_gt("0.1.6", "0.1.5") is True
+            assert package_service.version_gt("0.1.10", "0.1.9") is True
+
+    def test_unparseable_versions_never_prompt(self):
+        """잘못된 업데이트 안내보다 안내를 안 하는 쪽이 낫다."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_packaging(name, *args, **kwargs):
+            if name.startswith("packaging"):
+                raise ImportError("packaging 없음")
+            return real_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", no_packaging):
+            assert package_service.version_gt("알수없음", "0.1.6") is False
+            assert package_service.version_gt("0.1.6", "알수없음") is False
+
+
+def test_packaging_is_declared_as_a_dependency():
+    """선언이 빠져 있어서 맥에서만 폴백을 탔다 — 우연히 딸려오는 것에 기대면 안 된다."""
+    import tomllib
+    from pathlib import Path
+
+    data = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text(encoding="utf-8"))
+    assert any(d.startswith("packaging") for d in data["project"]["dependencies"])
