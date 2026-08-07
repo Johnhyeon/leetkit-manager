@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -665,3 +665,56 @@ def test_packaging_is_declared_as_a_dependency():
 
     data = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text(encoding="utf-8"))
     assert any(d.startswith("packaging") for d in data["project"]["dependencies"])
+
+
+class TestLatestVersionUsesTheSameIndexAsUv:
+    """Manager가 JSON API를, uv가 simple 인덱스를 보던 탓에 새 버전을 올린 직후 몇 분간
+    "최신은 X"라고 판단해놓고 `uv tool install pkg==X`가 실패했다. 화면에는 이유 없이
+    "실패했습니다"만 떴고, 기다리면 저절로 되니 원인을 짚기도 어려웠다."""
+
+    def _simple(self, versions):
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"name": "x", "files": [], "versions": versions}
+        return resp
+
+    def test_reads_the_simple_index(self):
+        with patch("httpx.get", return_value=self._simple(["0.1.1", "0.1.2"])) as mock_get:
+            assert package_service.latest_pypi_version("leetkit-manager") == "0.1.2"
+        url = mock_get.call_args[0][0]
+        assert "/simple/" in url, f"uv가 보는 곳을 봐야 한다: {url}"
+
+    def test_picks_the_highest_not_the_last(self):
+        """인덱스가 정렬돼 있다는 보장이 없다."""
+        with patch("httpx.get", return_value=self._simple(["0.1.9", "0.1.10", "0.1.2"])):
+            assert package_service.latest_pypi_version("x") == "0.1.10"
+
+    def test_ignores_versions_it_cannot_parse(self):
+        """읽을 수 없는 버전이 최신으로 뽑히면 설치할 수 없는 값을 권하게 된다."""
+        with patch("httpx.get", return_value=self._simple(["0.1.2", "알수없음"])):
+            assert package_service.latest_pypi_version("x") == "0.1.2"
+
+    def test_falls_back_to_the_json_api_when_the_index_is_unreadable(self):
+        """인덱스를 못 읽는다고 업데이트 확인 자체를 포기하면 안 된다."""
+        simple_failed = MagicMock()
+        simple_failed.raise_for_status.side_effect = Exception("보안장비 등에 막힘")
+        json_api = MagicMock()
+        json_api.raise_for_status.return_value = None
+        json_api.json.return_value = {"info": {"version": "0.9.9"}}
+        with patch("httpx.get", side_effect=[simple_failed, json_api]):
+            assert package_service.latest_pypi_version("x") == "0.9.9"
+
+    def test_returns_none_when_everything_fails(self):
+        with patch("httpx.get", side_effect=Exception("오프라인")):
+            assert package_service.latest_pypi_version("x") is None
+
+    def test_tolerates_an_index_without_a_versions_field(self):
+        """PEP 700 이전 형식으로 응답하는 미러도 있다."""
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"name": "x", "files": []}
+        json_api = MagicMock()
+        json_api.raise_for_status.return_value = None
+        json_api.json.return_value = {"info": {"version": "1.2.3"}}
+        with patch("httpx.get", side_effect=[resp, json_api]):
+            assert package_service.latest_pypi_version("x") == "1.2.3"

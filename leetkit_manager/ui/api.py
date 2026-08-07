@@ -129,7 +129,18 @@ def _install_failure_reason(process) -> str | None:
     detail = _first_meaningful_line(getattr(process, "stderr", "")) or _first_meaningful_line(
         getattr(process, "stdout", "")
     )
+    if detail and _looks_like_version_not_on_index(getattr(process, "stderr", "") or detail):
+        # 안전망 — 최신 버전 판단을 simple 인덱스 기준으로 바꿔서(latest_pypi_version)
+        # 이 상황은 거의 안 생기지만, 다른 경로로라도 걸리면 uv의 원문("no solution
+        # found")만 보여주는 건 도움이 안 된다. 기다리면 풀린다는 걸 알려준다.
+        return "방금 올라온 버전이라 아직 배포처에 반영되지 않았습니다 — 몇 분 뒤 다시 시도해주세요."
     return redaction.redact(detail) if detail else None
+
+
+def _looks_like_version_not_on_index(text: str) -> bool:
+    """uv가 "그 버전은 없다"고 말한 건지. 문구가 바뀔 수 있어 여러 표현을 본다."""
+    lowered = (text or "").lower()
+    return "no solution found" in lowered or "no version" in lowered or "not found in the package registry" in lowered
 
 
 class Api:

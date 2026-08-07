@@ -67,8 +67,50 @@ def resolve_lens_command(command_name: str) -> str:
     return command_name
 
 
+def _version_sort_key(value: str):
+    """버전 정렬용 키. packaging이 있으면 그걸 쓰고, 없으면 숫자 튜플로."""
+    try:
+        from packaging.version import Version
+
+        return (1, Version(value))
+    except Exception:
+        parts = _version_tuple(value)
+        # 못 읽는 버전은 항상 뒤로 밀어 최신으로 뽑히지 않게 한다.
+        return (0, parts) if parts else (-1, ())
+
+
+def _simple_index_versions(package_name: str, *, timeout: float) -> list[str]:
+    """simple 인덱스가 실제로 제공하는 버전 목록. 못 읽으면 빈 목록."""
+    try:
+        resp = httpx.get(
+            f"https://pypi.org/simple/{package_name}/",
+            timeout=timeout,
+            headers={"Accept": "application/vnd.pypi.simple.v1+json"},
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        versions = resp.json().get("versions")
+    except Exception:
+        return []
+    return [v for v in versions if isinstance(v, str)] if isinstance(versions, list) else []
+
+
 def latest_pypi_version(package_name: str, *, timeout: float = _PYPI_TIMEOUT) -> str | None:
-    """PyPI JSON API에서 최신 버전 조회. 실패해도 예외를 던지지 않고 None."""
+    """설치 가능한 최신 버전. 실패해도 예외를 던지지 않고 None.
+
+    **uv가 실제로 보는 곳(simple 인덱스)을 본다.** 예전엔 JSON API를 봤는데, 그쪽이
+    simple 인덱스보다 먼저 갱신된다 — 새 버전을 올린 직후 몇 분간 Manager는 "최신은
+    0.4.15"라고 판단하는데 uv는 그 버전을 못 찾아 `uv tool install pkg==0.4.15`가
+    실패했다. 화면에는 이유 없이 "실패했습니다"만 떴고, 시간이 지나 인덱스가 따라잡으면
+    저절로 되니 원인을 짚기도 어려웠다(실제로 오늘 세 번 겪었다).
+
+    같은 곳을 보면 그 어긋남이 원천적으로 안 생긴다 — 우리가 "최신"이라고 말한 버전은
+    uv가 반드시 설치할 수 있는 버전이다.
+    """
+    versions = _simple_index_versions(package_name, timeout=timeout)
+    if versions:
+        return max(versions, key=_version_sort_key)
+    # simple 인덱스를 못 읽으면 예전 경로로라도 알려준다(아예 모르는 것보단 낫다).
     try:
         resp = httpx.get(f"https://pypi.org/pypi/{package_name}/json", timeout=timeout)
         resp.raise_for_status()

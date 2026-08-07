@@ -271,7 +271,16 @@ class TestInstallFailureReason:
     def test_falls_back_to_stdout(self):
         from leetkit_manager.ui.api import _install_failure_reason
 
-        assert "No solution" in _install_failure_reason(self._proc(stdout="No solution found"))
+        assert "디스크" in _install_failure_reason(self._proc(stdout="error: 디스크 공간이 부족합니다"))
+
+    def test_version_not_on_the_index_gets_a_useful_message(self):
+        """uv 원문("no solution found")만 보여주면 뭘 하라는 건지 알 수 없다 — 기다리면
+        풀린다는 걸 말해줘야 한다. 최신 판단을 simple 인덱스로 옮겨서 이제 거의 안
+        생기지만, 다른 경로로 걸릴 때를 위한 안전망이다."""
+        from leetkit_manager.ui.api import _install_failure_reason
+
+        reason = _install_failure_reason(self._proc(stderr="error: No solution found when resolving"))
+        assert "몇 분 뒤" in reason
 
     def test_returns_none_when_there_is_nothing_to_say(self):
         """할 말이 없으면 지어내지 않는다 — 화면이 "원인을 알 수 없습니다"로 정직하게 뜬다."""
