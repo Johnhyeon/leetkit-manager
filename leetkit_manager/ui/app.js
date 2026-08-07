@@ -100,6 +100,12 @@ function renderReadout(summary) {
 // 건수 옆에 무엇이 걸렸는지도 같이 보여준다 — "문제 2건"만으로는 열어보기 전까지
 // 알 수 없다. 넘치면 말줄임으로 자른다(카드 높이는 그대로 유지).
 function statusBlock(label, checks, lensName, extraClass) {
+  // 진행률 숫자가 있으면 바로 보여준다. "수집 중"이라는 말만으로는 멈춘 건지 도는
+  // 건지 알 수 없어 조치가 필요한 상태로 오해하기 쉽다 — 바와 남은 시간이 있으면
+  // "기다리면 되는 상태"라는 게 그 자리에서 읽힌다.
+  const withProgress = checks.find((c) => c.details && c.details.progress);
+  if (withProgress) return progressBlock(withProgress, lensName);
+
   const summary = checks
     .map((c) => c.summary)
     .filter(Boolean)
@@ -109,6 +115,41 @@ function statusBlock(label, checks, lensName, extraClass) {
         <span class="status-count">${label} ${checks.length}건</span>
         <span class="status-summary">${escapeHtml(summary)}</span>
         <span class="status-chevron">›</span>
+      </div>`;
+}
+
+function formatEta(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  if (seconds < 60) return "약 1분 남음";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `약 ${minutes}분 남음`;
+  return `약 ${Math.round(minutes / 60)}시간 남음`;
+}
+
+function progressBlock(check, lensName) {
+  const p = check.details.progress;
+  const total = Number(p.total) || 0;
+  const done = Math.min(Number(p.done) || 0, total);
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+  const unit = p.unit ? escapeHtml(p.unit) : "";
+
+  // 아래 줄은 있는 것만 붙인다 — 없는 값을 자리만 채우려고 지어내지 않는다.
+  const notes = [];
+  if (Number.isFinite(Number(p.fetched))) {
+    notes.push(`${Number(p.fetched).toLocaleString("ko-KR")}건 수집`);
+  }
+  const eta = formatEta(Number(p.eta_sec));
+  if (eta) notes.push(eta);
+  notes.push("끝나면 알려드릴게요");
+
+  return `
+      <div class="progress-block" data-action="open-detail" data-lens="${lensName}">
+        <div class="progress-head">
+          <span class="progress-title">${escapeHtml(check.summary || "진행 중")}</span>
+          <span class="progress-count mono">${done.toLocaleString("ko-KR")} / ${total.toLocaleString("ko-KR")}${unit ? " " + unit : ""}</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+        <span class="progress-note">${escapeHtml(notes.join(" · "))}</span>
       </div>`;
 }
 
@@ -163,9 +204,9 @@ function renderCard(lens) {
       </div>
       <div class="field-list">
         <div class="field-row"><span class="field-label">업데이트</span><span class="field-value">${updateLabel(lens.update_available)}</span></div>
-        <div class="field-row"><span class="field-label">라이선스</span><span class="field-value emph">${licenseLabel(lens.license_status)}${lens.license_id_masked ? " · " + escapeHtml(lens.license_id_masked) : ""}</span></div>
+        <div class="field-row"><span class="field-label">라이선스</span><span class="field-value emph">${licenseLabel(lens.license_status)}${lens.license_id_masked ? ' · <span class="mono">' + escapeHtml(lens.license_id_masked) + "</span>" : ""}</span></div>
         <div class="field-row"><span class="field-label">MCP 등록</span><span class="field-value">${targets}</span></div>
-        <div class="field-row"><span class="field-label">최근 진단</span><span class="field-value">${formatCheckedAt(lens.checked_at)}</span></div>
+        <div class="field-row"><span class="field-label">최근 진단</span><span class="field-value mono">${formatCheckedAt(lens.checked_at)}</span></div>
       </div>
       </div>
       <div class="card-status">

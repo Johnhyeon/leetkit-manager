@@ -75,6 +75,25 @@ def _wait_for_pid_exit(pid: int, timeout_s: float = 30.0) -> None:
         time.sleep(0.2)
 
 
+def _cmd_selftest(args: argparse.Namespace) -> int:
+    """창을 띄우기 직전까지 필요한 것들이 실제로 불러와지는지만 확인하고 끝낸다.
+
+    빌드된 exe가 "켜자마자 죽는" 사고를 릴리스 전에 잡으려고 둔다. 실제로 v0.1.13
+    exe가 그랬다 — 번들 안에서 cffi(파이썬 쪽)와 _cffi_backend(컴파일된 쪽) 버전이
+    어긋나 webview가 .NET 런타임을 못 만들고 그 자리에서 죽었다. 빌드는 성공했고
+    `--help`도 멀쩡했기 때문에 아무 검사에도 안 걸렸다.
+
+    무거운 초기화(창 생성)까지 가지 않고 import만 한다 — CI에 화면이 없어도 돈다.
+    """
+    import webview  # noqa: F401
+
+    if sys.platform == "win32":
+        # 여기가 v0.1.13에서 터진 자리다(pythonnet → clr_loader → cffi).
+        import webview.platforms.winforms  # noqa: F401
+    print("selftest OK")
+    return 0
+
+
 def _cmd_gui(args: argparse.Namespace) -> int:
     from leetkit_manager.ui.app import run
 
@@ -98,6 +117,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     check_updates = sub.add_parser("check-updates", help="세 Lens 최신 버전 조회(PyPI)")
     check_updates.set_defaults(func=_cmd_check_updates)
+
+    selftest = sub.add_parser("selftest", help=argparse.SUPPRESS)
+    selftest.set_defaults(func=_cmd_selftest)
 
     gui = sub.add_parser("gui", help="데스크톱 대시보드(pywebview) 실행")
     gui.add_argument("--wait-for-exit", type=int, help=argparse.SUPPRESS)
