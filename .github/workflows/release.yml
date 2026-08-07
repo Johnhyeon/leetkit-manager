@@ -45,6 +45,39 @@ jobs:
           python -m pip install --upgrade twine
           twine check dist/*
 
+      # 배포하기 전에, 깨끗한 환경에 방금 만든 패키지를 설치해 실제로 동작하는지 본다.
+      #
+      # 개발 PC에는 다른 패키지가 끌어온 의존성이 남아 있어 "여기선 되는데"를 못 잡는다.
+      # 실제로 packaging을 의존성에 안 적었는데 윈도우에서는 우연히 딸려와 티가 안 났고,
+      # 맥에서만 폴백 경로를 타서 최신 사용자에게 옛 버전으로 내려가라고 권했다.
+      # 단순 import 검사로는 못 잡는다(지연 import라서) — 실제로 불러서 확인한다.
+      - name: 깨끗한 환경에서 동작 확인
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet --upgrade pip
+          # --no-cache-dir: 의존성을 새로 풀어 "오늘 처음 설치하는 사람"과 같은 조건을 만든다.
+          /tmp/verify/bin/pip install --quiet --no-cache-dir dist/*.whl
+          echo "── 실제로 깔린 의존성 ──"
+          /tmp/verify/bin/pip list
+          # 소스 트리가 아니라 설치된 패키지를 보게 홈에서 실행한다.
+          cd /tmp && /tmp/verify/bin/python - <<'PY'
+          import leetkit_manager
+          from leetkit_manager import orchestrator, package_service, review_prompt, shortcut  # noqa: F401
+          from leetkit_manager.package_service import version_gt
+
+          print("버전:", leetkit_manager.__version__)
+
+          # 지연 import하는 의존성은 "안 적어도 당장은 돌아가는" 탓에 빠지기 쉽다 —
+          # 실제로 packaging이 그렇게 빠졌고, 윈도우에서는 다른 패키지가 우연히 끌어와
+          # 티가 안 났다. 선언돼서 실제로 깔렸는지 여기서 못 박는다.
+          import packaging.version  # noqa: F401
+
+          assert version_gt("0.1.10", "0.1.9"), "새 버전을 새 버전으로 못 알아본다"
+          assert not version_gt("0.1.9", "0.1.10"), "옛 버전으로 내려가라고 권한다"
+          assert not version_gt("0.1.9", "0.1.9"), "같은 버전을 업데이트라고 한다"
+          print("동작 확인 OK")
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-dist
