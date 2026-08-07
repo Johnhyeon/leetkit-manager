@@ -62,12 +62,11 @@ _DEFAULTS = {
     #
     # Manager는 매일 여는 앱이 아니라 설치·진단 도구다. 문턱을 높게 잡으면 조건을
     # 만족하기 전에 기한이 먼저 끝난다 — 그래서 예전 값(7일·3회·14일 간격)보다 낮췄다.
-    "min_days": 3,        # 첫 실행 후 이만큼 지나야 처음 묻는다
-    "min_launches": 2,    # 설치하느라 연 첫 실행 말고 한 번은 더 열어봤어야 한다
+    "min_days": 3,        # 라이선스를 넣고 이만큼 지나야 처음 묻는다
+    "min_launches": 1,    # 사실상 없는 문턱 — 아래 설명 참고
     "snooze_days": 7,     # "나중에" 이후 다시 묻기까지
     "max_asks": 3,        # 이 횟수를 넘기면 영영 안 묻는다
     "deadline_days": 21,  # 활성화 후 이만큼 지나면 아예 안 묻는다(후기 기간 만료)
-    "urgent_days": 7,     # 마감까지 이만큼 이하로 남으면 실행 횟수 문턱을 없앤다
 
     # 화면에 "앞으로 며칠 남았다"를 보여줄 때 쓰는 실제 규칙(리틀리 기준 약 한 달).
     # 위 deadline_days와 일부러 다르다 — deadline_days는 "언제까지 물어볼까"라서
@@ -206,22 +205,22 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
     # 활성화 시각은 구매 직후라 구매일에 가깝지만 같지는 않다(메일을 며칠 뒤에 열어
     # 활성화하는 사람이 있다). 그만큼 실제 기한은 이미 줄어든 상태이므로, 마감선을
     # 한 달이 아니라 그보다 짧게 잡아 여유를 둔다.
-    days_to_deadline = _int(config, "deadline_days") - elapsed_days
-    if days_to_deadline < 0:
+    if elapsed_days > _int(config, "deadline_days"):
         return None
 
+    # 산 직후에는 안 묻는다. 아직 써보지도 않은 사람에게 후기를 달라는 건 무례하고,
+    # 받아봐야 내용도 없다. 기준이 라이선스를 넣은 시각이라 이 조건 하나로 충분하다 —
+    # Manager를 통해 처음 설치하는 사람은 그 자리에서 활성화하므로 여기 걸린다.
     if elapsed_days < _int(config, "min_days"):
         return None
 
-    # 실행 횟수 문턱 — 마감이 코앞이면 낮춘다.
-    #
-    # Manager는 매일 여는 앱이 아니다. 산 지 19일 된 사람이 오늘 처음 켜면 두 번째
-    # 실행을 기다리게 되는데, 그 사람이 다시 여는 게 마감 뒤일 수 있다. 그러면 물어볼
-    # 기회가 있었는데도 한 번도 못 묻고 끝난다. 여유가 있을 때만 "한 번은 더 써보고"를
-    # 요구하고, 코앞이면 지금이 마지막 기회이므로 그 자리에서 묻는다.
-    urgent = days_to_deadline <= _int(config, "urgent_days")
-    min_launches = 1 if urgent else _int(config, "min_launches")
-    if int(state.get("launches", 0)) < min_launches:
+    # 실행 횟수 문턱은 사실상 없다(1 = 지금 이 실행). 예전엔 "설치하느라 연 첫 실행
+    # 말고 한 번은 더"를 요구했는데, Manager는 매일 여는 앱이 아니라 설치·진단
+    # 도구여서 그 "한 번 더"가 영영 안 올 수 있다. Lens를 예전에 CLI로 깔고 이제야
+    # Manager를 처음 켠 사람이 딱 그렇다 — 후기 기간은 남았는데 물어볼 기회를
+    # 통째로 날린다. 위 min_days가 이미 "너무 이른 요청"을 막으므로 이중으로 막을
+    # 이유가 없다. 상태 파일이 없어 0으로 읽히는 경우만 여기서 걸러진다.
+    if int(state.get("launches", 0)) < _int(config, "min_launches"):
         return None
 
     last_ask = state.get("last_ask_at")
