@@ -261,3 +261,54 @@ class TestReviewWindowDeadline:
         d = review_prompt._DEFAULTS
         last_ask_day = d["min_days"] + d["snooze_days"] * (d["max_asks"] - 1)
         assert last_ask_day <= d["deadline_days"]
+
+
+class TestDeadlineNote:
+    """"앞으로 며칠 남았다" 안내 — 실제 규칙(구매 후 약 한 달)과 우리가 센 기준
+    (설치일)을 둘 다 밝혀야 한다. 앱은 구매 시각을 알 수 없어 첫 실행 시각으로
+    대신 세는데, 기준을 안 밝히면 늦게 설치한 사람에게 없는 기간을 있다고 말하게 된다."""
+
+    def test_counts_down_from_first_launch(self, _isolated_state):
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now - 10 * 86400, launches=10)
+        note = review_prompt.pending_prompt(
+            _config(review_window_days=30), ready=True, now=now
+        )["deadline_note"]
+        assert "20일 남았습니다" in note
+
+    def test_states_both_the_rule_and_the_basis(self, _isolated_state):
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now - 5 * 86400, launches=10)
+        note = review_prompt.pending_prompt(
+            _config(review_window_days=30), ready=True, now=now
+        )["deadline_note"]
+        assert "구매 후 약 30일" in note, "실제 규칙을 밝혀야 늦게 설치한 사람이 보정할 수 있다"
+        assert "설치하신 날부터" in note, "우리가 센 기준을 밝혀야 한다"
+
+    def test_can_be_turned_off(self, _isolated_state):
+        """기간 정책이 바뀌면 숫자를 고치는 대신 안내 자체를 끌 수 있어야 한다."""
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now - 5 * 86400, launches=10)
+        prompt = review_prompt.pending_prompt(_config(review_window_days=0), ready=True, now=now)
+        assert prompt["deadline_note"] == ""
+
+    def test_no_note_once_the_window_has_passed(self, _isolated_state):
+        """창이 닫혔는데 "0일 남았습니다"를 띄우면 안내가 아니라 조롱이 된다.
+        (물어보는 것 자체도 deadline_days에서 이미 막히지만, 창을 짧게 설정해
+        두 값이 엇갈려도 여기서 한 번 더 막힌다.)"""
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now - 15 * 86400, launches=10)
+        prompt = review_prompt.pending_prompt(
+            _config(review_window_days=10, deadline_days=21), ready=True, now=now
+        )
+        assert prompt["deadline_note"] == ""
+
+    def test_shipped_window_is_longer_than_the_ask_deadline(self):
+        """물어보기를 멈추는 시점(deadline_days)이 알려주는 기한(review_window_days)보다
+        길면, 마지막 요청에서 "0일 남았습니다"가 나온다."""
+        from pathlib import Path
+
+        config = json.loads(
+            (Path(__file__).parent.parent / "review_prompt.json").read_text(encoding="utf-8")
+        )
+        assert config["deadline_days"] < config["review_window_days"]

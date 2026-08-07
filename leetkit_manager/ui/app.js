@@ -1856,6 +1856,11 @@ async function maybeShowReviewPrompt() {
   document.getElementById("review-title").textContent = prompt.title;
   document.getElementById("review-body").textContent = prompt.body;
 
+  // 남은 기간 — 기한이 지났거나 안 쓰기로 한 설정이면 Python이 빈 문자열을 준다.
+  const deadlineEl = document.getElementById("review-deadline");
+  deadlineEl.textContent = prompt.deadline_note || "";
+  deadlineEl.hidden = !prompt.deadline_note;
+
   // 링크가 없으면(리틀리 후기란처럼 구매자마다 주소가 다른 경우) 여는 버튼을 아예
   // 안 만든다 — 눌러도 아무 일 없는 버튼을 두면 "고장난 앱"으로 읽힌다.
   const openBtn = document.getElementById("review-open");

@@ -58,6 +58,12 @@ _DEFAULTS = {
     "snooze_days": 7,     # "나중에" 이후 다시 묻기까지
     "max_asks": 3,        # 이 횟수를 넘기면 영영 안 묻는다
     "deadline_days": 21,  # 첫 실행 후 이만큼 지나면 아예 안 묻는다(후기 기간 만료)
+
+    # 화면에 "앞으로 며칠 남았다"를 보여줄 때 쓰는 실제 규칙(리틀리 기준 약 한 달).
+    # 위 deadline_days와 일부러 다르다 — deadline_days는 "언제까지 물어볼까"라서
+    # 대용 기준(첫 실행일)의 오차를 흡수하려고 짧게 잡았고, 이 값은 "사용자에게 알려줄
+    # 실제 기한"이다. 0으로 두면 남은 기간을 아예 안 보여준다.
+    "review_window_days": 30,
 }
 
 _DAY = 86400.0
@@ -173,7 +179,26 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
         "body": str(config.get("body") or _DEFAULTS["body"]),
         "cta": str(config.get("cta") or _DEFAULTS["cta"]),
         "url": _usable_url(config),
+        "deadline_note": _deadline_note(config, first=first, now=now),
     }
+
+
+def _deadline_note(config: dict, *, first: float, now: float) -> str:
+    """"앞으로 며칠 남았다"는 안내 문구. 안 보여줄 상황이면 빈 문자열.
+
+    실제 규칙(구매 후 약 한 달)과 우리가 센 기준(설치일)을 **둘 다** 밝힌다. 앱은
+    구매 시각을 알 수 없어 첫 실행 시각으로 대신 세는데, 사서 며칠 뒤에 설치한
+    사람에게 그냥 "N일 남음"이라고 하면 실제보다 넉넉하게 말하는 게 된다 — 그 사람은
+    믿고 미루다 기간을 놓친다. 기준을 같이 적어두면 늦게 설치한 사람이 스스로 보정할
+    수 있다.
+    """
+    window = _int(config, "review_window_days")
+    if window <= 0:
+        return ""
+    left = int((first + window * _DAY - now) // _DAY)
+    if left <= 0:
+        return ""
+    return f"후기는 구매 후 약 {window}일까지만 남길 수 있습니다.\n설치하신 날부터 세면 앞으로 {left}일 남았습니다."
 
 
 def mark_asked(now: float | None = None) -> None:

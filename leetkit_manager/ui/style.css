@@ -1044,6 +1044,21 @@ body {
   white-space: pre-line;
 }
 
+/* 남은 기간 안내 — 본문과 섞이면 그냥 지나쳐 읽히므로 선을 하나 그어 떼어놓는다.
+   미루면 놓친다는 게 요점이라 흐리게 두지 않고 본문 색을 쓴다. */
+.review-deadline {
+  border-top: 1px solid var(--hairline);
+  padding-top: 12px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+.review-deadline[hidden] {
+  display: none;
+}
+
 /* 버튼이 셋이라 오른쪽으로만 몰면 "나중에"와 "후기 남기기"가 붙어 오조작이 난다.
    거절 쪽(이미 남겼어요)을 왼쪽 끝으로 떼어놓는다. */
 .review-modal .modal-actions {

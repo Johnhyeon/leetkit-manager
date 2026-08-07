@@ -19,5 +19,8 @@
   "min_launches": 2,
   "snooze_days": 7,
   "max_asks": 3,
-  "deadline_days": 21
+  "deadline_days": 21,
+
+  "_남은기간_안내": "모달 아래에 '앞으로 N일 남았습니다'를 보여줄 때 쓰는 실제 기한. deadline_days와 일부러 다르다 — 그쪽은 '언제까지 물어볼까'라서 대용 기준(첫 실행일)의 오차를 흡수하려고 짧고, 이 값은 사용자에게 알려줄 실제 규칙이다. 0으로 두면 남은 기간을 안 보여준다.",
+  "review_window_days": 30
 }
