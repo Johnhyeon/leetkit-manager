@@ -495,7 +495,10 @@ function startInstallProgressPolling(render) {
   };
 }
 
-async function runAction(action, lensName, extra) {
+// opts.skipClaudePrompt — 여러 Lens를 한 번에 처리할 때 쓴다. 낱개로 돌리면 실패할
+// 때마다 "Claude를 껐다 켤까요?"가 따로 떠서, 3개면 3번 묻게 된다. 일괄 처리는
+// 시작 전에 한 번만 묻고 여기서는 안 묻는다.
+async function runAction(action, lensName, extra, opts = {}) {
   if (runningActions.has(lensName)) {
     showToast("이미 처리 중입니다 — 잠시만 기다려주세요.");
     return;
@@ -537,8 +540,11 @@ async function runAction(action, lensName, extra) {
       }
       replaceCard(lensName, lens);
       if (!result.ok) {
-        if (result.claude_blocking) {
+        if (result.claude_blocking && !opts.skipClaudePrompt) {
           await offerCloseClaudeAndRetry(lensName, "install");
+        } else if (result.claude_blocking) {
+          // 일괄 처리 중 — 이미 한 번 물어봤으므로 다시 안 묻고 사실만 남긴다.
+          showToast(`${displayName}: Claude Desktop이 파일을 쓰고 있어 건너뛰었습니다.`);
         } else {
           showToast(
             result.rollback_command
@@ -2058,16 +2064,71 @@ document.getElementById("update-patchnotes").addEventListener("click", () => {
 document.getElementById("update-now").addEventListener("click", async () => {
   const lenses = lensesWithUpdates();
   closeUpdateModal();
+
+  // Claude Desktop이 켜져 있으면 Lens 파일을 쥐고 있어 교체가 막힌다. 예전엔 Lens마다
+  // 실패한 뒤에 "껐다 켤까요?"가 따로 떠서, 3개면 3번 물어봤다 — 시작 전에 한 번만
+  // 묻고, 끝나면 다시 켜준다.
+  const closedClaude = await closeClaudeForBulkUpdate(lenses.length);
+
   // 한 번에 하나씩 — uv tool install이 같은 디렉터리를 건드리므로 동시에 돌리면
   // 서로의 파일을 쥔 채 실패한다. runAction이 진행률 오버레이까지 맡는다.
   for (const lens of lenses) {
-    await runAction("install", lens.name);
+    await runAction("install", lens.name, undefined, { skipClaudePrompt: true });
   }
   recomputeSummaryFromCache();
+
+  if (closedClaude) {
+    showBusyOverlay("Claude Desktop을 다시 켜는 중…");
+    try {
+      await window.pywebview.api.launch_claude_desktop();
+    } catch {
+      /* 못 켜도 업데이트 자체는 끝났다 — 아래 안내에서 직접 켜라고 말한다 */
+    }
+    hideBusyOverlay();
+  }
+
   const left = lensesWithUpdates();
-  showToast(left.length ? "일부 업데이트가 남았습니다 — 카드에서 다시 시도해주세요." : "업데이트를 마쳤습니다.");
+  showToast(
+    left.length
+      ? "일부 업데이트가 남았습니다 — 카드에서 다시 시도해주세요."
+      : closedClaude
+      ? "업데이트를 마치고 Claude Desktop을 다시 켰습니다."
+      : "업데이트를 마쳤습니다."
+  );
   await handOffToReviewPrompt();
 });
+
+// 일괄 업데이트 전에 Claude Desktop을 닫을지 한 번만 묻는다. 닫았으면 true —
+// 호출자가 끝나고 다시 켜준다.
+async function closeClaudeForBulkUpdate(count) {
+  let running = false;
+  try {
+    running = await window.pywebview.api.claude_desktop_running();
+  } catch {
+    return false; // 확인 실패 — 괜히 묻지 말고 그냥 진행한다
+  }
+  if (!running) return false;
+
+  const ok = confirm(
+    `Claude Desktop이 켜져 있으면 Lens 파일을 쓰고 있어 업데이트가 막힐 수 있습니다.\n\n` +
+      `잠시 껐다가 ${count}개를 업데이트하고, 끝나면 다시 켤까요?`
+  );
+  if (!ok) return false;
+
+  showBusyOverlay("Claude Desktop을 종료하는 중…");
+  try {
+    const quit = await window.pywebview.api.quit_claude_desktop();
+    if (!quit.ok) {
+      hideBusyOverlay();
+      showToast(quit.error || "Claude Desktop을 종료하지 못했습니다 — 그대로 진행합니다.");
+      return false;
+    }
+    return true;
+  } catch {
+    hideBusyOverlay();
+    return false;
+  }
+}
 
 // 업데이트 알림이 물러난 자리에 후기 요청을 이어붙인다. 예전엔 업데이트가 뜬 세션에서는
 // 후기가 통째로 건너뛰어졌다 — maybeShowReviewPrompt가 시작할 때 딱 한 번 돌면서

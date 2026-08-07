@@ -122,10 +122,14 @@ jobs:
       - name: 빌드된 exe가 실제로 뜨는지 확인
         shell: pwsh
         run: |
-          $out = & .\dist_exe\LeetKitManager.exe selftest 2>&1
-          $code = $LASTEXITCODE
-          $out | Write-Host
-          if ($code -ne 0) {
+          # --windowed exe는 stdout·stderr가 없다 — 결과를 파일로 받아야 원인이 남는다.
+          # Start-Process -Wait: GUI 서브시스템 exe는 그냥 부르면 기다리지 않는다.
+          $report = "$env:RUNNER_TEMP\selftest.txt"
+          $p = Start-Process -FilePath .\dist_exe\LeetKitManager.exe `
+                             -ArgumentList "selftest","--report",$report `
+                             -Wait -PassThru
+          if (Test-Path $report) { Get-Content $report | Write-Host }
+          if ($p.ExitCode -ne 0) {
             Write-Host "::error::빌드된 exe가 시작되지 못했습니다 — 배포를 중단합니다"
             exit 1
           }

@@ -84,13 +84,35 @@ def _cmd_selftest(args: argparse.Namespace) -> int:
     `--help`도 멀쩡했기 때문에 아무 검사에도 안 걸렸다.
 
     무거운 초기화(창 생성)까지 가지 않고 import만 한다 — CI에 화면이 없어도 돈다.
-    """
-    import webview  # noqa: F401
 
-    if sys.platform == "win32":
-        # 여기가 v0.1.13에서 터진 자리다(pythonnet → clr_loader → cffi).
-        import webview.platforms.winforms  # noqa: F401
-    print("selftest OK")
+    결과는 `--report <경로>`로 파일에 쓴다. --windowed로 빌드한 exe는 stdout·stderr가
+    아예 없어서, 실패해도 종료 코드만 남고 왜 실패했는지는 어디에도 안 남는다 —
+    실제로 CI에서 그렇게 한 번 막혔다. 파일로 받아야 원인을 볼 수 있다.
+    """
+    import traceback
+
+    report = getattr(args, "report", None)
+
+    def _write(text: str) -> None:
+        if sys.stdout:
+            print(text)
+        if report:
+            try:
+                with open(report, "w", encoding="utf-8") as f:
+                    f.write(text)
+            except OSError:
+                pass
+
+    try:
+        import webview  # noqa: F401
+
+        if sys.platform == "win32":
+            # 여기가 v0.1.13에서 터진 자리다(pythonnet → clr_loader → cffi).
+            import webview.platforms.winforms  # noqa: F401
+    except BaseException:  # noqa: BLE001 — SystemExit로 죽는 경우까지 원인을 남겨야 한다
+        _write("selftest FAILED\n" + traceback.format_exc())
+        return 1
+    _write("selftest OK")
     return 0
 
 
@@ -119,6 +141,7 @@ def _build_parser() -> argparse.ArgumentParser:
     check_updates.set_defaults(func=_cmd_check_updates)
 
     selftest = sub.add_parser("selftest", help=argparse.SUPPRESS)
+    selftest.add_argument("--report", help=argparse.SUPPRESS)
     selftest.set_defaults(func=_cmd_selftest)
 
     gui = sub.add_parser("gui", help="데스크톱 대시보드(pywebview) 실행")
