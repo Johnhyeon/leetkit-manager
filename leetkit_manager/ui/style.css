@@ -2,13 +2,16 @@
    컬러: 그래파이트 바디 + 코팅 렌즈 유리색 틸 액센트. 상태 3색은 조리개 경고등처럼 또렷하게. */
 
 :root {
-  --bg: #16181b;
-  --panel: #1e2124;
-  --panel-raised: #262a2e;
-  --hairline: #34383d;
-  --text: #f1efe9;
-  --text-muted: #adb2b9;
-  --text-dim: #83888f;
+  /* 배경 계열 — 디자인 안 4b(#0D0F12 니어블랙). 예전(#16181b 중성 그래파이트)보다
+     한 단계 깊게 내려서 카드가 배경에서 확실히 떠 보이고, 상태 3색이 더 선명해진다.
+     카드·경계·글자 색도 같은 계열로 맞춰야 색이 겉돌지 않는다. */
+  --bg: #0d0f12;
+  --panel: #16191e;
+  --panel-raised: #1e2228;
+  --hairline: #23272e;
+  --text: #edf0f4;
+  --text-muted: #a2a9b3;
+  --text-dim: #767d87;
 
   --ok: #5fd4c0;
   --ok-dim: rgba(95, 212, 192, 0.16);
@@ -173,9 +176,11 @@ body {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  /* 줄 높이를 모두 같게 — 아래 줄(TelegramLens)은 카드가 하나뿐이라 내용이 덜 접혀
-     위 두 카드보다 짧아 보였다. 세 카드의 세로 높이를 맞춘다. */
-  grid-auto-rows: 1fr;
+  /* 줄 높이는 내용에 맞춘다. 예전엔 1fr로 늘려 세 카드 높이를 맞췄는데, 그건 아래 줄
+     (TelegramLens)이 1단이라 내용이 덜 접혀 짧아 보였기 때문이다 — 2단으로 바꾸면서
+     그 이유가 사라졌고, 늘리면 오히려 카드 안이 텅 빈다. 같은 줄에 있는 카드끼리는
+     그리드가 알아서 같은 높이로 맞춰준다. */
+  grid-auto-rows: min-content;
   gap: 14px;
   padding: 18px 22px 24px;
   width: 100%;
@@ -185,6 +190,61 @@ body {
 /* 3개 중 마지막 카드는 남는 칸에 혼자 두지 않고 아래 줄 전체를 쓴다. */
 .card:last-child {
   grid-column: 1 / -1;
+}
+
+/* 평소에는 이 두 묶음이 없는 것처럼 동작한다 — 위 두 카드의 배치는 예전 그대로다.
+   전폭 카드에서만 왼쪽(정보)·오른쪽(상황)으로 갈라 쓰려고 감싸둔 것이다. */
+.card-main,
+.card-status {
+  display: contents;
+}
+
+/* 디자인 안 7a — 전폭 카드는 안을 2단으로 나누고, 버튼은 그 아래 전폭에 왼쪽 정렬로.
+   전폭인데 안이 1단이면 오른쪽 가로폭이 통째로 빈다. 버튼을 한쪽 단에 넣으면 위
+   두 카드와 줄이 안 맞아서, 2단 아래 전폭에 두면 정렬도 맞고 균형도 유지된다. */
+.card:last-child {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  grid-template-rows: 1fr auto;
+  column-gap: 24px;
+  row-gap: 14px;
+}
+
+.card:last-child .card-main,
+.card:last-child .card-status {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  min-width: 0; /* 없으면 긴 문구가 단 폭을 밀어낸다 */
+  grid-row: 1;
+}
+
+.card:last-child .card-main {
+  grid-column: 1;
+}
+
+/* 두 단 사이 세로 선 — 빈 칸이 아니라 나눠 쓰는 것임을 보여준다.
+   오른쪽에 보여줄 게 있을 때만 긋는다(:has). 문제도 진행중도 없으면 선만 덩그러니
+   남아 "뭔가 안 뜬 것"처럼 보인다. :has를 모르는 렌더러에서는 이 규칙이 통째로
+   무시돼 선이 안 그어질 뿐, 배치는 그대로다. */
+.card:last-child:has(.status-block)::before {
+  content: "";
+  grid-column: 2;
+  grid-row: 1;
+  background: var(--hairline);
+}
+
+.card:last-child .card-status {
+  grid-column: 3;
+  justify-content: center; /* 알림이 하나뿐일 때 위에 붙지 않고 가운데 온다 */
+}
+
+.card:last-child .actions {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  border-top: 1px solid var(--hairline);
+  padding-top: 14px;
+  margin-top: 0;
 }
 
 .card {
@@ -352,26 +412,51 @@ body {
   word-break: break-word;
 }
 
-.check-toggle {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  letter-spacing: 0.02em;
-  color: var(--fail);
+/* 디자인 안 8c — 상황 알림(문제·진행중)을 선이 아니라 블록으로.
+   예전엔 문제 줄에만 윗선을 그어서, 카드마다 선이 있는 자리가 달라져 선의 의미가
+   흐려졌다. 블록으로 통일하면 "카드 안의 상황 알림"이 한 종류로 묶여 보인다. */
+.status-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 12px 15px;
   cursor: pointer;
-  border-top: 1px solid var(--hairline);
-  padding-top: 8px;
+  min-width: 0;
 }
 
-.check-toggle .chevron {
-  display: inline-block;
-  margin-right: 5px;
+.status-count {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--fail);
+  flex-shrink: 0;
 }
 
-/* 진행중(백필 등) — 문제가 아니므로 경고색(--fail)이 아니라 정상색(--ok)으로 구분한다. */
-.check-toggle.progress {
+.status-block.progress .status-count {
   color: var(--ok);
 }
 
+/* 무엇이 걸렸는지 한 줄로. 넘치면 잘라서 카드 높이를 지킨다. */
+.status-summary {
+  font-size: 14.5px;
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.status-chevron {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* 진행중(백필 등) — 문제가 아니므로 경고색(--fail)이 아니라 정상색(--ok)으로 구분한다. */
 .check-item {
   font-size: 14.5px;
   line-height: 1.4;

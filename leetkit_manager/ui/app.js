@@ -93,6 +93,25 @@ function renderReadout(summary) {
   document.getElementById("readout-text").textContent = text;
 }
 
+// 디자인 안 8c — 카드 안 상황 알림(문제·진행중)을 구분선이 아니라 블록으로 보여준다.
+// 예전엔 문제 줄에만 윗선을 그었는데, 카드마다 선이 있는 곳이 달라져 선의 의미가
+// 흐려졌다. 블록으로 통일하면 "카드 안의 상황 알림"이 한 종류로 묶여 보인다.
+//
+// 건수 옆에 무엇이 걸렸는지도 같이 보여준다 — "문제 2건"만으로는 열어보기 전까지
+// 알 수 없다. 넘치면 말줄임으로 자른다(카드 높이는 그대로 유지).
+function statusBlock(label, checks, lensName, extraClass) {
+  const summary = checks
+    .map((c) => c.summary)
+    .filter(Boolean)
+    .join(" · ");
+  return `
+      <div class="status-block ${extraClass}" data-action="open-detail" data-lens="${lensName}">
+        <span class="status-count">${label} ${checks.length}건</span>
+        <span class="status-summary">${escapeHtml(summary)}</span>
+        <span class="status-chevron">›</span>
+      </div>`;
+}
+
 function renderCard(lens) {
   lensDataCache[lens.name] = lens;
 
@@ -133,6 +152,7 @@ function renderCard(lens) {
 
   return `
     <div class="card" data-card="${lens.name}">
+      <div class="card-main">
       <div class="card-head">
         ${focusRingSvg(cls)}
         <div class="card-title">
@@ -147,16 +167,13 @@ function renderCard(lens) {
         <div class="field-row"><span class="field-label">MCP 등록</span><span class="field-value">${targets}</span></div>
         <div class="field-row"><span class="field-label">최근 진단</span><span class="field-value">${formatCheckedAt(lens.checked_at)}</span></div>
       </div>
+      </div>
+      <div class="card-status">
       ${lens.problem_detail ? `
       <div class="problem-detail">${escapeHtml(lens.problem_detail)}</div>` : ""}
-      ${problems.length ? `
-      <div class="check-toggle" data-action="open-detail" data-lens="${lens.name}">
-        <span class="chevron">▸</span>문제 ${problems.length}건 — 자세히
-      </div>` : ""}
-      ${inProgress.length ? `
-      <div class="check-toggle progress" data-action="open-detail" data-lens="${lens.name}">
-        <span class="chevron">▸</span>진행중 ${inProgress.length}건 — 자세히
-      </div>` : ""}
+      ${problems.length ? statusBlock("문제", problems, lens.name, "") : ""}
+      ${inProgress.length ? statusBlock("진행중", inProgress, lens.name, "progress") : ""}
+      </div>
       <div class="actions">
         <button class="action-btn" data-action="diagnose" data-lens="${lens.name}">진단</button>
         <button class="action-btn" data-action="register" data-lens="${lens.name}">MCP 등록</button>
@@ -1416,9 +1433,9 @@ const TOUR_STEPS = [
     // "명령어를 누르면 복사된다"고 안내하고 있었는데, 지금은 누르면 그 자리에서
     // 실행되고 끝나면 자동으로 다시 진단한다 — 기능이 바뀐 뒤 설명이 안 따라왔었다.
     desc:
-      "문제가 있으면 카드에 \"문제 N건 — 자세히\" 줄이 나타납니다.\n" +
-      "누르면 무엇이 문제인지 따로 창으로 보여줍니다.\n\n" +
-      "지금 이 Lens는 문제가 없어 그 줄이 안 보이지만,\n예시로 그 창을 띄워드릴게요.\n\n" +
+      "문제가 있으면 카드에 \"문제 N건\" 블록이 나타나고,\n무엇이 걸렸는지 옆에 같이 보입니다.\n" +
+      "누르면 자세한 내용을 따로 창으로 보여줍니다.\n\n" +
+      "지금 이 Lens는 문제가 없어 그 블록이 안 보이지만,\n예시로 그 창을 띄워드릴게요.\n\n" +
       "\"조치\" 옆의 굵은 명령어를 누르면 그 자리에서 실행되고,\n끝나면 해결됐는지 자동으로 다시 진단합니다.",
     demo: "detail",
   },
