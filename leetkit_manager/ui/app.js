@@ -484,8 +484,10 @@ async function runAction(action, lensName, extra) {
         } else {
           showToast(
             result.rollback_command
-              ? `설치/업데이트에 실패했습니다 — 이전 버전 복구 명령: ${result.rollback_command}`
-              : "설치/업데이트에 실패했습니다."
+              // 이유를 먼저 말한다 — 예전엔 "실패했습니다"와 복구 명령뿐이라, 사용자도
+              // 우리도 왜 실패했는지 알 방법이 없었다.
+              ? `설치/업데이트 실패 — ${result.error || "원인을 알 수 없습니다"} (이전 버전 복구: ${result.rollback_command})`
+              : `설치/업데이트 실패 — ${result.error || "원인을 알 수 없습니다"}`
           );
         }
       }

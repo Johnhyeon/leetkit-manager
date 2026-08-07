@@ -244,3 +244,63 @@ class TestPurchasePage:
         with patch("webbrowser.open") as mock_open:
             assert Api().open_purchase_page() is True
         mock_open.assert_called_once_with(PURCHASE_URL)
+
+
+class TestInstallFailureReason:
+    """예전엔 ok=False만 돌려줘서 화면에 "실패했습니다"밖에 못 띄웠다 — 사용자도 우리도
+    원인을 알 방법이 없었다(맥에서 업데이트가 계속 실패했는데 단서가 하나도 없었다)."""
+
+    def _proc(self, **kwargs):
+        base = dict(cmd=["uv"], exit_code=1, stdout="", stderr="", timed_out=False, duration_s=0.0)
+        base.update(kwargs)
+        return ProcessResult(**base)
+
+    def test_timeout_says_it_took_too_long(self):
+        from leetkit_manager.ui.api import _install_failure_reason
+
+        reason = _install_failure_reason(self._proc(timed_out=True))
+        assert "시간" in reason
+
+    def test_uses_the_stderr_line_uv_printed(self):
+        """uv는 이유를 stderr에 또렷하게 적는다 — 그대로 보여주는 게 제일 낫다."""
+        from leetkit_manager.ui.api import _install_failure_reason
+
+        proc = self._proc(stderr="error: failed to remove directory ... 액세스가 거부되었습니다")
+        assert "액세스가 거부" in _install_failure_reason(proc)
+
+    def test_falls_back_to_stdout(self):
+        from leetkit_manager.ui.api import _install_failure_reason
+
+        assert "No solution" in _install_failure_reason(self._proc(stdout="No solution found"))
+
+    def test_returns_none_when_there_is_nothing_to_say(self):
+        """할 말이 없으면 지어내지 않는다 — 화면이 "원인을 알 수 없습니다"로 정직하게 뜬다."""
+        from leetkit_manager.ui.api import _install_failure_reason
+
+        assert _install_failure_reason(self._proc()) is None
+        assert _install_failure_reason(None) is None
+
+    def test_install_or_update_carries_the_reason(self):
+        from leetkit_manager.lens_contract import STOCKLENS
+
+        failed = MagicMock()
+        failed.ok = False
+        failed.rollback_command = "uv tool install stocklens-mcp==0.5.8"
+        failed.install = self._proc(stderr="error: 무언가 잘못됨")
+
+        with patch.object(orchestrator, "diagnose_lens") as mock_diag, \
+             patch.object(orchestrator, "update_lens", return_value=failed):
+            mock_diag.return_value.report.latest_version = "0.5.9"
+            mock_diag.return_value.report.installed_version = "0.5.8"
+            result = Api().install_or_update(STOCKLENS.name)
+
+        assert result["ok"] is False
+        assert "무언가 잘못됨" in result["error"]
+
+
+def test_install_timeout_is_generous_enough_for_the_biggest_lens():
+    """120초는 실제로 부족했다 — TelegramLens는 telethon·Pillow·pystray까지 받아야 해서
+    느린 회선이나 가상머신에서 중간에 잘렸다."""
+    from leetkit_manager import package_service
+
+    assert package_service._INSTALL_TIMEOUT >= 300

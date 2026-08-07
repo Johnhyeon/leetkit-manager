@@ -23,8 +23,12 @@ import httpx
 from leetkit_manager.process_runner import ProcessResult, run_cli, run_cli_streaming
 
 _PYPI_TIMEOUT = 10.0
-_INSTALL_TIMEOUT = 120.0  # PyPI 다운로드가 걸리므로 doctor(30초)보다 넉넉하게.
-_UV_INSTALL_TIMEOUT = 120.0
+# PyPI 다운로드가 걸리므로 doctor(30초)보다 넉넉하게. 120초는 실제로 부족했다 —
+# TelegramLens는 telethon·Pillow·pystray까지 받아야 해서 느린 회선이나 가상머신에서
+# 중간에 잘렸고, 화면에는 이유 없이 "실패했습니다"만 떴다. 오래 걸리는 건 진행률
+# 오버레이가 보여주므로, 넉넉히 두고 정말 멈춘 경우만 끊는 편이 낫다.
+_INSTALL_TIMEOUT = 420.0
+_UV_INSTALL_TIMEOUT = 180.0
 _GITHUB_RELEASE_TIMEOUT = 10.0
 _EXE_DOWNLOAD_TIMEOUT = 120.0
 _EXE_SHA256_ASSET = "LeetKitManager.exe.sha256"

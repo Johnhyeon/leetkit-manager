@@ -116,6 +116,22 @@ def _problem_detail(d: LensDiagnosis) -> str | None:
     return redaction.redact(" ".join(parts))
 
 
+def _install_failure_reason(process) -> str | None:
+    """설치/업데이트가 왜 실패했는지 한 줄로. 알 수 없으면 None.
+
+    uv는 실패 이유를 stderr에 꽤 또렷하게 적는다(파일 사용 중, 버전 없음, 네트워크 등) —
+    그걸 그대로 보여주는 게 "실패했습니다"보다 훨씬 낫다. 시간 초과는 stderr가 비어
+    있으므로 따로 문구를 만든다."""
+    if process is None:
+        return None
+    if getattr(process, "timed_out", False):
+        return "시간이 오래 걸려 중단했습니다. 네트워크가 느리거나 받을 파일이 많을 때 그렇습니다 — 다시 시도해보세요."
+    detail = _first_meaningful_line(getattr(process, "stderr", "")) or _first_meaningful_line(
+        getattr(process, "stdout", "")
+    )
+    return redaction.redact(detail) if detail else None
+
+
 class Api:
     def __init__(self) -> None:
         # 후기 링크는 JS가 건네주는 게 아니라 Python이 원격 설정에서 받아 여기 들고
@@ -247,6 +263,10 @@ class Api:
             "rollback_command": result.rollback_command,
             "version": latest,
             "claude_blocking": _is_claude_blocking(result.install),
+            # 실패 이유를 같이 돌려준다. 예전엔 ok=False만 보내서 화면에 "실패했습니다"
+            # 밖에 못 띄웠고, 사용자도 우리도 원인을 알 방법이 없었다(실제로 맥에서
+            # 업데이트가 계속 실패했는데 아무 단서가 없었다).
+            "error": None if result.ok else _install_failure_reason(result.install),
         }
 
     def uninstall(self, lens_name: str) -> dict:
