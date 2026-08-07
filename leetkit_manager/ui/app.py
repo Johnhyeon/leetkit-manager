@@ -7,7 +7,7 @@ from pathlib import Path
 
 import webview
 
-from leetkit_manager import orchestrator, package_service, review_prompt, single_instance
+from leetkit_manager import orchestrator, package_service, review_prompt, shortcut, single_instance
 from leetkit_manager.ui.api import Api
 
 _UI_DIR = Path(__file__).parent
@@ -70,6 +70,14 @@ def run() -> None:
     # 때문에 앱이 안 뜨면 안 되므로 어떤 예외도 삼킨다.
     try:
         review_prompt.record_launch()
+    except Exception:
+        pass
+
+    # 맥에서 예전 버전이 만든 심볼릭 링크 바로가기를 .app 번들로 갈아끼운다. 바로가기는
+    # 온보딩에서 한 번만 만들고 그 뒤론 다시 안 만들기 때문에, 이게 없으면 고쳐놓은
+    # 아이콘·이름·터미널 문제가 정작 기존 사용자에게는 하나도 안 닿는다.
+    try:
+        shortcut.migrate_macos_shortcut()
     except Exception:
         pass
     try:

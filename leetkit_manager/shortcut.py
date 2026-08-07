@@ -151,6 +151,40 @@ def has_shortcut_been_offered() -> bool:
     return _MARKER.exists()
 
 
-def mark_shortcut_offered() -> None:
+def mark_shortcut_offered(target_dir: Path | None = None) -> None:
+    """어디에 만들었는지도 같이 적는다. 나중에 바로가기를 고쳐야 할 때(맥의 .app 전환
+    같은) 사용자가 고른 폴더를 찾아갈 수 있어야 한다 — 예전엔 "1"만 적어서 바탕화면이
+    아닌 곳에 만든 사람은 찾을 방법이 없었다."""
     _MARKER.parent.mkdir(parents=True, exist_ok=True)
-    _MARKER.write_text("1", encoding="utf-8")
+    _MARKER.write_text(str(target_dir) if target_dir else "1", encoding="utf-8")
+
+
+def _recorded_shortcut_dir() -> Path | None:
+    try:
+        recorded = _MARKER.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not recorded or recorded == "1":  # 위치를 안 적던 시절의 표시
+        return None
+    return Path(recorded)
+
+
+def migrate_macos_shortcut() -> Path | None:
+    """예전 버전이 만든 심볼릭 링크 바로가기를 .app 번들로 갈아끼운다.
+
+    바로가기는 온보딩에서 한 번만 만들고 그 뒤로는 "이미 물어봤다"는 표시 때문에 다시
+    안 만든다 — 업데이트만으로는 이미 깔린 링크가 그대로 남아, 고쳐놓은 아이콘·이름·
+    터미널 문제가 정작 기존 사용자에게는 하나도 안 닿는다.
+
+    사용자가 고른 폴더를 먼저 보고, 없으면 바탕화면을 본다. 링크가 없으면(이미
+    번들이거나 애초에 안 만들었으면) 아무것도 안 한다."""
+    if sys.platform != "darwin":
+        return None
+    candidates = [d for d in (_recorded_shortcut_dir(), Path.home() / "Desktop") if d]
+    for target_dir in candidates:
+        try:
+            if (target_dir / "LeetKit Manager").is_symlink():
+                return create_shortcut_at(target_dir)
+        except OSError:
+            continue
+    return None

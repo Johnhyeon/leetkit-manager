@@ -209,3 +209,82 @@ class TestMacosAppIdentity:
         source = inspect.getsource(app.run)
         # rindex: 주석에도 "webview.start()"가 나온다 — 실제 호출은 맨 뒤 것이다.
         assert source.index("_apply_macos_app_identity()") < source.rindex("webview.start(")
+
+
+class TestMacosShortcutMigration:
+    """바로가기는 온보딩에서 한 번만 만들고 그 뒤론 "이미 물어봤다" 표시 때문에 다시
+    안 만든다 — 이 마이그레이션이 없으면 고쳐놓은 아이콘·이름·터미널 문제가 정작
+    기존 사용자에게는 하나도 안 닿는다."""
+
+    def _legacy_symlink(self, tmp_path, folder_name="Desktop"):
+        fake_exe = tmp_path / "leetkit-manager"
+        fake_exe.write_text("#!/bin/sh\n", encoding="utf-8")
+        folder = tmp_path / folder_name
+        folder.mkdir()
+        legacy = folder / "LeetKit Manager"
+        try:
+            legacy.symlink_to(fake_exe)
+        except (OSError, NotImplementedError):
+            pytest.skip("이 환경에서는 심볼릭 링크를 만들 수 없음(Windows 권한)")
+        return folder, fake_exe
+
+    def test_does_nothing_off_darwin(self, tmp_path):
+        with patch.object(shortcut.sys, "platform", "win32"):
+            assert shortcut.migrate_macos_shortcut() is None
+
+    def test_replaces_a_legacy_symlink_on_the_desktop(self, tmp_path):
+        folder, fake_exe = self._legacy_symlink(tmp_path)
+        marker = tmp_path / "shortcut_created"
+        marker.write_text("1", encoding="utf-8")  # 위치를 안 적던 시절의 표시
+        with patch.object(shortcut.sys, "platform", "darwin"), \
+             patch.object(shortcut, "_MARKER", marker), \
+             patch.object(shortcut.Path, "home", return_value=tmp_path), \
+             patch.object(shortcut, "_resolved_exe_path", return_value=str(fake_exe)):
+            result = shortcut.migrate_macos_shortcut()
+        assert result == folder / "LeetKit Manager.app"
+        assert (folder / "LeetKit Manager.app" / "Contents" / "Info.plist").is_file()
+
+    def test_follows_the_recorded_folder(self, tmp_path):
+        """바탕화면이 아닌 곳에 만든 사람도 고쳐져야 한다 — 그래서 위치를 적어둔다."""
+        folder, fake_exe = self._legacy_symlink(tmp_path, folder_name="내 앱")
+        marker = tmp_path / "shortcut_created"
+        marker.write_text(str(folder), encoding="utf-8")
+        with patch.object(shortcut.sys, "platform", "darwin"), \
+             patch.object(shortcut, "_MARKER", marker), \
+             patch.object(shortcut.Path, "home", return_value=tmp_path / "no-desktop-here"), \
+             patch.object(shortcut, "_resolved_exe_path", return_value=str(fake_exe)):
+            result = shortcut.migrate_macos_shortcut()
+        assert result == folder / "LeetKit Manager.app"
+
+    def test_leaves_things_alone_when_there_is_no_legacy_link(self, tmp_path):
+        """이미 번들이거나 애초에 안 만든 사람의 바탕화면을 건드리면 안 된다."""
+        marker = tmp_path / "shortcut_created"
+        marker.write_text("1", encoding="utf-8")
+        (tmp_path / "Desktop").mkdir()
+        with patch.object(shortcut.sys, "platform", "darwin"), \
+             patch.object(shortcut, "_MARKER", marker), \
+             patch.object(shortcut.Path, "home", return_value=tmp_path), \
+             patch.object(shortcut, "create_shortcut_at") as mock_create:
+            assert shortcut.migrate_macos_shortcut() is None
+        mock_create.assert_not_called()
+
+    def test_survives_a_missing_marker(self, tmp_path):
+        with patch.object(shortcut.sys, "platform", "darwin"), \
+             patch.object(shortcut, "_MARKER", tmp_path / "nope"), \
+             patch.object(shortcut.Path, "home", return_value=tmp_path):
+            assert shortcut.migrate_macos_shortcut() is None
+
+
+def test_mark_shortcut_offered_records_the_folder(tmp_path):
+    marker = tmp_path / "shortcut_created"
+    with patch.object(shortcut, "_MARKER", marker):
+        shortcut.mark_shortcut_offered(tmp_path / "내 앱")
+        assert shortcut._recorded_shortcut_dir() == tmp_path / "내 앱"
+
+
+def test_old_marker_without_a_folder_is_tolerated(tmp_path):
+    """이미 깔린 사람들의 표시는 "1"뿐이다 — 그걸 폴더 이름으로 읽으면 안 된다."""
+    marker = tmp_path / "shortcut_created"
+    marker.write_text("1", encoding="utf-8")
+    with patch.object(shortcut, "_MARKER", marker):
+        assert shortcut._recorded_shortcut_dir() is None

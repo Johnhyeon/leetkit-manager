@@ -476,7 +476,9 @@ class Api:
         # 문제가 있었다. 성공했을 때만 다시 안 물어보게 하고, 실패하면 다음 실행에서
         # 다시 시도할 수 있게 둔다.
         if link_path is not None:
-            shortcut.mark_shortcut_offered()
+            # 고른 폴더까지 적어둔다 — 나중에 바로가기를 고쳐야 할 때(맥의 .app 전환
+            # 같은) 바탕화면이 아닌 곳에 만든 사람도 찾아갈 수 있게.
+            shortcut.mark_shortcut_offered(target_dir)
         return {"ok": link_path is not None, "path": str(link_path) if link_path else None}
 
     def open_patch_notes(self) -> None:
