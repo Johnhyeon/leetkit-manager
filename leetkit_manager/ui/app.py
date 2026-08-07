@@ -13,6 +13,46 @@ from leetkit_manager.ui.api import Api
 _UI_DIR = Path(__file__).parent
 
 
+def _apply_macos_app_identity() -> None:
+    """macOS 도크·메뉴막대에 뜨는 이름과 아이콘을 잡아준다. 다른 OS에선 아무것도 안 한다.
+
+    .app 번들을 만들어줘도 이것만으로는 부족할 수 있다 — macOS는 "지금 실행 중인
+    바이너리가 어느 번들에 들어 있나"로 앱 정체를 판별하는데, 번들 안의 실행 스크립트가
+    번들 **밖**의 파이썬을 exec하면 그 파이썬 위치를 기준으로 판별해버린다. 그러면
+    번들을 잘 만들어놨어도 도크에는 다시 "Python"이 뜬다(실제로 겪은 증상).
+
+    그래서 번들에 기대지 않고 프로세스 안에서 직접 이름을 박는다. 터미널에서
+    `leetkit-manager gui`로 띄운 경우에도 같이 고쳐지는 게 덤이다.
+
+    PyObjC는 macOS의 pywebview가 이미 의존하는 패키지라 별도 설치가 필요 없다.
+    실패해도 창은 정상적으로 떠야 하므로 어떤 예외도 삼킨다(이름이 좀 이상한 것보다
+    앱이 안 뜨는 게 훨씬 나쁘다)."""
+    if sys.platform != "darwin":
+        return
+    try:
+        from Foundation import NSBundle  # type: ignore[import-not-found]
+
+        bundle = NSBundle.mainBundle()
+        # localizedInfoDictionary가 있으면 그쪽이 우선 적용된다 — 둘 다 고쳐야 확실하다.
+        for info in (bundle.localizedInfoDictionary(), bundle.infoDictionary()):
+            if info is not None:
+                info["CFBundleName"] = "LeetKit Manager"
+                info["CFBundleDisplayName"] = "LeetKit Manager"
+    except Exception:
+        pass
+
+    try:
+        from AppKit import NSApplication, NSImage  # type: ignore[import-not-found]
+
+        icns = _UI_DIR / "icon.icns"
+        if icns.exists():
+            image = NSImage.alloc().initWithContentsOfFile_(str(icns))
+            if image is not None:
+                NSApplication.sharedApplication().setApplicationIconImage_(image)
+    except Exception:
+        pass
+
+
 def run() -> None:
     if single_instance.is_already_running():
         # 창 없는 exe에선 stderr가 없어 print가 사라진다 — 기존 창을 앞으로 가져오거나
@@ -59,6 +99,7 @@ def run() -> None:
         # 프로필을 남겨(private_mode=False) 재실행해도 이어지게 한다.
         storage_path = str(Path.home() / ".leetkit-manager" / "webview")
         icon_path = _UI_DIR / "icon.ico"
+        _apply_macos_app_identity()
         webview.start(
             private_mode=False,
             storage_path=storage_path,

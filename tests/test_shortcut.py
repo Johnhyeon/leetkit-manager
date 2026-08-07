@@ -178,3 +178,34 @@ class TestMacosAppBundle:
         assert again == app
         plist = (app / "Contents" / "Info.plist").read_text(encoding="utf-8")
         assert "CFBundleName" in plist
+
+
+class TestMacosAppIdentity:
+    """도크·메뉴막대 이름 — .app 번들만으로는 부족할 수 있다. 번들 안의 스크립트가
+    번들 밖 파이썬을 exec하면 macOS가 그 파이썬 위치로 앱을 판별해 다시 "Python"이
+    뜬다. 프로세스 안에서 직접 박아 그 경우까지 막는다."""
+
+    def test_does_nothing_off_darwin(self):
+        """윈도우에서 이 코드가 돌면 안 된다(PyObjC가 없다)."""
+        from leetkit_manager.ui import app
+
+        with patch.object(app.sys, "platform", "win32"):
+            app._apply_macos_app_identity()  # 예외가 나면 실패
+
+    def test_survives_missing_pyobjc(self):
+        """PyObjC가 없거나 API가 바뀌어도 창은 떠야 한다 — 이름이 좀 이상한 것보다
+        앱이 안 뜨는 게 훨씬 나쁘다."""
+        from leetkit_manager.ui import app
+
+        with patch.object(app.sys, "platform", "darwin"):
+            app._apply_macos_app_identity()  # import 실패를 삼키는지
+
+    def test_is_called_before_the_window_starts(self):
+        """webview.start() 뒤에 부르면 이미 NSApplication이 이름을 읽은 뒤다."""
+        import inspect
+
+        from leetkit_manager.ui import app
+
+        source = inspect.getsource(app.run)
+        # rindex: 주석에도 "webview.start()"가 나온다 — 실제 호출은 맨 뒤 것이다.
+        assert source.index("_apply_macos_app_identity()") < source.rindex("webview.start(")
