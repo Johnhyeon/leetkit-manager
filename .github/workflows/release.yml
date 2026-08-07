@@ -102,8 +102,10 @@ jobs:
       - name: Install build dependencies
         shell: pwsh
         run: |
-          python -m venv .venv-build
-          .\.venv-build\Scripts\python -m pip install --upgrade pip
+          # --upgrade-deps: venv를 만들면서 pip를 최신으로 맞춘다. 만든 뒤에 pip로
+          # pip를 올리면 Windows에서 자기 파일을 교체하다 반쯤 깨진다(실제로 그렇게
+          # 실패했다 — ModuleNotFoundError: pip._internal.operations.build).
+          python -m venv --upgrade-deps .venv-build
           .\.venv-build\Scripts\python -m pip install -e ".[build]"
 
       # 구매자에게 "exe 하나만 받으면 끝"을 실제로 제공하는 핵심 산출물 — 지금까지는
