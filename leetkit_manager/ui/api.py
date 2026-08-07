@@ -459,8 +459,18 @@ class Api:
 
         from leetkit_manager import shortcut
 
+        # "물어본 적 있다"는 표시만 보고 건너뛰면, 바로가기가 실제로는 없는데도 아무것도
+        # 안 하고 성공이라고 답한다 — 사용자가 지웠거나 옛 바로가기를 정리한 경우가 그렇고,
+        # 마법사 말고는 만들 진입점이 없어서 영영 다시 못 만든다(실제로 맥에서 겪었다).
+        # 표시가 있어도 파일이 없으면 다시 만든다. 다만 위치는 이미 답한 질문이므로
+        # 다이얼로그로 또 묻지 않고 그때 고른 폴더(없으면 바탕화면)에 그대로 만든다.
         if shortcut.has_shortcut_been_offered():
-            return {"ok": True, "path": None}
+            existing = shortcut.existing_shortcut()
+            if existing is not None:
+                return {"ok": True, "path": str(existing)}
+            target_dir = shortcut.recorded_shortcut_dir() or (Path.home() / "Desktop")
+            link_path = shortcut.create_shortcut_at(target_dir)
+            return {"ok": link_path is not None, "path": str(link_path) if link_path else None}
 
         default_dir = str(Path.home() / "Desktop")
         chosen = None

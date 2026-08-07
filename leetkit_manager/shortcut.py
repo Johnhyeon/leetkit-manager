@@ -159,7 +159,7 @@ def mark_shortcut_offered(target_dir: Path | None = None) -> None:
     _MARKER.write_text(str(target_dir) if target_dir else "1", encoding="utf-8")
 
 
-def _recorded_shortcut_dir() -> Path | None:
+def recorded_shortcut_dir() -> Path | None:
     try:
         recorded = _MARKER.read_text(encoding="utf-8").strip()
     except OSError:
@@ -167,6 +167,31 @@ def _recorded_shortcut_dir() -> Path | None:
     if not recorded or recorded == "1":  # 위치를 안 적던 시절의 표시
         return None
     return Path(recorded)
+
+
+def _shortcut_names() -> tuple[str, ...]:
+    if sys.platform == "win32":
+        return ("LeetKit Manager.lnk",)
+    if sys.platform == "darwin":
+        return ("LeetKit Manager.app", "LeetKit Manager")  # 두 번째는 옛 심볼릭 링크
+    return ("LeetKit Manager",)
+
+
+def existing_shortcut() -> Path | None:
+    """실제로 남아 있는 바로가기. 없으면 None.
+
+    "물어본 적 있다"는 표시만으로 건너뛰면, 사용자가 바로가기를 지웠거나 생성이 실제로는
+    실패한 경우에 다시 만들 방법이 사라진다 — 마법사는 표시를 보고 건너뛰고, 다른
+    진입점은 없다. 표시가 아니라 파일이 있는지로 판단할 수 있게 한다."""
+    for target_dir in [d for d in (recorded_shortcut_dir(), Path.home() / "Desktop") if d]:
+        for name in _shortcut_names():
+            try:
+                candidate = target_dir / name
+                if candidate.exists() or candidate.is_symlink():
+                    return candidate
+            except OSError:
+                continue
+    return None
 
 
 def migrate_macos_shortcut() -> Path | None:
@@ -180,7 +205,7 @@ def migrate_macos_shortcut() -> Path | None:
     번들이거나 애초에 안 만들었으면) 아무것도 안 한다."""
     if sys.platform != "darwin":
         return None
-    candidates = [d for d in (_recorded_shortcut_dir(), Path.home() / "Desktop") if d]
+    candidates = [d for d in (recorded_shortcut_dir(), Path.home() / "Desktop") if d]
     for target_dir in candidates:
         try:
             if (target_dir / "LeetKit Manager").is_symlink():

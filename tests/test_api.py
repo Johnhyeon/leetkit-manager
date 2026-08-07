@@ -106,9 +106,12 @@ class TestChooseShortcutLocation:
         assert result["ok"] is False
         assert offered is False
 
-    def test_already_offered_skips_dialog_entirely(self, tmp_path):
+    def test_already_offered_with_the_shortcut_still_there_does_nothing(self, tmp_path):
         marker = tmp_path / "shortcut_created"
-        with patch.object(shortcut, "_MARKER", marker):
+        existing = tmp_path / "LeetKit Manager.lnk"
+        with patch.object(shortcut, "_MARKER", marker), \
+             patch.object(shortcut, "existing_shortcut", return_value=existing), \
+             patch.object(shortcut, "create_shortcut_at") as mock_create:
             shortcut.mark_shortcut_offered()
 
             fake_window = MagicMock()
@@ -116,7 +119,31 @@ class TestChooseShortcutLocation:
                 result = Api().choose_shortcut_location()
 
         assert result["ok"] is True
+        assert result["path"] == str(existing)
         fake_window.create_file_dialog.assert_not_called()
+        mock_create.assert_not_called()
+
+    def test_already_offered_but_shortcut_gone_recreates_it(self, tmp_path):
+        """표시만 보고 건너뛰면 바로가기가 없는데도 성공이라고 답한다 — 사용자가 지웠거나
+        생성이 실패한 경우 다시 만들 방법이 사라진다(맥에서 실제로 겪었다). 위치는 이미
+        답한 질문이므로 다이얼로그로 또 묻지 않고 그때 고른 폴더에 다시 만든다."""
+        marker = tmp_path / "shortcut_created"
+        chosen = tmp_path / "내 앱"
+        chosen.mkdir()
+        made = chosen / "LeetKit Manager.lnk"
+        with patch.object(shortcut, "_MARKER", marker), \
+             patch.object(shortcut, "existing_shortcut", return_value=None), \
+             patch.object(shortcut, "create_shortcut_at", return_value=made) as mock_create:
+            shortcut.mark_shortcut_offered(chosen)
+
+            fake_window = MagicMock()
+            with patch("webview.windows", [fake_window]):
+                result = Api().choose_shortcut_location()
+
+        assert result["ok"] is True
+        assert result["path"] == str(made)
+        fake_window.create_file_dialog.assert_not_called()  # 위치는 다시 안 묻는다
+        mock_create.assert_called_once_with(chosen)
 
 
 class TestReviewPrompt:

@@ -993,6 +993,11 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     if (!onboardingActive && sessionTargets.length) {
       notes.push(`${sessionTargets.join(", ")}는 새로 시작하는 대화부터 반영됩니다.`);
     }
+    // 카드에서 직접 등록한 경우엔 마법사 완료 화면을 안 보므로 여기서 같이 알려준다 —
+    // 처음 도구를 쓸 때 뜨는 허용 창에서 겁먹고 멈추지 않게.
+    if (notes.length) {
+      notes.push("처음 도구를 쓸 때 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.");
+    }
 
     msgEl.textContent = notes.length ? `등록 완료 — ${notes.join(" ")}` : "등록 완료.";
     msgEl.className = "modal-msg ok";
@@ -1895,9 +1900,15 @@ async function finishOnboarding() {
     ? " Claude Desktop을 열면 텔레그램 채널 메시지 수집이 시작됩니다."
     : "";
 
+  // 처음 도구를 쓸 때 Claude가 "허용하시겠습니까?"를 묻는다. 미리 말해두지 않으면
+  // 설치가 잘못됐거나 위험한 걸 깐 줄 알고 거기서 멈춘다 — 한 번 허용하면 다시
+  // 안 묻는다는 것까지 같이 알려줘야 안심하고 누른다.
+  const permissionNote =
+    " 처음 도구를 쓸 때 Claude가 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.";
+
   if (claudeRunning) {
     onboardingSetBanner(
-      "설정이 끝났습니다! 마지막으로 Claude Desktop을 껐다 켜야 도구가 나타납니다." + telegramNote,
+      "설정이 끝났습니다! 마지막으로 Claude Desktop을 껐다 켜야 도구가 나타납니다." + telegramNote + permissionNote,
       `<button class="action-btn" id="onboarding-done-btn">나중에 직접 할게요</button>
        <button class="action-btn primary" id="onboarding-restart-claude-btn">지금 다시 시작</button>`
     );
@@ -1912,7 +1923,7 @@ async function finishOnboarding() {
   }
 
   onboardingSetBanner(
-    "모든 설정이 끝났습니다! Claude Desktop을 열어주세요." + telegramNote,
+    "모든 설정이 끝났습니다! Claude Desktop을 열어주세요." + telegramNote + permissionNote,
     `<button class="action-btn primary" id="onboarding-done-btn">알겠습니다</button>`
   );
   document.getElementById("onboarding-done-btn").addEventListener("click", () => {

@@ -279,7 +279,7 @@ def test_mark_shortcut_offered_records_the_folder(tmp_path):
     marker = tmp_path / "shortcut_created"
     with patch.object(shortcut, "_MARKER", marker):
         shortcut.mark_shortcut_offered(tmp_path / "내 앱")
-        assert shortcut._recorded_shortcut_dir() == tmp_path / "내 앱"
+        assert shortcut.recorded_shortcut_dir() == tmp_path / "내 앱"
 
 
 def test_old_marker_without_a_folder_is_tolerated(tmp_path):
@@ -287,4 +287,46 @@ def test_old_marker_without_a_folder_is_tolerated(tmp_path):
     marker = tmp_path / "shortcut_created"
     marker.write_text("1", encoding="utf-8")
     with patch.object(shortcut, "_MARKER", marker):
-        assert shortcut._recorded_shortcut_dir() is None
+        assert shortcut.recorded_shortcut_dir() is None
+
+
+class TestShortcutRecreation:
+    """표시만 보고 건너뛰면, 바로가기가 실제로 없는데도 아무것도 안 하고 성공이라고
+    답한다 — 사용자가 지웠거나 생성이 실패한 경우 다시 만들 방법이 사라진다
+    (마법사 말고는 진입점이 없다). 실제로 맥에서 "바로가기가 생성이 안 됨"으로 겪었다."""
+
+    def test_reports_an_existing_shortcut(self, tmp_path):
+        marker = tmp_path / "shortcut_created"
+        desktop = tmp_path / "Desktop"
+        desktop.mkdir()
+        name = "LeetKit Manager.lnk" if sys.platform == "win32" else "LeetKit Manager.app"
+        (desktop / name).mkdir() if name.endswith(".app") else (desktop / name).write_text("x")
+        marker.write_text(str(desktop), encoding="utf-8")
+        with patch.object(shortcut, "_MARKER", marker):
+            assert shortcut.existing_shortcut() == desktop / name
+
+    def test_reports_none_when_the_shortcut_was_deleted(self, tmp_path):
+        marker = tmp_path / "shortcut_created"
+        desktop = tmp_path / "Desktop"
+        desktop.mkdir()
+        marker.write_text(str(desktop), encoding="utf-8")
+        with patch.object(shortcut, "_MARKER", marker), \
+             patch.object(shortcut.Path, "home", return_value=tmp_path / "elsewhere"):
+            assert shortcut.existing_shortcut() is None
+
+    def test_falls_back_to_the_desktop_for_old_markers(self, tmp_path):
+        """위치를 안 적던 시절 표시("1")를 쓰는 사람도 찾아져야 한다."""
+        marker = tmp_path / "shortcut_created"
+        marker.write_text("1", encoding="utf-8")
+        desktop = tmp_path / "Desktop"
+        desktop.mkdir()
+        name = "LeetKit Manager.lnk" if sys.platform == "win32" else "LeetKit Manager.app"
+        (desktop / name).mkdir() if name.endswith(".app") else (desktop / name).write_text("x")
+        with patch.object(shortcut, "_MARKER", marker), \
+             patch.object(shortcut.Path, "home", return_value=tmp_path):
+            assert shortcut.existing_shortcut() == desktop / name
+
+    def test_survives_a_missing_marker(self, tmp_path):
+        with patch.object(shortcut, "_MARKER", tmp_path / "nope"), \
+             patch.object(shortcut.Path, "home", return_value=tmp_path):
+            assert shortcut.existing_shortcut() is None
