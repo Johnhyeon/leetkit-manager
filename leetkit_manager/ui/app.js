@@ -1834,14 +1834,20 @@ async function finishOnboarding() {
 
 /* ---------- 후기 요청 ---------- */
 
-// 후기를 물어봐도 되는 상태인지. "정상인 Lens가 하나라도 있다"는 곧 설치를 끝내고
-// 실제로 쓰고 있다는 뜻이다. 아직 아무것도 못 깐 사람이나 문제를 고치는 중인 사람에게
-// 후기를 달라고 하면 역효과다.
+// 후기를 물어봐도 되는 상태인지. "라이선스가 활성인 Lens가 하나라도 있고, 그게
+// 정상"이라는 건 곧 사서 설치까지 끝내고 실제로 쓰고 있다는 뜻이다. 아직 아무것도
+// 못 깐 사람이나 문제를 고치는 중인 사람에게 후기를 달라고 하면 역효과고, 리틀리
+// 후기란은 애초에 구매자에게만 열린다.
+//
+// Python 쪽도 라이선스 파일이 있는지 따로 확인한다(review_prompt.license_activated_at) —
+// 그쪽은 "언제 샀나"를 알아내는 게 주목적이고, 여기서는 "지금 제대로 쓰고 있나"를 본다.
 function reviewPromptReady() {
   const lenses = Object.values(lensDataCache);
   if (!lenses.length) return false;
   if (lenses.some(lensHasActionableProblem)) return false;
-  return lenses.some((l) => l.overall === "ok" && !l.incompatible);
+  return lenses.some(
+    (l) => l.overall === "ok" && !l.incompatible && l.license_status === "active"
+  );
 }
 
 function closeReviewModal() {

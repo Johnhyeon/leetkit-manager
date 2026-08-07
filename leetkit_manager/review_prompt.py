@@ -19,10 +19,19 @@ false거나, URL이 비어 있으면 조용히 아무것도 안 한다. 후기 �
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
 import httpx
+
+# 각 Lens가 라이선스 키를 저장하는 곳(각 licensing.py의 _home + "license.key").
+# 환경변수 우회까지 그대로 따라간다 — 안 그러면 옮겨 쓴 사람을 미구매자로 본다.
+_LICENSE_FILES = (
+    ("STOCKLENS_HOME", ".stocklens"),
+    ("DARTLENS_HOME", ".dartlens"),
+    ("TELEGRAMLENS_HOME", ".telegramlens"),
+)
 
 # 이 리포의 파일을 그대로 읽는다 — 새 인프라 없이 GitHub만으로 끝난다(자동 업데이트도
 # 이미 GitHub를 본다). main에 커밋하는 순간 반영되므로 릴리스가 필요 없다.
@@ -101,6 +110,33 @@ def record_launch() -> None:
     _save_state(state)
 
 
+def license_activated_at() -> float | None:
+    """라이선스를 활성화한 시각(가장 이른 것). 활성화한 적이 없으면 None.
+
+    후기 요청의 기준 시각이자 "구매자인가" 판정을 겸한다. 라이선스 파일이 하나도
+    없으면 산 적이 없는 사람이므로, 후기를 물어볼 대상이 아니다.
+
+    **왜 첫 실행 시각이 아니라 이걸 쓰나.** Manager는 Lens보다 늦게 나왔다. 두 달 전에
+    산 사람이 오늘 Manager를 처음 켜면 첫 실행 시각은 오늘이고, 그걸 기준으로 세면
+    이미 닫힌 후기 창을 "30일 남았다"고 알려주게 된다. 활성화 시각은 구매 직후라
+    실제 구매일에 훨씬 가깝고, 덕분에 기간이 지난 사람에게는 아예 안 묻게 된다.
+
+    한계: 다른 PC에 새로 깔거나 키를 다시 넣으면 시각이 갱신돼 최근 구매자처럼 보인다.
+    그때는 기간이 지났는데도 한 번 물어볼 수 있는데, 화면에 "구매 후 약 30일"이라는
+    실제 규칙을 같이 적어두므로 본인이 판단할 수 있다.
+    """
+    times = []
+    for env_var, folder in _LICENSE_FILES:
+        base = os.environ.get(env_var)
+        path = (Path(base) if base else Path.home() / folder) / "license.key"
+        try:
+            if path.is_file():
+                times.append(path.stat().st_mtime)
+        except OSError:
+            continue  # 권한 문제 등 — 못 읽으면 없는 셈 친다
+    return min(times) if times else None
+
+
 def fetch_config() -> dict:
     """원격 설정을 읽어 기본값 위에 덮어쓴다. 실패하면 기본값(=안 띄움)."""
     config = dict(_DEFAULTS)
@@ -156,18 +192,23 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
     if int(state.get("launches", 0)) < _int(config, "min_launches"):
         return None
 
+    # 라이선스를 활성화한 적이 없으면 산 적이 없는 사람이다 — 후기를 물어볼 대상이
+    # 아니고, 애초에 리틀리 후기란은 구매자에게만 열린다.
+    activated_at = license_activated_at()
+    if activated_at is None:
+        return None
+
     now = time.time() if now is None else now
-    first = state.get("first_launch_at")
-    if not isinstance(first, (int, float)) or now - first < _int(config, "min_days") * _DAY:
+    if now - activated_at < _int(config, "min_days") * _DAY:
         return None
 
     # 후기 기간이 끝났으면 묻지 않는다. 리틀리 후기란은 파일 받는 기간이 만료되면
     # 같이 사라져서, 지난 뒤의 요청은 누를 데 없는 안내가 된다.
     #
-    # 구매 시각을 알 방법이 없어 첫 실행 시각을 대신 쓴다 — 보통 사서 바로 설치하므로
-    # 며칠 안쪽으로 붙지만, 늦게 설치한 사람은 실제 기한이 이미 줄어든 상태다.
-    # 그래서 마감선을 한 달이 아니라 그보다 짧게 잡아 여유를 둔다.
-    if now - first > _int(config, "deadline_days") * _DAY:
+    # 활성화 시각은 구매 직후라 구매일에 가깝지만 같지는 않다(메일을 며칠 뒤에 열어
+    # 활성화하는 사람이 있다). 그만큼 실제 기한은 이미 줄어든 상태이므로, 마감선을
+    # 한 달이 아니라 그보다 짧게 잡아 여유를 둔다.
+    if now - activated_at > _int(config, "deadline_days") * _DAY:
         return None
 
     last_ask = state.get("last_ask_at")
@@ -179,30 +220,29 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
         "body": str(config.get("body") or _DEFAULTS["body"]),
         "cta": str(config.get("cta") or _DEFAULTS["cta"]),
         "url": _usable_url(config),
-        "deadline_note": _deadline_note(config, first=first, now=now),
+        "deadline_note": _deadline_note(config, activated_at=activated_at, now=now),
     }
 
 
-def _deadline_note(config: dict, *, first: float, now: float) -> str:
+def _deadline_note(config: dict, *, activated_at: float, now: float) -> str:
     """"앞으로 며칠 남았다"는 안내 문구. 안 보여줄 상황이면 빈 문자열.
 
-    실제 규칙(구매 후 약 한 달)과 우리가 센 기준(설치일)을 **둘 다** 밝힌다. 앱은
-    구매 시각을 알 수 없어 첫 실행 시각으로 대신 세는데, 사서 며칠 뒤에 설치한
-    사람에게 그냥 "N일 남음"이라고 하면 실제보다 넉넉하게 말하는 게 된다 — 그 사람은
-    믿고 미루다 기간을 놓친다. 기준을 같이 적어두면 늦게 설치한 사람이 스스로 보정할
-    수 있다.
+    실제 규칙(구매 후 약 한 달)과 우리가 센 기준(라이선스를 넣은 날)을 **둘 다**
+    밝힌다. 앱은 구매 시각을 알 수 없어 활성화 시각으로 대신 세는데, 사서 며칠 뒤에
+    활성화한 사람에게 그냥 "N일 남음"이라고 하면 실제보다 넉넉하게 말하는 게 된다 —
+    그 사람은 믿고 미루다 기간을 놓친다. 기준을 같이 적어두면 스스로 보정할 수 있다.
     """
     window = _int(config, "review_window_days")
     if window <= 0:
         return ""
-    left = int((first + window * _DAY - now) // _DAY)
+    left = int((activated_at + window * _DAY - now) // _DAY)
     if left <= 0:
         return ""
     # **…**로 감싼 부분은 화면에서 굵게 나온다(app.js의 renderEmphasis). 여기서 눈에
     # 걸려야 하는 건 숫자 두 개다 — 나머지 문장은 읽어도 되고 넘겨도 되는 설명이다.
     return (
         f"후기는 구매 후 약 **{window}일**까지만 남길 수 있습니다.\n"
-        f"설치하신 날부터 세면 앞으로 **{left}일** 남았습니다."
+        f"라이선스를 넣으신 날부터 세면 앞으로 **{left}일** 남았습니다."
     )
 
 

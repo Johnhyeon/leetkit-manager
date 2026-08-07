@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -17,6 +19,21 @@ def _isolated_state(tmp_path):
         yield path
 
 
+def _activated_days_ago(days: float):
+    return patch.object(
+        review_prompt, "license_activated_at", side_effect=lambda: time.time() - days * 86400
+    )
+
+
+@pytest.fixture
+def _activated_10_days_ago():
+    """대부분의 테스트는 "언제 샀나"가 아니라 다른 조건을 검사한다 — 활성화 시각을
+    후기 기간 안쪽으로 고정해두고, 그 시각 자체를 보는 테스트만 덮어쓴다.
+    실제 파일에서 시각을 읽는 경로는 TestLicenseActivatedAt이 따로 검증한다."""
+    with _activated_days_ago(10):
+        yield
+
+
 def _config(**overrides) -> dict:
     config = dict(review_prompt._DEFAULTS)
     config.update({"enabled": True, "url": "https://forms.example/review"})
@@ -29,11 +46,17 @@ def _state(path, **fields) -> None:
 
 
 def _eligible_state(path, now: float) -> None:
-    """조건을 전부 만족하는 상태 — 각 테스트는 여기서 하나씩만 무너뜨린다.
-    후기 기간(deadline_days) 안쪽이어야 한다 — 밖이면 다른 조건과 무관하게 안 뜬다."""
+    """조건을 전부 만족하는 상태 — 각 테스트는 여기서 하나씩만 무너뜨린다."""
     _state(path, first_launch_at=now - 10 * 86400, launches=10)
 
 
+def _shipped_config() -> dict:
+    return json.loads(
+        (Path(__file__).parent.parent / "review_prompt.json").read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.usefixtures("_activated_10_days_ago")
 class TestGate:
     def test_shows_when_all_conditions_met(self, _isolated_state):
         now = time.time()
@@ -72,24 +95,13 @@ class TestGate:
         _eligible_state(_isolated_state, now)
         assert review_prompt.pending_prompt(_config(), ready=False, now=now) is None
 
-    def test_first_launch_never_shows(self, _isolated_state):
-        """써보지도 않은 사람에게 후기를 묻지 않는다 — 이 기능의 핵심 제약."""
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now, launches=1)
-        assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
-
     def test_too_few_launches_never_shows(self, _isolated_state):
         now = time.time()
         _state(_isolated_state, first_launch_at=now - 10 * 86400, launches=2)
         assert review_prompt.pending_prompt(_config(min_launches=3), ready=True, now=now) is None
 
-    def test_too_soon_after_install_never_shows(self, _isolated_state):
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 2 * 86400, launches=10)
-        assert review_prompt.pending_prompt(_config(min_days=7), ready=True, now=now) is None
-
     def test_missing_state_file_never_shows(self, _isolated_state):
-        """상태 파일이 없으면 first_launch_at도 없다 = 지금이 첫 실행."""
+        """상태 파일이 없으면 실행 횟수가 0이다 = 지금이 첫 실행."""
         assert review_prompt.pending_prompt(_config(), ready=True) is None
 
     def test_corrupt_state_file_never_shows(self, _isolated_state):
@@ -97,6 +109,24 @@ class TestGate:
         assert review_prompt.pending_prompt(_config(), ready=True) is None
 
 
+class TestBuyerOnly:
+    """리틀리 후기란은 구매자에게만 열린다 — 라이선스를 넣은 적이 있는지로 가른다."""
+
+    def test_never_asks_someone_who_has_not_bought(self, _isolated_state):
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        with patch.object(review_prompt, "license_activated_at", return_value=None):
+            assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
+
+    def test_too_soon_after_purchase_never_shows(self, _isolated_state):
+        """산 지 얼마 안 된 사람은 아직 할 말이 없다."""
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        with _activated_days_ago(2):
+            assert review_prompt.pending_prompt(_config(min_days=7), ready=True, now=now) is None
+
+
+@pytest.mark.usefixtures("_activated_10_days_ago")
 class TestSnoozeAndStop:
     def test_recent_ask_is_snoozed(self, _isolated_state):
         now = time.time()
@@ -109,26 +139,15 @@ class TestSnoozeAndStop:
         )
         assert review_prompt.pending_prompt(_config(snooze_days=7), ready=True, now=now) is None
 
-    def test_asks_again_after_snooze_period(self, _isolated_state):
-        now = time.time()
-        _state(
-            _isolated_state,
-            first_launch_at=now - 18 * 86400,
-            launches=10,
-            asks=1,
-            last_ask_at=now - 10 * 86400,
-        )
-        assert review_prompt.pending_prompt(_config(snooze_days=7), ready=True, now=now) is not None
-
     def test_stops_after_max_asks(self, _isolated_state):
         """몇 번 물어봤는데 안 남겼으면 그 사람은 안 남기는 거다 — 계속 묻지 않는다."""
         now = time.time()
         _state(
             _isolated_state,
-            first_launch_at=now - 18 * 86400,
+            first_launch_at=now - 10 * 86400,
             launches=50,
             asks=3,
-            last_ask_at=now - 10 * 86400,
+            last_ask_at=now - 8 * 86400,
         )
         assert review_prompt.pending_prompt(_config(max_asks=3), ready=True, now=now) is None
 
@@ -155,6 +174,171 @@ class TestSnoozeAndStop:
         assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
 
 
+class TestSnoozeExpiry:
+    def test_asks_again_after_snooze_period(self, _isolated_state):
+        now = time.time()
+        _state(
+            _isolated_state,
+            first_launch_at=now - 18 * 86400,
+            launches=10,
+            asks=1,
+            last_ask_at=now - 10 * 86400,
+        )
+        with _activated_days_ago(18):
+            assert (
+                review_prompt.pending_prompt(_config(snooze_days=7), ready=True, now=now)
+                is not None
+            )
+
+
+class TestReviewWindowDeadline:
+    """리틀리 후기는 파일 받는 기간(구매 후 약 한 달)이 만료되면 후기란까지 사라진다 —
+    지난 뒤의 요청은 누를 데 없는 안내가 되므로 아예 묻지 않아야 한다."""
+
+    def test_stops_asking_after_the_deadline(self, _isolated_state):
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        with _activated_days_ago(25):
+            assert (
+                review_prompt.pending_prompt(_config(deadline_days=21), ready=True, now=now) is None
+            )
+
+    def test_still_asks_just_inside_the_deadline(self, _isolated_state):
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        with _activated_days_ago(20):
+            assert (
+                review_prompt.pending_prompt(_config(deadline_days=21), ready=True, now=now)
+                is not None
+            )
+
+    def test_long_time_buyer_installing_the_manager_today_is_never_asked(self, _isolated_state):
+        """Manager는 Lens보다 늦게 나왔다 — 두 달 전에 산 사람이 오늘 처음 켜는 일이
+        실제로 생긴다. 첫 실행 시각을 기준으로 세면 이미 닫힌 창을 열려 있다고
+        알려주게 되므로, 라이선스 활성화 시각으로 센다."""
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now, launches=10)
+        with _activated_days_ago(60):
+            assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
+
+    def test_shipped_schedule_fits_entirely_inside_the_window(self):
+        """배포되는 값이 기한을 넘기면 마지막 요청이 통째로 헛돈다 — 예전 값
+        (7일 시작·14일 간격·3회)은 3번째가 35일째라 실제로 그랬다."""
+        config = _shipped_config()
+        last_ask_day = config["min_days"] + config["snooze_days"] * (config["max_asks"] - 1)
+        assert last_ask_day <= config["deadline_days"], (
+            f"마지막 요청이 {last_ask_day}일째라 마감선({config['deadline_days']}일)을 넘는다"
+        )
+
+    def test_defaults_also_fit_inside_the_window(self):
+        """원격 설정을 못 받았을 때 쓰이는 코드 기본값도 같은 조건을 지켜야 한다."""
+        d = review_prompt._DEFAULTS
+        last_ask_day = d["min_days"] + d["snooze_days"] * (d["max_asks"] - 1)
+        assert last_ask_day <= d["deadline_days"]
+
+
+class TestLicenseActivatedAt:
+    """라이선스 파일의 수정 시각을 구매 시점 대용으로 쓴다 — 구매자 판별과
+    "언제 샀나"를 한 번에 해결한다. 여기서는 실제 파일을 놓고 검사한다."""
+
+    @pytest.fixture(autouse=True)
+    def _blank_homes(self, tmp_path, monkeypatch):
+        """세 Lens 홈을 전부 빈 임시 경로로 돌린다 — 이 PC에 실제로 깔린 라이선스가
+        결과를 바꾸면 안 된다."""
+        for env_var, _ in review_prompt._LICENSE_FILES:
+            monkeypatch.setenv(env_var, str(tmp_path / f"empty-{env_var}"))
+
+    def _put_license(self, tmp_path, monkeypatch, env_var: str, mtime: float):
+        home = tmp_path / env_var
+        home.mkdir(exist_ok=True)
+        key = home / "license.key"
+        key.write_text("KEY", encoding="utf-8")
+        os.utime(key, (mtime, mtime))
+        monkeypatch.setenv(env_var, str(home))
+
+    def test_returns_none_when_no_license_anywhere(self):
+        assert review_prompt.license_activated_at() is None
+
+    def test_reads_the_file_modification_time(self, tmp_path, monkeypatch):
+        self._put_license(tmp_path, monkeypatch, "STOCKLENS_HOME", 1_700_000_000)
+        assert review_prompt.license_activated_at() == 1_700_000_000
+
+    def test_uses_the_earliest_of_several_licenses(self, tmp_path, monkeypatch):
+        """BASIC을 샀다가 나중에 하나 더 넣은 경우 — 먼저 산 쪽의 후기 창이 먼저
+        닫히므로 이른 시각을 쓰는 게 안전하다."""
+        self._put_license(tmp_path, monkeypatch, "STOCKLENS_HOME", 1_700_000_000)
+        self._put_license(tmp_path, monkeypatch, "DARTLENS_HOME", 1_700_900_000)
+        assert review_prompt.license_activated_at() == 1_700_000_000
+
+    def test_honours_the_home_override_env_vars(self, tmp_path, monkeypatch):
+        """홈을 옮겨 쓰는 사람을 미구매자로 보면 안 된다."""
+        self._put_license(tmp_path, monkeypatch, "TELEGRAMLENS_HOME", 1_700_000_000)
+        assert review_prompt.license_activated_at() == 1_700_000_000
+
+
+@pytest.mark.usefixtures("_activated_10_days_ago")
+class TestDeadlineNote:
+    """"앞으로 며칠 남았다" 안내 — 실제 규칙(구매 후 약 한 달)과 우리가 센 기준
+    (라이선스를 넣은 날)을 둘 다 밝혀야 한다. 앱은 구매 시각을 알 수 없어 활성화
+    시각으로 대신 세는데, 기준을 안 밝히면 늦게 활성화한 사람에게 없는 기간을
+    있다고 말하게 된다."""
+
+    def test_counts_down_from_license_activation(self, _isolated_state):
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        note = review_prompt.pending_prompt(_config(review_window_days=30), ready=True, now=now)[
+            "deadline_note"
+        ]
+        assert "**20일** 남았습니다" in note, "숫자는 굵게 — 눈에 걸려야 하는 건 이것뿐이다"
+
+    def test_states_both_the_rule_and_the_basis(self, _isolated_state):
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        note = review_prompt.pending_prompt(_config(review_window_days=30), ready=True, now=now)[
+            "deadline_note"
+        ]
+        assert "구매 후 약 **30일**" in note, "실제 규칙을 밝혀야 늦게 활성화한 사람이 보정할 수 있다"
+        assert "라이선스를 넣으신 날부터" in note, "우리가 센 기준을 밝혀야 한다"
+
+    def test_can_be_turned_off(self, _isolated_state):
+        """기간 정책이 바뀌면 숫자를 고치는 대신 안내 자체를 끌 수 있어야 한다."""
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        prompt = review_prompt.pending_prompt(_config(review_window_days=0), ready=True, now=now)
+        assert prompt["deadline_note"] == ""
+
+    def test_deadline_note_marks_only_the_numbers(self, _isolated_state):
+        """**…**는 app.js의 renderEmphasis가 <strong>으로 바꾼다. 짝이 안 맞으면
+        별표가 화면에 그대로 보인다."""
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        note = review_prompt.pending_prompt(_config(), ready=True, now=now)["deadline_note"]
+        assert note.count("**") == 4, "여는/닫는 표시가 짝이 맞아야 한다(숫자 두 곳)"
+
+
+class TestDeadlineNoteEdges:
+    def test_no_note_once_the_window_has_passed(self, _isolated_state):
+        """창이 닫혔는데 "0일 남았습니다"를 띄우면 안내가 아니라 조롱이 된다.
+        (물어보는 것 자체도 deadline_days에서 이미 막히지만, 창을 짧게 설정해
+        두 값이 엇갈려도 여기서 한 번 더 막힌다.)"""
+        now = time.time()
+        _eligible_state(_isolated_state, now)
+        with _activated_days_ago(15):
+            prompt = review_prompt.pending_prompt(
+                _config(review_window_days=10, deadline_days=21), ready=True, now=now
+            )
+        assert prompt["deadline_note"] == ""
+
+    def test_shipped_window_is_longer_than_the_ask_deadline(self):
+        """물어보기를 멈추는 시점(deadline_days)이 알려주는 기한(review_window_days)보다
+        길면, 마지막 요청에서 "0일 남았습니다"가 나온다."""
+        config = _shipped_config()
+        assert config["deadline_days"] < config["review_window_days"]
+
+    def test_shipped_body_has_balanced_markers(self):
+        assert _shipped_config()["body"].count("**") % 2 == 0
+
+
 class TestRecordLaunch:
     def test_first_call_sets_baseline(self, _isolated_state):
         review_prompt.record_launch()
@@ -163,7 +347,6 @@ class TestRecordLaunch:
         assert state["first_launch_at"] > 0
 
     def test_repeated_calls_keep_original_first_launch(self, _isolated_state):
-        """first_launch_at이 매번 갱신되면 "설치 후 N일" 조건이 영영 성립하지 않는다."""
         review_prompt.record_launch()
         first = json.loads(_isolated_state.read_text(encoding="utf-8"))["first_launch_at"]
         review_prompt.record_launch()
@@ -211,123 +394,18 @@ class TestFetchConfig:
 
     def test_shipped_config_file_is_valid_and_off_by_default(self):
         """리포에 커밋된 파일이 곧 배포되는 설정이다 — 깨져 있으면 전부 무력화된다."""
-        from pathlib import Path
-
-        path = Path(__file__).parent.parent / "review_prompt.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = _shipped_config()
         assert data["enabled"] is False, "문구를 확정하기 전에는 꺼진 채로 나가야 한다"
-        for key in ("url", "title", "body", "cta", "min_days", "min_launches", "snooze_days", "max_asks"):
+        for key in (
+            "url",
+            "title",
+            "body",
+            "cta",
+            "min_days",
+            "min_launches",
+            "snooze_days",
+            "max_asks",
+            "deadline_days",
+            "review_window_days",
+        ):
             assert key in data
-
-
-class TestReviewWindowDeadline:
-    """리틀리 후기는 파일 받는 기간(구매 후 약 한 달)이 만료되면 후기란까지 사라진다 —
-    지난 뒤의 요청은 누를 데 없는 안내가 되므로 아예 묻지 않아야 한다."""
-
-    def test_stops_asking_after_the_deadline(self, _isolated_state):
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 25 * 86400, launches=10)
-        assert review_prompt.pending_prompt(_config(deadline_days=21), ready=True, now=now) is None
-
-    def test_still_asks_just_inside_the_deadline(self, _isolated_state):
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 20 * 86400, launches=10)
-        assert (
-            review_prompt.pending_prompt(_config(deadline_days=21), ready=True, now=now) is not None
-        )
-
-    def test_rare_user_who_qualifies_too_late_is_never_asked(self, _isolated_state):
-        """Manager는 매일 여는 앱이 아니다. 설치하고 한참 뒤에야 두 번째로 열면
-        실행 횟수 조건은 그때 채워지지만, 그때는 이미 후기를 남길 수 없다."""
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 40 * 86400, launches=2)
-        assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
-
-    def test_shipped_schedule_fits_entirely_inside_the_window(self):
-        """배포되는 값이 기한을 넘기면 마지막 요청이 통째로 헛돈다 — 예전 값
-        (7일 시작·14일 간격·3회)은 3번째가 35일째라 실제로 그랬다."""
-        from pathlib import Path
-
-        config = json.loads(
-            (Path(__file__).parent.parent / "review_prompt.json").read_text(encoding="utf-8")
-        )
-        last_ask_day = config["min_days"] + config["snooze_days"] * (config["max_asks"] - 1)
-        assert last_ask_day <= config["deadline_days"], (
-            f"마지막 요청이 {last_ask_day}일째라 마감선({config['deadline_days']}일)을 넘는다"
-        )
-
-    def test_defaults_also_fit_inside_the_window(self):
-        """원격 설정을 못 받았을 때 쓰이는 코드 기본값도 같은 조건을 지켜야 한다."""
-        d = review_prompt._DEFAULTS
-        last_ask_day = d["min_days"] + d["snooze_days"] * (d["max_asks"] - 1)
-        assert last_ask_day <= d["deadline_days"]
-
-
-class TestDeadlineNote:
-    """"앞으로 며칠 남았다" 안내 — 실제 규칙(구매 후 약 한 달)과 우리가 센 기준
-    (설치일)을 둘 다 밝혀야 한다. 앱은 구매 시각을 알 수 없어 첫 실행 시각으로
-    대신 세는데, 기준을 안 밝히면 늦게 설치한 사람에게 없는 기간을 있다고 말하게 된다."""
-
-    def test_counts_down_from_first_launch(self, _isolated_state):
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 10 * 86400, launches=10)
-        note = review_prompt.pending_prompt(
-            _config(review_window_days=30), ready=True, now=now
-        )["deadline_note"]
-        assert "**20일** 남았습니다" in note, "숫자는 굵게 — 눈에 걸려야 하는 건 이것뿐이다"
-
-    def test_states_both_the_rule_and_the_basis(self, _isolated_state):
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 5 * 86400, launches=10)
-        note = review_prompt.pending_prompt(
-            _config(review_window_days=30), ready=True, now=now
-        )["deadline_note"]
-        assert "구매 후 약 **30일**" in note, "실제 규칙을 밝혀야 늦게 설치한 사람이 보정할 수 있다"
-        assert "설치하신 날부터" in note, "우리가 센 기준을 밝혀야 한다"
-
-    def test_can_be_turned_off(self, _isolated_state):
-        """기간 정책이 바뀌면 숫자를 고치는 대신 안내 자체를 끌 수 있어야 한다."""
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 5 * 86400, launches=10)
-        prompt = review_prompt.pending_prompt(_config(review_window_days=0), ready=True, now=now)
-        assert prompt["deadline_note"] == ""
-
-    def test_no_note_once_the_window_has_passed(self, _isolated_state):
-        """창이 닫혔는데 "0일 남았습니다"를 띄우면 안내가 아니라 조롱이 된다.
-        (물어보는 것 자체도 deadline_days에서 이미 막히지만, 창을 짧게 설정해
-        두 값이 엇갈려도 여기서 한 번 더 막힌다.)"""
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 15 * 86400, launches=10)
-        prompt = review_prompt.pending_prompt(
-            _config(review_window_days=10, deadline_days=21), ready=True, now=now
-        )
-        assert prompt["deadline_note"] == ""
-
-    def test_shipped_window_is_longer_than_the_ask_deadline(self):
-        """물어보기를 멈추는 시점(deadline_days)이 알려주는 기한(review_window_days)보다
-        길면, 마지막 요청에서 "0일 남았습니다"가 나온다."""
-        from pathlib import Path
-
-        config = json.loads(
-            (Path(__file__).parent.parent / "review_prompt.json").read_text(encoding="utf-8")
-        )
-        assert config["deadline_days"] < config["review_window_days"]
-
-
-class TestEmphasisMarkup:
-    """**…**는 app.js의 renderEmphasis가 <strong>으로 바꾼다. 표시를 짝이 안 맞게
-    남기면 별표가 화면에 그대로 보인다."""
-
-    def test_deadline_note_marks_only_the_numbers(self, _isolated_state):
-        now = time.time()
-        _state(_isolated_state, first_launch_at=now - 5 * 86400, launches=10)
-        note = review_prompt.pending_prompt(_config(), ready=True, now=now)["deadline_note"]
-        assert note.count("**") == 4, "여는/닫는 표시가 짝이 맞아야 한다(숫자 두 곳)"
-
-    def test_shipped_body_has_balanced_markers(self):
-        from pathlib import Path
-
-        config = json.loads(
-            (Path(__file__).parent.parent / "review_prompt.json").read_text(encoding="utf-8")
-        )
-        assert config["body"].count("**") % 2 == 0
