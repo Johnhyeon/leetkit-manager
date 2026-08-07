@@ -823,11 +823,28 @@ async function openRegisterModal(lensName) {
   container.innerHTML = "<div class=\"register-target-row disabled\">불러오는 중…</div>";
   document.getElementById("register-backdrop").hidden = false;
 
+  await refreshRegisterTargets(lensName);
+  startRegisterTargetWatch(lensName);
+}
+
+// 선택된 체크박스 목록 — 다시 그릴 때 사용자가 방금 고른 걸 잃지 않으려고 먼저 걷어둔다.
+function checkedRegisterTargets() {
+  return [...document.querySelectorAll("#register-targets input[type=checkbox]:checked")].map(
+    (c) => c.value
+  );
+}
+
+async function refreshRegisterTargets(lensName, { keepSelection = null } = {}) {
+  const container = document.getElementById("register-targets");
   const targets = await window.pywebview.api.available_targets(lensName);
+  const lens = lensDataCache[lensName];
   const currentTargets = (lens && lens.targets) || [];
+
   container.innerHTML = targets
     .map((t) => {
-      const checked = t.installed && (t.id !== "codex" || currentTargets.includes(t.id));
+      const checked = keepSelection
+        ? keepSelection.includes(t.id)
+        : t.installed && (t.id !== "codex" || currentTargets.includes(t.id));
       // 아직 없는 앱은 등록해봐야 읽어갈 주체가 없다 — 막기만 하지 말고 받는 곳을
       // 바로 열 수 있게 해준다(없는 게 잘못이 아니라 다음 할 일을 알려주는 것).
       const getItHtml = t.installed
@@ -835,7 +852,7 @@ async function openRegisterModal(lensName) {
         : `<button type="button" class="target-install-link" data-install-url="${escapeAttr(t.install_url)}">받으러 가기</button>`;
       return `
         <label class="register-target-row${t.installed ? "" : " disabled"}">
-          <input type="checkbox" value="${t.id}" ${t.installed ? "" : "disabled"} ${checked ? "checked" : ""}>
+          <input type="checkbox" value="${t.id}" ${t.installed ? "" : "disabled"} ${checked && t.installed ? "checked" : ""}>
           <span>${escapeHtml(t.label)}${t.installed ? "" : " — 아직 설치 안 됨"}</span>
           ${getItHtml}
         </label>`;
@@ -846,12 +863,66 @@ async function openRegisterModal(lensName) {
     btn.addEventListener("click", (e) => {
       e.preventDefault(); // label 안이라 클릭이 체크박스로 새지 않게
       window.pywebview.api.open_url(btn.dataset.installUrl);
+      const msgEl = document.getElementById("register-msg");
+      msgEl.textContent = "설치가 끝나면 여기서 자동으로 확인합니다 — 창은 열어두세요.";
+      msgEl.className = "modal-msg";
     });
   });
+
+  return targets;
+}
+
+// "받으러 가기"로 앱을 받아 설치하고 돌아와도, 체크박스가 계속 잠겨 있어 더 진행할
+// 수가 없었다 — 목록을 모달을 열 때 딱 한 번만 만들었기 때문이다. 창이 열려 있는
+// 동안 빠진 앱이 생겼는지 계속 지켜보고, 확인되면 그 자리에서 풀어준다.
+let registerTargetWatch = null;
+
+function startRegisterTargetWatch(lensName) {
+  stopRegisterTargetWatch();
+  registerTargetWatch = setInterval(async () => {
+    // 창이 닫혔으면 볼 이유가 없다(닫기 경로를 못 탄 경우까지 여기서 정리된다).
+    if (document.getElementById("register-backdrop").hidden) {
+      stopRegisterTargetWatch();
+      return;
+    }
+    const missingBefore = [...document.querySelectorAll("#register-targets input[disabled]")].map(
+      (c) => c.value
+    );
+    if (!missingBefore.length) {
+      stopRegisterTargetWatch();
+      return;
+    }
+    let targets;
+    try {
+      // 방금 고른 체크는 그대로 두고 다시 그린다.
+      targets = await refreshRegisterTargets(lensName, { keepSelection: checkedRegisterTargets() });
+    } catch {
+      return; // 일시적인 실패는 다음 차례에 다시 본다
+    }
+    const nowInstalled = targets.filter((t) => t.installed && missingBefore.includes(t.id));
+    if (!nowInstalled.length) return;
+
+    // 방금 확인된 앱은 알아서 체크해준다 — 받으러 간 이유가 그것이므로.
+    nowInstalled.forEach((t) => {
+      const box = document.querySelector(`#register-targets input[value="${t.id}"]`);
+      if (box) box.checked = true;
+    });
+    const msgEl = document.getElementById("register-msg");
+    msgEl.textContent = `${nowInstalled.map((t) => t.label).join(", ")} 설치를 확인했습니다 — '등록'을 눌러 계속하세요.`;
+    msgEl.className = "modal-msg ok";
+  }, 3000);
+}
+
+function stopRegisterTargetWatch() {
+  if (registerTargetWatch !== null) {
+    clearInterval(registerTargetWatch);
+    registerTargetWatch = null;
+  }
 }
 
 function closeRegisterModal(completed = false) {
   document.getElementById("register-backdrop").hidden = true;
+  stopRegisterTargetWatch(); // 창이 닫혔는데 3초마다 계속 확인할 이유가 없다
   registerTargetLens = null;
   if (!completed) pendingResolveVerify = null;
   if (completed) {
