@@ -3,6 +3,9 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+# CI가 exe를 빌드할 때 만드는 전용 venv. 이름이 .venv/ 규칙에 안 걸려서
+# 한 번 통째로 커밋된 적이 있다(3천 파일, 56만 줄).
+.venv-*/
 .pytest_cache/
 .ruff_cache/
 dist/
