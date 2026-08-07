@@ -25,6 +25,13 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
+// 후기 모달 문구에서 **…**를 굵게. 먼저 통째로 이스케이프하고 그 뒤에 우리 표시만
+// 태그로 바꾸므로, 원격 설정(review_prompt.json)에 HTML이 섞여 들어와도 그냥 글자로
+// 나온다 — 문구를 릴리스 없이 고칠 수 있게 열어둔 통로라 이 순서가 중요하다.
+function renderEmphasis(text) {
+  return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
 function statusClass(readiness) {
   if (readiness === "정상") return "ok";
   if (readiness === "주의") return "warn";
@@ -1854,11 +1861,13 @@ async function maybeShowReviewPrompt() {
   if (!prompt) return;
 
   document.getElementById("review-title").textContent = prompt.title;
-  document.getElementById("review-body").textContent = prompt.body;
+  // 본문에서도 **…**로 강조할 수 있게 — 메일 제목처럼 눈으로 찾아야 하는 부분을
+  // 문구만 고쳐서 굵게 만들 수 있다.
+  document.getElementById("review-body").innerHTML = renderEmphasis(prompt.body);
 
   // 남은 기간 — 기한이 지났거나 안 쓰기로 한 설정이면 Python이 빈 문자열을 준다.
   const deadlineEl = document.getElementById("review-deadline");
-  deadlineEl.textContent = prompt.deadline_note || "";
+  deadlineEl.innerHTML = prompt.deadline_note ? renderEmphasis(prompt.deadline_note) : "";
   deadlineEl.hidden = !prompt.deadline_note;
 
   // 링크가 없으면(리틀리 후기란처럼 구매자마다 주소가 다른 경우) 여는 버튼을 아예

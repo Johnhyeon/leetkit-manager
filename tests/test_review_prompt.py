@@ -274,7 +274,7 @@ class TestDeadlineNote:
         note = review_prompt.pending_prompt(
             _config(review_window_days=30), ready=True, now=now
         )["deadline_note"]
-        assert "20일 남았습니다" in note
+        assert "**20일** 남았습니다" in note, "숫자는 굵게 — 눈에 걸려야 하는 건 이것뿐이다"
 
     def test_states_both_the_rule_and_the_basis(self, _isolated_state):
         now = time.time()
@@ -282,7 +282,7 @@ class TestDeadlineNote:
         note = review_prompt.pending_prompt(
             _config(review_window_days=30), ready=True, now=now
         )["deadline_note"]
-        assert "구매 후 약 30일" in note, "실제 규칙을 밝혀야 늦게 설치한 사람이 보정할 수 있다"
+        assert "구매 후 약 **30일**" in note, "실제 규칙을 밝혀야 늦게 설치한 사람이 보정할 수 있다"
         assert "설치하신 날부터" in note, "우리가 센 기준을 밝혀야 한다"
 
     def test_can_be_turned_off(self, _isolated_state):
@@ -312,3 +312,22 @@ class TestDeadlineNote:
             (Path(__file__).parent.parent / "review_prompt.json").read_text(encoding="utf-8")
         )
         assert config["deadline_days"] < config["review_window_days"]
+
+
+class TestEmphasisMarkup:
+    """**…**는 app.js의 renderEmphasis가 <strong>으로 바꾼다. 표시를 짝이 안 맞게
+    남기면 별표가 화면에 그대로 보인다."""
+
+    def test_deadline_note_marks_only_the_numbers(self, _isolated_state):
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now - 5 * 86400, launches=10)
+        note = review_prompt.pending_prompt(_config(), ready=True, now=now)["deadline_note"]
+        assert note.count("**") == 4, "여는/닫는 표시가 짝이 맞아야 한다(숫자 두 곳)"
+
+    def test_shipped_body_has_balanced_markers(self):
+        from pathlib import Path
+
+        config = json.loads(
+            (Path(__file__).parent.parent / "review_prompt.json").read_text(encoding="utf-8")
+        )
+        assert config["body"].count("**") % 2 == 0

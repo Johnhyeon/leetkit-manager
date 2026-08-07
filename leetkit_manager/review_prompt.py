@@ -198,7 +198,12 @@ def _deadline_note(config: dict, *, first: float, now: float) -> str:
     left = int((first + window * _DAY - now) // _DAY)
     if left <= 0:
         return ""
-    return f"후기는 구매 후 약 {window}일까지만 남길 수 있습니다.\n설치하신 날부터 세면 앞으로 {left}일 남았습니다."
+    # **…**로 감싼 부분은 화면에서 굵게 나온다(app.js의 renderEmphasis). 여기서 눈에
+    # 걸려야 하는 건 숫자 두 개다 — 나머지 문장은 읽어도 되고 넘겨도 되는 설명이다.
+    return (
+        f"후기는 구매 후 약 **{window}일**까지만 남길 수 있습니다.\n"
+        f"설치하신 날부터 세면 앞으로 **{left}일** 남았습니다."
+    )
 
 
 def mark_asked(now: float | None = None) -> None:
