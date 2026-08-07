@@ -808,7 +808,16 @@ def replace_running_exe(new_exe_path: Path) -> ProcessResult:
         current_exe.rename(backup)
         shutil.copy2(new_exe_path, current_exe)
         creationflags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
-        subprocess.Popen([str(current_exe)], creationflags=creationflags, close_fds=True)
+        # --wait-for-exit: 새 프로세스가 지금 이 프로세스의 종료를 기다렸다가 뜬다.
+        # 이게 없으면 새 프로세스가 곧바로 중복 실행 방지에 걸린다 — 이 프로세스가
+        # 아직 몇 초 더 살아 뮤텍스와 창을 쥐고 있어서, 새 쪽이 "이미 실행 중"으로
+        # 판단하고 스스로 종료한 뒤 이 프로세스마저 닫히면 아무것도 안 남는다
+        # (화면엔 "다시 시작합니다"만 뜨고 실제로는 아무 일도 안 일어났다).
+        subprocess.Popen(
+            [str(current_exe), "--wait-for-exit", str(os.getpid())],
+            creationflags=creationflags,
+            close_fds=True,
+        )
         return ProcessResult(
             cmd=[str(current_exe)], exit_code=0, stdout="", stderr="", timed_out=False, duration_s=0.0
         )
@@ -816,6 +825,30 @@ def replace_running_exe(new_exe_path: Path) -> ProcessResult:
         return ProcessResult(
             cmd=[str(current_exe)], exit_code=1, stdout="", stderr=str(e), timed_out=False, duration_s=0.0, error=str(e)
         )
+
+
+def relaunch_after_exit() -> bool:
+    """지금 프로세스가 끝난 뒤 새 버전을 띄우도록 예약한다. 성공하면 True.
+
+    `uv tool install`로 깐 버전용 — 단일 exe는 replace_running_exe가 파일을 바꿔치는
+    김에 같이 띄운다. 이쪽은 예전엔 아무것도 안 해서, 업데이트를 누르면 "앱을 다시
+    시작합니다"라고 안내하고는 그냥 닫히기만 했다(윈도우·맥 공통).
+
+    새 프로세스는 `--wait-for-exit <pid>`로 이 프로세스의 종료를 기다린다 — 안 그러면
+    중복 실행 방지에 걸려 스스로 종료하고, 곧이어 이 프로세스도 닫혀 아무것도 안 남는다.
+    """
+    command = resolve_lens_command("leetkit-manager")
+    creationflags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
+    try:
+        subprocess.Popen(
+            [command, "gui", "--wait-for-exit", str(os.getpid())],
+            creationflags=creationflags,
+            close_fds=True,
+            start_new_session=(sys.platform != "win32"),
+        )
+        return True
+    except Exception:
+        return False
 
 
 def cleanup_old_exe_backup() -> None:

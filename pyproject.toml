@@ -1,6 +1,10 @@
 [project]
 name = "leetkit-manager"
-version = "0.1.5"
+# 버전은 leetkit_manager/__init__.py 한 곳에만 적는다. 예전엔 여기와 __init__.py에
+# 따로 적혀 있었는데 __init__.py 쪽을 안 올려서 0.1.0에 멈췄고, 앱이 자기 버전을
+# 0.1.0으로 읽는 바람에 (1) 화면에 옛 버전이 뜨고 (2) 최신을 깔아도 항상 "업데이트
+# 있음"으로 판정돼 업데이트 버튼이 영영 사라지지 않았다.
+dynamic = ["version"]
 description = "StockLens/DartLens/TelegramLens 통합 설치·진단·업데이트 Manager"
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -40,6 +44,9 @@ leetkit-manager = "leetkit_manager.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "leetkit_manager/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["leetkit_manager"]

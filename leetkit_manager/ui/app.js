@@ -2096,7 +2096,13 @@ document.getElementById("self-update-btn").addEventListener("click", async (e) =
   btn.textContent = "설치 중…";
   const result = await window.pywebview.api.self_update();
   if (result.ok) {
-    showToast(`v${result.version}로 업데이트됨 — 앱을 다시 시작합니다`);
+    // 다시 띄우지 못했으면 그렇다고 말한다 — 저절로 뜰 줄 알고 기다리게 두면 안 된다.
+    // (relaunching이 아예 안 오는 단일 exe 경로는 replace_running_exe가 같이 띄운다.)
+    showToast(
+      result.relaunching === false
+        ? `v${result.version}로 업데이트됨 — 앱을 닫습니다. 바로가기로 다시 열어주세요.`
+        : `v${result.version}로 업데이트됨 — 앱을 다시 시작합니다`
+    );
     setTimeout(() => window.pywebview.api.quit(), 1600);
   } else {
     showToast(result.error || "업데이트에 실패했습니다.");

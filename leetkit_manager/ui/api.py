@@ -383,7 +383,11 @@ class Api:
         if not latest:
             return {"ok": False, "error": "최신 버전을 확인할 수 없습니다(네트워크를 확인하세요)."}
         result = package_service.install_version("leetkit-manager", latest)
-        return {"ok": result.ok, "version": latest}
+        if not result.ok:
+            return {"ok": False, "version": latest}
+        # 예전엔 여기서 그냥 끝나서, "앱을 다시 시작합니다"라고 안내해놓고 닫히기만 했다
+        # (윈도우·맥 공통 — 단일 exe 쪽만 replace_running_exe가 같이 띄우고 있었다).
+        return {"ok": True, "version": latest, "relaunching": package_service.relaunch_after_exit()}
 
     def create_support_bundle(self) -> dict:
         """지원 문의용 zip 생성(로그·상태 파일 안전 목록만) + 탐색기로 폴더 열기 +

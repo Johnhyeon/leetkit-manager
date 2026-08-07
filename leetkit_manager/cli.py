@@ -56,15 +56,40 @@ def _cmd_check_updates(args: argparse.Namespace) -> int:
     return 0
 
 
+def _wait_for_pid_exit(pid: int, timeout_s: float = 30.0) -> None:
+    """그 PID가 사라질 때까지(최대 timeout_s) 기다린다.
+
+    자체 업데이트가 새 버전을 띄울 때만 쓴다. 옛 프로세스가 아직 살아 있는 동안 새
+    프로세스가 뜨면 중복 실행 방지에 걸려 스스로 종료하고, 곧이어 옛 프로세스도
+    닫히면서 아무것도 안 남는다 — 화면엔 "다시 시작합니다"만 뜨고 실제로는 아무 일도
+    안 일어난 것처럼 보였다. 시간이 다 되면 그냥 진행한다(영영 안 뜨는 것보다는
+    창이 두 개 뜨는 편이 낫다 — single_instance의 판단 기준과 같은 정신)."""
+    import time
+
+    import psutil
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if not psutil.pid_exists(pid):
+            return
+        time.sleep(0.2)
+
+
 def _cmd_gui(args: argparse.Namespace) -> int:
     from leetkit_manager.ui.app import run
 
+    wait_for = getattr(args, "wait_for_exit", None)
+    if wait_for:
+        _wait_for_pid_exit(wait_for)
     run()
     return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="leetkit-manager")
+    # 서브커맨드 없이 바로가기로 뜨는 경우가 기본이라 최상위에도 둔다(자체 업데이트가
+    # 새 버전을 띄울 때 `<exe> --wait-for-exit <pid>` 형태로 붙인다).
+    p.add_argument("--wait-for-exit", type=int, help=argparse.SUPPRESS)
     sub = p.add_subparsers(dest="command")
 
     diagnose = sub.add_parser("diagnose", help="전체 Lens 진단 대시보드(텍스트)")
@@ -75,6 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
     check_updates.set_defaults(func=_cmd_check_updates)
 
     gui = sub.add_parser("gui", help="데스크톱 대시보드(pywebview) 실행")
+    gui.add_argument("--wait-for-exit", type=int, help=argparse.SUPPRESS)
     gui.set_defaults(func=_cmd_gui)
 
     return p

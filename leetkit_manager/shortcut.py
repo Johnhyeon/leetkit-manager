@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -35,7 +37,7 @@ def create_shortcut_at(target_dir: Path) -> Path | None:
         if sys.platform == "win32":
             return _create_windows_shortcut(target_dir)
         if sys.platform == "darwin":
-            return _create_macos_alias(target_dir)
+            return _create_macos_app_bundle(target_dir)
         return None
     except Exception:
         return None
@@ -71,19 +73,76 @@ def _create_windows_shortcut(target_dir: Path) -> Path | None:
     return link_path
 
 
-def _create_macos_alias(target_dir: Path) -> Path | None:
-    """macOS는 .lnk 개념이 없다 — 심볼릭 링크로 최소한의 더블클릭 진입점을 제공한다.
-    (실제 .app 번들만큼 매끄럽진 않다 — 검증 안 됨, 추후 개선 여지.)"""
+_MACOS_INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>LeetKit Manager</string>
+  <key>CFBundleDisplayName</key><string>LeetKit Manager</string>
+  <key>CFBundleExecutable</key><string>LeetKitManager</string>
+  <key>CFBundleIdentifier</key><string>com.leetkit.manager</string>
+  <key>CFBundleIconFile</key><string>icon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>{version}</string>
+  <key>CFBundleVersion</key><string>{version}</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+"""
+
+
+def _create_macos_app_bundle(target_dir: Path) -> Path | None:
+    """macOS는 .lnk 개념이 없다 — 최소 구성의 .app 번들을 만든다.
+
+    예전엔 심볼릭 링크였는데 실사용에서 세 가지가 한꺼번에 문제였다:
+    아이콘이 아예 안 붙고(링크에는 지정할 방법이 없다), 도크·메뉴막대 이름이
+    "Python"으로 뜨고(실행 주체가 파이썬 인터프리터라서), 더블클릭하면 터미널 창이
+    같이 떴다. .app 번들은 이 셋을 한 번에 해결한다 — 이름은 Info.plist의
+    CFBundleName, 아이콘은 Resources/icon.icns, 터미널은 애초에 안 뜬다.
+
+    번들은 폴더일 뿐이라 별도 도구가 필요 없다. 아이콘도 빌드 때 미리 만들어 둔
+    icon.icns를 복사만 한다(맥에서 sips/iconutil을 부르지 않으므로 실패할 구석이 없다).
+    """
+    from leetkit_manager import __version__
+
     if not target_dir.exists():
         return None
     target = _resolved_exe_path()
     if not Path(target).exists():
         return None
-    link_path = target_dir / "LeetKit Manager"
-    if link_path.exists():
-        return link_path
-    link_path.symlink_to(target)
-    return link_path
+
+    app_path = target_dir / "LeetKit Manager.app"
+    macos_dir = app_path / "Contents" / "MacOS"
+    resources_dir = app_path / "Contents" / "Resources"
+    macos_dir.mkdir(parents=True, exist_ok=True)
+    resources_dir.mkdir(parents=True, exist_ok=True)
+
+    (app_path / "Contents" / "Info.plist").write_text(
+        _MACOS_INFO_PLIST.format(version=__version__), encoding="utf-8"
+    )
+
+    # 경로에 공백이 있어도(예: /Users/홍 길동/...) 깨지지 않게 따옴표로 감싼다.
+    launcher = macos_dir / "LeetKitManager"
+    launcher.write_text(f'#!/bin/sh\nexec "{target}" gui\n', encoding="utf-8")
+    launcher.chmod(0o755)  # 실행 권한이 없으면 Finder가 번들을 아예 안 연다
+
+    icns = Path(__file__).parent / "ui" / "icon.icns"
+    if icns.exists():
+        shutil.copy2(icns, resources_dir / "icon.icns")
+
+    # Finder는 번들 아이콘을 캐시한다 — 내용만 바꾸면 옛 아이콘이 그대로 보인다.
+    # 번들 자체의 수정 시각을 건드려 다시 읽게 한다.
+    try:
+        os.utime(app_path, None)
+    except OSError:
+        pass
+
+    # 예전 버전이 만든 심볼릭 링크가 남아 있으면 아이콘 없는 항목이 옆에 계속 보인다.
+    legacy = target_dir / "LeetKit Manager"
+    if legacy.is_symlink():
+        legacy.unlink(missing_ok=True)
+
+    return app_path
 
 
 def has_shortcut_been_offered() -> bool:
