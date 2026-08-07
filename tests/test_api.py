@@ -313,3 +313,63 @@ def test_install_timeout_is_generous_enough_for_the_biggest_lens():
     from leetkit_manager import package_service
 
     assert package_service._INSTALL_TIMEOUT >= 300
+
+
+class TestRegisterUnchecksToUnregister:
+    """체크박스가 토글처럼 보이는데 실제로는 "추가만" 됐다 — 체크를 풀고 등록을 눌러도
+    그 설정이 그대로 남아 사용자 눈에는 해제가 먹통으로 보였다."""
+
+    def _diag_with_targets(self, targets):
+        diag = MagicMock()
+        diag.report.targets = targets
+        return diag
+
+    def test_unchecked_target_gets_unregistered(self):
+        setup_ok = MagicMock(ok=True, error=None)
+        remove_ok = MagicMock(ok=True, error=None)
+        with patch.object(orchestrator, "diagnose_lens", return_value=self._diag_with_targets(["claude-desktop", "codex"])), \
+             patch.object(orchestrator, "unregister_lens", return_value=remove_ok) as mock_rm, \
+             patch.object(orchestrator, "setup_lens", return_value=setup_ok):
+            result = Api().register(STOCKLENS.name, ["claude-desktop"])
+        mock_rm.assert_called_once_with(STOCKLENS, ["codex"])
+        assert result["ok"] is True
+        assert result["removed"] == ["codex"]
+
+    def test_nothing_to_remove_skips_the_call(self):
+        with patch.object(orchestrator, "diagnose_lens", return_value=self._diag_with_targets(["claude-desktop"])), \
+             patch.object(orchestrator, "unregister_lens") as mock_rm, \
+             patch.object(orchestrator, "setup_lens", return_value=MagicMock(ok=True, error=None)):
+            result = Api().register(STOCKLENS.name, ["claude-desktop", "codex"])
+        mock_rm.assert_not_called()
+        assert result["removed"] == []
+
+    def test_unchecking_everything_only_removes(self):
+        """전부 풀면 등록할 게 없다 — 빈 목록으로 setup을 부르면 Lens가 거부한다."""
+        with patch.object(orchestrator, "diagnose_lens", return_value=self._diag_with_targets(["claude-desktop", "codex"])), \
+             patch.object(orchestrator, "unregister_lens", return_value=MagicMock(ok=True, error=None)) as mock_rm, \
+             patch.object(orchestrator, "setup_lens") as mock_setup:
+            result = Api().register(STOCKLENS.name, [])
+        mock_rm.assert_called_once_with(STOCKLENS, ["claude-desktop", "codex"])
+        mock_setup.assert_not_called()
+        assert result["ok"] is True
+
+    def test_failed_removal_is_reported(self):
+        """조용히 넘어가면 사용자는 해제된 줄 안다."""
+        with patch.object(orchestrator, "diagnose_lens", return_value=self._diag_with_targets(["codex"])), \
+             patch.object(orchestrator, "unregister_lens", return_value=MagicMock(ok=False, error="옛 버전이라 해제를 못 합니다")), \
+             patch.object(orchestrator, "setup_lens", return_value=MagicMock(ok=True, error=None)):
+            result = Api().register(STOCKLENS.name, ["claude-desktop"])
+        assert result["ok"] is False
+        assert "옛 버전" in result["error"]
+        assert result["removed"] == []
+
+    def test_omitted_targets_keeps_the_old_behaviour(self):
+        """기존 호출부(targets 생략)는 등록만 하고 아무것도 해제하지 않는다."""
+        with patch.object(orchestrator, "diagnose_lens") as mock_diag, \
+             patch.object(orchestrator, "unregister_lens") as mock_rm, \
+             patch.object(orchestrator, "setup_lens", return_value=MagicMock(ok=True, error=None)) as mock_setup:
+            result = Api().register(STOCKLENS.name)
+        mock_diag.assert_not_called()
+        mock_rm.assert_not_called()
+        mock_setup.assert_called_once_with(STOCKLENS, ["claude-desktop", "claude-code"])
+        assert result["removed"] == []

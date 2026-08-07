@@ -1001,7 +1001,12 @@ document.getElementById("register-confirm").addEventListener("click", async () =
       notes.push("처음 도구를 쓸 때 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.");
     }
 
-    msgEl.textContent = notes.length ? `등록 완료 — ${notes.join(" ")}` : "등록 완료.";
+    // 체크를 푼 곳은 실제로 해제된다 — 그걸 말해주지 않으면 정말 지워졌는지 알 수 없다.
+    const removedLabels = (result.removed || []).map((t) => TARGET_LABEL[t] || t);
+    const headline = removedLabels.length
+      ? `${removedLabels.join(", ")} 등록을 해제했습니다.`
+      : "등록 완료.";
+    msgEl.textContent = notes.length ? `${headline.replace(/\.$/, "")} — ${notes.join(" ")}` : headline;
     msgEl.className = "modal-msg ok";
     const needsRestartNote = claudeRunning;
     if (needsRestartNote) {

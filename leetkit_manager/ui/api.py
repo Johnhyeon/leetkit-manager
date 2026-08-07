@@ -162,10 +162,42 @@ class Api:
         return _diagnosis_to_dict(orchestrator.diagnose_lens(lens, online=online))
 
     def register(self, lens_name: str, targets: list[str] | None = None) -> dict:
-        """MCP 등록(setup). targets 생략 시 기존과 동일하게 Claude Desktop/Code 둘 다."""
+        """MCP 등록 대상을 `targets`에 맞춘다 — 체크된 곳에 등록하고, 체크가 풀린 곳은 해제한다.
+
+        예전엔 체크된 것만 등록하고 끝이라, 체크박스가 토글처럼 보이는데 실제로는
+        "추가만" 됐다. 체크를 풀고 등록을 눌러도 그 설정이 그대로 남아 사용자 눈에는
+        해제가 먹통으로 보였다.
+
+        targets 생략 시 기존과 동일하게 Claude Desktop/Code 둘 다 등록만 한다(해제 없음).
+        """
         lens = get_lens(lens_name)
-        result = orchestrator.setup_lens(lens, targets or ["claude-desktop", "claude-code"])
-        return {"ok": result.ok, "error": result.error}
+        if targets is None:
+            result = orchestrator.setup_lens(lens, ["claude-desktop", "claude-code"])
+            return {"ok": result.ok, "error": result.error, "removed": []}
+
+        desired = list(dict.fromkeys(targets))
+        # 지금 등록돼 있는데 이번에 체크가 풀린 곳
+        diag = orchestrator.diagnose_lens(lens)
+        current = list((diag.report.targets if diag.report else []) or [])
+        to_remove = [t for t in current if t not in desired]
+
+        removed: list[str] = []
+        remove_error = None
+        if to_remove:
+            rm = orchestrator.unregister_lens(lens, to_remove)
+            removed = to_remove if rm.ok else []
+            remove_error = rm.error
+
+        if not desired:
+            # 전부 체크를 푼 경우 — 등록할 게 없다. 해제만 하고 끝낸다.
+            return {"ok": remove_error is None, "error": remove_error, "removed": removed}
+
+        result = orchestrator.setup_lens(lens, desired)
+        return {
+            "ok": result.ok and remove_error is None,
+            "error": result.error or remove_error,
+            "removed": removed,
+        }
 
     def available_targets(self, lens_name: str) -> list[dict]:
         """MCP 등록 대상 선택 모달용 — 각 타겟의 id/라벨/설치 여부/설치 안내 링크.

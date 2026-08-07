@@ -226,6 +226,52 @@ def setup_lens(
     return SetupResult(ok=ok, targets=merged_targets, error=error, error_code=error_code, raw=raw)
 
 
+def unregister_lens(
+    lens: LensSpec, targets: list[str], *, timeout: float = DEFAULT_TIMEOUT
+) -> SetupResult:
+    """`<lens>-setup --target <t> --remove --json --non-interactive`.
+
+    Manager의 "MCP 등록" 모달에서 체크를 풀면 여기로 온다. 예전엔 해제 수단이 아예
+    없어서 체크박스가 토글처럼 보이는데 실제로는 "추가만" 됐다.
+
+    setup_lens와 같은 이유로 타겟을 하나씩(또는 claude 쌍은 "both"로) 나눠 부른다 —
+    Lens CLI의 --target이 한 번에 한 값만 받기 때문이다.
+    """
+    if not targets:
+        raise ValueError("targets가 비어 있습니다.")
+
+    target_groups: list[str] = []
+    remaining = list(dict.fromkeys(targets))
+    if _CLAUDE_PAIR <= set(remaining):
+        target_groups.append("both")
+        remaining = [t for t in remaining if t not in _CLAUDE_PAIR]
+    target_groups += remaining
+
+    ok = True
+    error: str | None = None
+    removed: list = []
+    for target_arg in target_groups:
+        cmd = [
+            package_service.resolve_lens_command(lens.setup_cmd),
+            "--target", target_arg, "--remove", "--json", "--non-interactive",
+        ]
+        process, payload = run_json_cli(cmd, timeout=timeout)
+        if payload is None:
+            ok = False
+            # 옛 버전 Lens에는 --remove가 없다 — 그 사실을 그대로 말해준다.
+            error = _unsupported_flag_message(lens, process) or (
+                f"해제 응답을 파싱할 수 없습니다 (exit={process.exit_code}). "
+                "Lens를 최신 버전으로 업데이트한 뒤 다시 시도해주세요."
+            )
+            continue
+        if not payload.get("ok"):
+            ok = False
+            error = payload.get("error") or "해제에 실패했습니다."
+            continue
+        removed.extend(payload.get("removed") or [])
+    return SetupResult(ok=ok, targets=[], error=error, error_code=None, raw={"removed": removed})
+
+
 def activate_lens(
     lens: LensSpec, license_key: str, *, timeout: float = DEFAULT_TIMEOUT
 ) -> ActivateResult:

@@ -609,3 +609,58 @@ class TestTelegramLogin:
             orchestrator.start_telegram_login()
             orchestrator.start_telegram_login()
         assert first_closed["called"] is True
+
+
+class TestUnregisterLens:
+    """예전엔 해제 수단이 아예 없어서, 체크박스가 토글처럼 보이는데 실제로는 "추가만"
+    됐다 — 체크를 풀고 등록을 눌러도 그 설정이 그대로 남았다."""
+
+    def _payload(self, ok=True, removed=None, error=None):
+        p = {"ok": ok, "removed": removed or []}
+        if error:
+            p["error"] = error
+        return p
+
+    def test_passes_remove_flag(self):
+        with patch.object(orchestrator, "run_json_cli", return_value=(_fake_process(), self._payload())) as mock:
+            orchestrator.unregister_lens(STOCKLENS, ["codex"])
+        cmd = mock.call_args[0][0]
+        assert "--remove" in cmd and "--json" in cmd and "--non-interactive" in cmd
+        assert cmd[cmd.index("--target") + 1] == "codex"
+
+    def test_claude_pair_is_one_call(self):
+        """setup_lens와 같은 규칙 — Lens CLI의 --target은 한 번에 한 값만 받는다."""
+        with patch.object(orchestrator, "run_json_cli", return_value=(_fake_process(), self._payload())) as mock:
+            orchestrator.unregister_lens(STOCKLENS, ["claude-desktop", "claude-code"])
+        assert mock.call_count == 1
+        assert mock.call_args[0][0][2] == "both"
+
+    def test_mixed_targets_split_into_separate_calls(self):
+        with patch.object(orchestrator, "run_json_cli", return_value=(_fake_process(), self._payload())) as mock:
+            orchestrator.unregister_lens(STOCKLENS, ["claude-desktop", "claude-code", "codex"])
+        used = [c[0][0][2] for c in mock.call_args_list]
+        assert used == ["both", "codex"]
+
+    def test_empty_targets_is_a_programming_error(self):
+        with pytest.raises(ValueError):
+            orchestrator.unregister_lens(STOCKLENS, [])
+
+    def test_old_lens_without_the_flag_says_so(self):
+        """--remove가 없는 옛 Lens에서는 뭘 해야 하는지 알려줘야 한다."""
+        broken = ProcessResult(
+            cmd=["x"], exit_code=2, timed_out=False, duration_s=0.1, stdout="",
+            stderr="usage: stocklens-setup [-h]\nerror: unrecognized arguments: --remove",
+        )
+        with patch.object(orchestrator, "run_json_cli", return_value=(broken, None)):
+            result = orchestrator.unregister_lens(STOCKLENS, ["codex"])
+        assert result.ok is False
+        assert result.error
+
+    def test_reports_failure_from_the_lens(self):
+        with patch.object(
+            orchestrator, "run_json_cli",
+            return_value=(_fake_process(), self._payload(ok=False, error="권한 없음")),
+        ):
+            result = orchestrator.unregister_lens(STOCKLENS, ["codex"])
+        assert result.ok is False
+        assert result.error == "권한 없음"
