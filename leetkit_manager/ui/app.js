@@ -967,18 +967,36 @@ document.getElementById("register-confirm").addEventListener("click", async () =
   if (result.ok) {
     // 마법사 중이면 완료 화면에서 한 번만 안내하므로 여기선 생략 — 매 단계 반복하면
     // 잔소리가 된다. 카드에서 직접 등록한 경우엔 여기가 유일한 안내 지점이다.
-    let needsRestartNote = false;
-    if (!onboardingActive) {
+    //
+    // 예전엔 "Claude Desktop이 켜져 있나"만 보고 안내했다 — Codex만 골라 등록해도
+    // Claude를 껐다 켜라고 해서, 시킨 대로 해도 아무 변화가 없었다. 방금 등록한
+    // 대상에 대해서만 말한다.
+    let claudeRunning = false;
+    if (!onboardingActive && checked.includes("claude-desktop")) {
       try {
-        needsRestartNote = await window.pywebview.api.claude_desktop_running();
+        claudeRunning = await window.pywebview.api.claude_desktop_running();
       } catch {
         /* 확인 실패 시 조용히 생략 */
       }
     }
-    msgEl.textContent = needsRestartNote
-      ? "등록 완료 — Claude Desktop을 껐다 켜야 도구가 나타납니다."
-      : "등록 완료.";
+
+    // Claude Code CLI와 Codex는 시작할 때 설정을 읽으므로 재시작할 대상이 따로 없다 —
+    // 다음에 새로 여는 대화부터 반영된다. "껐다 켜라"고 하면 뭘 끄라는 건지 알 수 없다.
+    const sessionTargets = checked
+      .filter((t) => t === "claude-code" || t === "codex")
+      .map((t) => TARGET_LABEL[t] || t);
+    const notes = [];
+    if (claudeRunning) notes.push("Claude Desktop을 껐다 켜야 도구가 나타납니다.");
+    else if (!onboardingActive && checked.includes("claude-desktop")) {
+      notes.push("Claude Desktop을 열면 도구가 나타납니다.");
+    }
+    if (!onboardingActive && sessionTargets.length) {
+      notes.push(`${sessionTargets.join(", ")}는 새로 시작하는 대화부터 반영됩니다.`);
+    }
+
+    msgEl.textContent = notes.length ? `등록 완료 — ${notes.join(" ")}` : "등록 완료.";
     msgEl.className = "modal-msg ok";
+    const needsRestartNote = claudeRunning;
     if (needsRestartNote) {
       // 마법사 밖에서 등록한 경우엔 여기가 유일한 안내 지점이라, 안내만 하지 말고
       // 바로 실행할 수단까지 같이 준다.
