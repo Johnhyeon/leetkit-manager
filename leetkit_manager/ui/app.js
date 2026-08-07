@@ -2112,12 +2112,17 @@ document.getElementById("review-never").addEventListener("click", async () => {
 
 async function checkSelfUpdate() {
   const info = await window.pywebview.api.check_self_update();
+  // 지금 돌고 있는 버전을 항상 보여준다. 어디에도 안 보여서 "업데이트했는데 버튼이 안
+  // 사라진다" 같은 상황에서 실제로 몇 버전이 도는지 확인할 방법이 없었다.
+  document.getElementById("manager-version").textContent = info.current ? `v${info.current}` : "";
+
   const btn = document.getElementById("self-update-btn");
   if (info.update_available) {
     btn.hidden = false;
     btn.title = `v${info.current} → v${info.latest}`;
   } else {
     btn.hidden = true;
+    btn.title = ""; // 남겨두면 다시 보이게 됐을 때 옛 버전이 그대로 뜬다
   }
 }
 
@@ -2125,7 +2130,15 @@ document.getElementById("self-update-btn").addEventListener("click", async (e) =
   const btn = e.currentTarget;
   btn.disabled = true;
   btn.textContent = "설치 중…";
-  const result = await window.pywebview.api.self_update();
+  // Lens 설치와 똑같이 전면 오버레이를 띄운다. 예전엔 버튼 글자만 바뀌어서, 다운로드가
+  // 오래 걸리는 동안 멈춘 건지 진행 중인지 알 수 없었다(맥에서 실제로 그랬다).
+  showBusyOverlay("LeetKit Manager를 업데이트하는 중…");
+  let result;
+  try {
+    result = await window.pywebview.api.self_update();
+  } finally {
+    hideBusyOverlay();
+  }
   if (result.ok) {
     // 다시 띄우지 못했으면 그렇다고 말한다 — 저절로 뜰 줄 알고 기다리게 두면 안 된다.
     // (relaunching이 아예 안 오는 단일 exe 경로는 replace_running_exe가 같이 띄운다.)
@@ -2134,11 +2147,18 @@ document.getElementById("self-update-btn").addEventListener("click", async (e) =
         ? `v${result.version}로 업데이트됨 — 앱을 닫습니다. 바로가기로 다시 열어주세요.`
         : `v${result.version}로 업데이트됨 — 앱을 다시 시작합니다`
     );
+    showBusyOverlay("앱을 다시 시작하는 중…");
     setTimeout(() => window.pywebview.api.quit(), 1600);
   } else {
     showToast(result.error || "업데이트에 실패했습니다.");
     btn.disabled = false;
     btn.textContent = "업데이트";
+    // 실패했으면 화면에 남은 안내가 사실과 다를 수 있다 — 지금 상태로 다시 맞춘다.
+    try {
+      await checkSelfUpdate();
+    } catch {
+      /* 확인 실패는 조용히 — 버튼은 그대로 남아 다시 시도할 수 있다 */
+    }
   }
 });
 

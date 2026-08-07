@@ -94,6 +94,16 @@ body {
   text-transform: uppercase;
 }
 
+/* 지금 돌고 있는 Manager 버전. 어디에도 안 보여서 "업데이트했는데 버튼이 안 사라진다"
+   같은 상황에서 실제로 몇 버전이 도는지 확인할 방법이 없었다 — 문의가 와도 서로
+   추측만 하게 된다. */
+.brand-version {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-left: 8px;
+}
+
 .refresh-btn {
   font-family: var(--font-mono);
   font-size: 13.5px;
