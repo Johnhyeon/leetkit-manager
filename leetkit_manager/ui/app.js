@@ -1878,9 +1878,10 @@ function maybeShowUpdateNotice() {
   document.getElementById("update-backdrop").hidden = false;
 }
 
-document.getElementById("update-later").addEventListener("click", () => {
+document.getElementById("update-later").addEventListener("click", async () => {
   localStorage.setItem(UPDATE_NOTICE_KEY, updateNoticeSignature(lensesWithUpdates()));
   closeUpdateModal();
+  await handOffToReviewPrompt();
 });
 
 // 창은 닫지 않는다 — 패치노트를 브라우저에서 읽고 돌아와 바로 "지금 업데이트"를
@@ -1900,7 +1901,22 @@ document.getElementById("update-now").addEventListener("click", async () => {
   recomputeSummaryFromCache();
   const left = lensesWithUpdates();
   showToast(left.length ? "일부 업데이트가 남았습니다 — 카드에서 다시 시도해주세요." : "업데이트를 마쳤습니다.");
+  await handOffToReviewPrompt();
 });
+
+// 업데이트 알림이 물러난 자리에 후기 요청을 이어붙인다. 예전엔 업데이트가 뜬 세션에서는
+// 후기가 통째로 건너뛰어졌다 — maybeShowReviewPrompt가 시작할 때 딱 한 번 돌면서
+// "다른 모달이 떠 있으면 물러난다" 규칙에 걸렸기 때문이다.
+//
+// 곧바로 갈아끼우면 눈에는 창이 깜빡한 것처럼 보인다 — 잠깐 쉬었다 띄운다.
+async function handOffToReviewPrompt() {
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  try {
+    await maybeShowReviewPrompt();
+  } catch {
+    /* 후기 요청은 없어도 그만인 기능 */
+  }
+}
 
 /* ---------- 후기 요청 ---------- */
 
@@ -1924,13 +1940,21 @@ function closeReviewModal() {
   document.getElementById("review-backdrop").hidden = true;
 }
 
+// 한 번 물어보면 Python이 그 자리에서 횟수를 세므로(review_prompt.mark_asked),
+// 한 세션에서 두 번 부르면 남은 기회를 공짜로 까먹는다. 실제로 그럴 수 있는 경로가
+// 생겼다 — 시작할 때 한 번, 업데이트 모달이 닫힐 때 또 한 번.
+let reviewPromptAsked = false;
+
 async function maybeShowReviewPrompt() {
+  if (reviewPromptAsked) return;
   // 마법사를 아직 안 끝낸 사람은 설정 중이다 — 그 위에 후기 모달을 겹쳐 띄우면
   // 설치 흐름을 가로막는다.
   if (!localStorage.getItem(ONBOARDING_DONE_KEY)) return;
-  // 다른 모달이 떠 있으면 그 위에 겹치지 않는다(자동 복구·업데이트 등).
+  // 다른 모달이 떠 있으면 그 위에 겹치지 않는다(자동 복구·업데이트 등). 여기서
+  // 물러나도 그 모달이 닫힐 때 다시 불러주므로(handOffToReviewPrompt) 기회를 잃지 않는다.
   if (document.querySelector(".modal-backdrop:not([hidden])")) return;
 
+  reviewPromptAsked = true;
   // 여기서 null이면 "아직 때가 아니다"이거나 원격 설정이 꺼져 있다는 뜻 — 어느 쪽이든
   // 조용히 넘어간다(Python 쪽 review_prompt.pending_prompt 참고).
   const prompt = await window.pywebview.api.review_prompt(reviewPromptReady());
