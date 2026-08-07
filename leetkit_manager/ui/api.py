@@ -111,6 +111,11 @@ def _problem_detail(d: LensDiagnosis) -> str | None:
 
 
 class Api:
+    def __init__(self) -> None:
+        # 후기 링크는 JS가 건네주는 게 아니라 Python이 원격 설정에서 받아 여기 들고
+        # 있는다 — 프론트엔드가 임의의 주소를 열게 만드는 통로가 생기지 않게.
+        self._review_url: str | None = None
+
     def diagnose(self, online: bool = False) -> dict:
         """전체 진단(2.4) — Lens별 순차 호출은 orchestrator가 이미 보장한다."""
         diagnoses = orchestrator.run_full_diagnosis(online=online)
@@ -382,6 +387,46 @@ class Api:
         zip_path = support_bundle.create_bundle()
         support_bundle.reveal_in_file_manager(zip_path)
         return support_bundle.mail_compose_info(zip_path)
+
+    def review_prompt(self, ready: bool) -> dict | None:
+        """지금 후기를 물어볼 때면 표시할 내용, 아니면 None.
+
+        `ready`는 "설치가 실제로 끝났는가" — 아직 설치 중이거나 문제를 고치는 중인
+        사람에게 후기를 달라고 하면 역효과라 JS가 진단 결과를 보고 넘겨준다.
+
+        네트워크를 타므로(원격 설정) 실패할 수 있는데, 실패는 곧 "안 띄움"이다 —
+        후기 요청은 없어도 제품이 돌아가는 기능이라 오류를 보여줄 이유가 없다."""
+        from leetkit_manager import review_prompt
+
+        try:
+            config = review_prompt.fetch_config()
+            pending = review_prompt.pending_prompt(config, ready=bool(ready))
+        except Exception:
+            return None
+        if pending is None:
+            self._review_url = None
+            return None
+        self._review_url = pending.pop("url")
+        review_prompt.mark_asked()
+        return pending
+
+    def open_review_url(self) -> bool:
+        """방금 review_prompt가 받아둔 주소만 연다(JS가 주소를 넘기지 않는다).
+        링크를 실제로 열었으면 목적을 이룬 것이므로 다시 묻지 않는다."""
+        from leetkit_manager import review_prompt
+
+        if not self._review_url:
+            return False
+        webbrowser.open(self._review_url)
+        review_prompt.mark_done()
+        return True
+
+    def review_prompt_never_again(self) -> bool:
+        """"이미 남겼어요" — 다시는 묻지 않는다."""
+        from leetkit_manager import review_prompt
+
+        review_prompt.mark_done()
+        return True
 
     def choose_shortcut_location(self) -> dict:
         """바로가기 저장 위치를 사용자가 직접 고르게 한다(폴더 선택 다이얼로그).

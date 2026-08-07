@@ -1,0 +1,19 @@
+{
+  "_읽는_곳": "leetkit_manager/review_prompt.py — 앱이 실행될 때마다 raw.githubusercontent.com에서 이 파일을 읽는다. main에 커밋하면 릴리스 없이 바로 반영된다.",
+  "_켜는_법": "url에 https 주소를 넣고 enabled를 true로 바꾼 뒤 main에 커밋. url이 비어 있거나 enabled가 false면 모달은 아예 안 뜬다.",
+  "_끄는_법": "enabled를 false로. 이미 설치된 사람도 다음 실행부터 안 뜬다.",
+
+  "enabled": false,
+  "url": "",
+
+  "_문구": "body의 \\n은 줄바꿈으로 그대로 나온다. 한 덩어리 줄글은 읽다가 닫히므로 문단을 나눠 쓸 것.",
+  "title": "후기 한 줄 부탁드립니다",
+  "body": "좋았던 점이든 아쉬웠던 점이든 괜찮습니다.\n읽고 다음 버전에 반영합니다.\n\n1분이면 끝납니다.",
+  "cta": "후기 남기기",
+
+  "_타이밍": "첫 실행에는 안 띄운다. 아래 조건을 전부 만족해야 처음 묻는다.",
+  "min_days": 7,
+  "min_launches": 3,
+  "snooze_days": 14,
+  "max_asks": 3
+}

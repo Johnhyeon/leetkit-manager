@@ -7,7 +7,7 @@ from pathlib import Path
 
 import webview
 
-from leetkit_manager import orchestrator, package_service, single_instance
+from leetkit_manager import orchestrator, package_service, review_prompt, single_instance
 from leetkit_manager.ui.api import Api
 
 _UI_DIR = Path(__file__).parent
@@ -25,6 +25,13 @@ def run() -> None:
     package_service.cleanup_old_exe_backup()
 
     single_instance.acquire()
+    # 후기 요청 시점 판단용(첫 실행이 언제였는지·몇 번 열었는지). 중복 실행으로 되돌아간
+    # 경우는 위에서 이미 return했으므로 여기 오는 것만 실제 실행이다. 후기 요청 하나
+    # 때문에 앱이 안 뜨면 안 되므로 어떤 예외도 삼킨다.
+    try:
+        review_prompt.record_launch()
+    except Exception:
+        pass
     try:
         # 바로가기 생성은 더 이상 여기서 자동으로 하지 않는다 — 위치 선택 다이얼로그가
         # 필요한데(webview.start()가 실제로 창을 띄운 뒤에만 호출 가능) 이 시점엔 아직

@@ -42,6 +42,14 @@ html, body {
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+
+  /* 한글 줄바꿈. 브라우저 기본값은 CJK를 글자 단위로 끊어서 "됩니다"가 "됩니 / 다"로
+     갈라진다 — 읽는 사람은 매 줄 끝에서 한 번씩 멈칫하게 된다. keep-all은 어절
+     단위로만 끊어 그 멈칫함을 없앤다. 다만 그것만 켜면 줄바꿈할 자리가 없는 긴
+     영문·경로(C:\Users\...\site-packages 같은 것)가 상자를 뚫고 나가므로,
+     break-word로 "정 안 되면 그때만" 강제로 끊게 같이 둔다. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 body {
@@ -467,6 +475,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 내용이 창 높이를 넘으면 예전엔 모달이 위아래로 잘려서, 마지막 줄이나 버튼이
+     아예 안 보였다(작은 노트북 화면에서 실제로 그랬다). 배경을 스크롤 가능하게 두고
+     위아래 여백을 줘서, 길어지면 잘리는 대신 스크롤되게 한다. */
+  overflow-y: auto;
+  padding: 24px 0;
   /* 가이드 투어 데모 단계에서 실제 모달을 같이 띄우므로 tour-overlay(30)보다 위 —
      단, tour-tooltip(34)은 그 모달 위에 남아 있어야 다음/이전 버튼을 계속 누를 수 있다. */
   z-index: 32;
@@ -495,6 +508,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* 배경이 스크롤을 맡으므로(위 .modal-backdrop), 모달 자신은 내용만큼 커진 뒤
+     가운데 정렬에서 빠진다 — flex 자식이라 이게 없으면 높이가 눌려 잘린다. */
+  flex-shrink: 0;
+  margin: auto;
 }
 
 .modal-title {
@@ -729,7 +746,12 @@ body {
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   padding: 16px 18px;
-  width: 300px;
+  /* 300px에서는 목록 한 줄("MCP 등록 — Claude Desktop, Claude Code, Codex 중 …")이
+     두 줄로 접혀 목록 모양이 무너졌다. 창이 1180px이므로 이 정도는 여유가 있다. */
+  width: 360px;
+  /* 설명이 길어도 화면 밖으로 나가 잘리지 않게 — 넘치면 이 안에서 스크롤된다. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
   /* modal-backdrop(32)보다 위 — 데모로 실제 모달이 같이 떠도 다음/이전 버튼이 안 가려짐. */
   z-index: 34;
@@ -753,11 +775,14 @@ body {
   margin-top: 6px;
 }
 
+/* 주 고객층(40-50대) 기준으로 14px + muted 색은 읽기 부담이 크다 — 한 단계 키우고
+   본문 색으로 올린다. pre-line은 TOUR_STEPS가 넣은 줄바꿈을 그대로 살리기 위한 것. */
 .tour-desc {
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
   margin-top: 8px;
+  white-space: pre-line;
 }
 
 .tour-nav {
@@ -974,6 +999,34 @@ body {
 @keyframes toast-in {
   from { opacity: 0; transform: translate(-50%, 6px); }
   to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ---------- 후기 요청 모달 ---------- */
+
+.review-modal {
+  width: 440px;
+}
+
+/* 주 고객층(40-50대) 기준 — 본문을 카드 설명보다 한 단계 크게, 줄간격도 넉넉히.
+   읽는 데 힘이 들면 그 자리에서 닫힌다.
+   pre-line: 원격 설정(review_prompt.json)의 줄바꿈을 그대로 살린다 — 문구를 고칠 때
+   릴리스 없이 문단 나누기까지 조절할 수 있어야 한다. textContent로 넣으므로 HTML이
+   섞여 들어올 여지는 없다. */
+.review-body {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+/* 버튼이 셋이라 오른쪽으로만 몰면 "나중에"와 "후기 남기기"가 붙어 오조작이 난다.
+   거절 쪽(이미 남겼어요)을 왼쪽 끝으로 떼어놓는다. */
+.review-modal .modal-actions {
+  justify-content: space-between;
+}
+
+.review-modal .modal-actions #review-later {
+  margin-left: auto;
 }
 
 /* 접근성: 키보드 포커스 항상 보이게, reduced-motion 존중 */

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from leetkit_manager import orchestrator, shortcut
+from leetkit_manager import orchestrator, review_prompt, shortcut
 from leetkit_manager.lens_contract import STOCKLENS
 from leetkit_manager.process_runner import ProcessResult
 from leetkit_manager.ui.api import Api, _diagnosis_to_dict, _first_meaningful_line
@@ -117,3 +117,62 @@ class TestChooseShortcutLocation:
 
         assert result["ok"] is True
         fake_window.create_file_dialog.assert_not_called()
+
+
+class TestReviewPrompt:
+    """후기 요청의 브릿지 계층 — 판정 자체는 test_review_prompt.py가 다룬다."""
+
+    def test_returns_none_and_clears_url_when_not_due(self):
+        api = Api()
+        api._review_url = "https://stale.example"
+        with patch.object(review_prompt, "fetch_config", return_value={}), \
+             patch.object(review_prompt, "pending_prompt", return_value=None):
+            assert api.review_prompt(True) is None
+        # 지난번에 받아둔 주소가 남아 있으면, 모달이 안 떴는데도 열 수 있는 상태가 된다
+        assert api._review_url is None
+
+    def test_url_is_not_exposed_to_javascript(self):
+        """JS는 주소를 받지도, 넘기지도 않는다 — 임의 URL을 여는 통로가 생기지 않게."""
+        pending = {"title": "t", "body": "b", "cta": "c", "url": "https://forms.example"}
+        api = Api()
+        with patch.object(review_prompt, "fetch_config", return_value={}), \
+             patch.object(review_prompt, "pending_prompt", return_value=pending), \
+             patch.object(review_prompt, "mark_asked"):
+            result = api.review_prompt(True)
+        assert "url" not in result
+        assert api._review_url == "https://forms.example"
+
+    def test_showing_the_modal_counts_as_an_ask(self):
+        """세지 않으면 스누즈·최대 횟수가 전부 무력화돼 매번 뜬다."""
+        pending = {"title": "t", "body": "b", "cta": "c", "url": "https://forms.example"}
+        with patch.object(review_prompt, "fetch_config", return_value={}), \
+             patch.object(review_prompt, "pending_prompt", return_value=pending), \
+             patch.object(review_prompt, "mark_asked") as mock_asked:
+            Api().review_prompt(True)
+        mock_asked.assert_called_once()
+
+    def test_network_failure_is_silent(self):
+        with patch.object(review_prompt, "fetch_config", side_effect=Exception("offline")):
+            assert Api().review_prompt(True) is None
+
+    def test_open_without_a_pending_prompt_does_nothing(self):
+        api = Api()
+        with patch("webbrowser.open") as mock_open, \
+             patch.object(review_prompt, "mark_done") as mock_done:
+            assert api.open_review_url() is False
+        mock_open.assert_not_called()
+        mock_done.assert_not_called()
+
+    def test_open_uses_cached_url_and_stops_asking(self):
+        api = Api()
+        api._review_url = "https://forms.example"
+        with patch("webbrowser.open") as mock_open, \
+             patch.object(review_prompt, "mark_done") as mock_done:
+            assert api.open_review_url() is True
+        mock_open.assert_called_once_with("https://forms.example")
+        mock_done.assert_called_once()
+
+    def test_never_again_stops_asking(self):
+        with patch.object(review_prompt, "mark_done") as mock_done:
+            assert Api().review_prompt_never_again() is True
+        mock_done.assert_called_once()

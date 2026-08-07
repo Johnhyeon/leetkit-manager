@@ -1273,15 +1273,69 @@ document.getElementById("support-copy").addEventListener("click", async () => {
    설명만 하는 스포트라이트 — 이제 자동으로는 안 뜨고(최초 실행 자동 시작은 온보딩
    마법사가 대신함) #guide-btn으로 언제든 다시 볼 수 있는 참고용으로만 남는다. */
 
+// desc의 줄바꿈은 그대로 화면에 나온다(style.css의 .tour-desc가 white-space: pre-line).
+// 예전엔 전부 한 문단짜리 줄글이라 300px 폭에서 예닐곱 줄로 뭉쳐 읽혔다 — 주 고객층
+// 기준으로는 그 시점에 그냥 닫힌다. 한 줄에 한 가지씩, 목록은 목록으로 끊어 쓴다.
 const TOUR_STEPS = [
-  { selector: "#readout", title: "전체 상태 요약", desc: "몇 개 Lens가 정상인지, 업데이트나 조치가 필요한 게 있는지 한눈에 보여줍니다." },
-  { selector: ".card:first-child .focus-ring", title: "상태 표시등", desc: "원 색깔로 상태를 보여줍니다. 틸색(가득 참)=정상, 주황=주의, 빨강=조치 필요, 회색=미설치." },
-  { selector: ".card:first-child .field-list", title: "세부 정보", desc: "업데이트 · 라이선스 · MCP 등록 · 최근 진단 시각을 확인할 수 있습니다." },
-  { selector: ".card:first-child", title: "문제 자세히 보기", desc: "카드에 문제가 있으면 \"문제 N건 — 자세히\" 줄이 나타나고, 누르면 무엇이 문제인지 창으로 자세히 봅니다(카드 크기는 그대로예요). 지금 이 Lens는 문제가 없어서 그 줄이 안 보이지만, 예시로 그 창을 띄워드릴게요 — \"조치\" 옆의 굵고 밑줄 있는 명령어를 누르면 그 명령어가 그대로 복사됩니다.", demo: "detail" },
-  { selector: ".card:first-child .actions", title: "동작 버튼", desc: "진단(다시 검사) · MCP 등록(Claude Desktop/Code/Codex 중 골라서 연결) · 활성화(라이선스 키 입력) · 복구(자동으로 고침)를 여기서 할 수 있습니다. 결과 복사는 \"문제 자세히\" 창 안에 있습니다." },
-  { selector: "#support-btn", title: "지원 문의", desc: "문제가 안 풀리면 여기를 눌러보세요. 로그 파일을 모아 zip으로 만들고 폴더를 열어줍니다. 뜨는 창의 받는사람 · 제목 · 내용을 복사해서 메일에 붙여넣고, zip 파일을 첨부해서 보내면 됩니다." },
-  { selector: "#self-update-btn", title: "매니저 업데이트", desc: "LeetKit Manager 자체의 새 버전이 있을 때만 이 버튼이 나타납니다. 누르면 설치하고 앱이 자동으로 닫히니, 바탕화면 아이콘으로 다시 실행하면 됩니다.", requiresVisible: true },
-  { selector: "#guide-btn", title: "가이드 다시 보기", desc: "이 설명은 여기 버튼을 눌러 언제든 다시 볼 수 있습니다." },
+  {
+    selector: "#readout",
+    title: "전체 상태 요약",
+    desc: "몇 개 Lens가 정상인지 한눈에 보여줍니다.\n업데이트나 조치가 필요하면 여기 같이 표시됩니다.",
+  },
+  {
+    selector: ".card:first-child .focus-ring",
+    title: "상태 표시등",
+    desc: "원 색깔로 상태를 보여줍니다.\n\n틸색(가득 참) — 정상\n주황 — 주의\n빨강 — 조치 필요\n회색 — 아직 설치 안 됨",
+  },
+  {
+    selector: ".card:first-child .field-list",
+    title: "세부 정보",
+    desc: "이 Lens의 상태를 항목별로 보여줍니다.\n\n업데이트가 있는지\n라이선스가 활성화됐는지\nMCP에 등록됐는지\n마지막으로 진단한 시각",
+  },
+  {
+    selector: ".card:first-child",
+    title: "문제 자세히 보기",
+    // "명령어를 누르면 복사된다"고 안내하고 있었는데, 지금은 누르면 그 자리에서
+    // 실행되고 끝나면 자동으로 다시 진단한다 — 기능이 바뀐 뒤 설명이 안 따라왔었다.
+    desc:
+      "문제가 있으면 카드에 \"문제 N건 — 자세히\" 줄이 나타납니다.\n" +
+      "누르면 무엇이 문제인지 따로 창으로 보여줍니다.\n\n" +
+      "지금 이 Lens는 문제가 없어 그 줄이 안 보이지만,\n예시로 그 창을 띄워드릴게요.\n\n" +
+      "\"조치\" 옆의 굵은 명령어를 누르면 그 자리에서 실행되고,\n끝나면 해결됐는지 자동으로 다시 진단합니다.",
+    demo: "detail",
+  },
+  {
+    selector: ".card:first-child .actions",
+    title: "동작 버튼",
+    desc:
+      "진단 — 지금 상태를 다시 검사합니다\n" +
+      // 앱 이름을 여기 다 늘어놓으면 한 줄을 넘겨 접히고, 접힌 줄이 다음 항목처럼
+      // 보여 목록 모양이 무너진다 — 어떤 앱이 있는지는 누르면 나오는 모달이 보여준다.
+      "MCP 등록 — 어떤 앱에 연결할지 고릅니다\n" +
+      "활성화 — 라이선스 키를 넣습니다\n" +
+      "복구 — 발견된 문제를 자동으로 고칩니다\n\n" +
+      "결과 복사는 \"문제 자세히\" 창 안에 있습니다.",
+  },
+  {
+    selector: "#support-btn",
+    title: "지원 문의",
+    desc:
+      "문제가 안 풀리면 여기를 눌러보세요.\n로그를 모아 zip으로 만들고 그 폴더를 열어줍니다.\n\n" +
+      "뜨는 창의 받는사람, 제목, 내용을 복사해\n메일에 붙여넣고 zip을 첨부해서 보내시면 됩니다.",
+  },
+  {
+    selector: "#self-update-btn",
+    title: "매니저 업데이트",
+    desc:
+      "LeetKit Manager 자체의 새 버전이 있을 때만 나타납니다.\n\n" +
+      "누르면 설치하고 앱이 자동으로 닫히니,\n바탕화면 아이콘으로 다시 실행하시면 됩니다.",
+    requiresVisible: true,
+  },
+  {
+    selector: "#guide-btn",
+    title: "가이드 다시 보기",
+    desc: "이 설명은 여기 버튼을 눌러 언제든 다시 볼 수 있습니다.",
+  },
 ];
 
 let tourSteps = [];
@@ -1761,6 +1815,60 @@ async function finishOnboarding() {
   });
 }
 
+/* ---------- 후기 요청 ---------- */
+
+// 후기를 물어봐도 되는 상태인지. "정상인 Lens가 하나라도 있다"는 곧 설치를 끝내고
+// 실제로 쓰고 있다는 뜻이다. 아직 아무것도 못 깐 사람이나 문제를 고치는 중인 사람에게
+// 후기를 달라고 하면 역효과다.
+function reviewPromptReady() {
+  const lenses = Object.values(lensDataCache);
+  if (!lenses.length) return false;
+  if (lenses.some(lensHasActionableProblem)) return false;
+  return lenses.some((l) => l.overall === "ok" && !l.incompatible);
+}
+
+function closeReviewModal() {
+  document.getElementById("review-backdrop").hidden = true;
+}
+
+async function maybeShowReviewPrompt() {
+  // 마법사를 아직 안 끝낸 사람은 설정 중이다 — 그 위에 후기 모달을 겹쳐 띄우면
+  // 설치 흐름을 가로막는다.
+  if (!localStorage.getItem(ONBOARDING_DONE_KEY)) return;
+  // 다른 모달이 떠 있으면 그 위에 겹치지 않는다(자동 복구·업데이트 등).
+  if (document.querySelector(".modal-backdrop:not([hidden])")) return;
+
+  // 여기서 null이면 "아직 때가 아니다"이거나 원격 설정이 꺼져 있다는 뜻 — 어느 쪽이든
+  // 조용히 넘어간다(Python 쪽 review_prompt.pending_prompt 참고).
+  const prompt = await window.pywebview.api.review_prompt(reviewPromptReady());
+  if (!prompt) return;
+
+  document.getElementById("review-title").textContent = prompt.title;
+  document.getElementById("review-body").textContent = prompt.body;
+  document.getElementById("review-open").textContent = prompt.cta;
+  document.getElementById("review-backdrop").hidden = false;
+}
+
+document.getElementById("review-open").addEventListener("click", async () => {
+  closeReviewModal();
+  // 주소는 JS가 들고 있지 않다 — Python이 원격 설정에서 받아둔 값으로 연다.
+  const opened = await window.pywebview.api.open_review_url();
+  showToast(
+    opened
+      ? "브라우저에서 열었습니다. 정말 고맙습니다!"
+      : "브라우저를 열지 못했습니다. 나중에 다시 안내드릴게요."
+  );
+});
+
+// "나중에"는 아무 표시도 안 남긴다 — 이미 review_prompt()가 물어본 횟수를 세뒀으므로
+// 정해진 기간 뒤에 다시 뜨고, 횟수를 다 쓰면 알아서 그만 묻는다.
+document.getElementById("review-later").addEventListener("click", closeReviewModal);
+
+document.getElementById("review-never").addEventListener("click", async () => {
+  closeReviewModal();
+  await window.pywebview.api.review_prompt_never_again();
+});
+
 /* ---------- 매니저 자기 자신 업데이트 ---------- */
 
 async function checkSelfUpdate() {
@@ -1821,5 +1929,12 @@ window.addEventListener("pywebviewready", async () => {
     await maybeShowOnboardingIntro();
   } catch {
     /* 마법사를 못 띄워도 대시보드 자체는 쓸 수 있어야 한다 */
+  }
+  // 마법사 판단이 끝난 뒤에 본다 — 위에서 "이미 다 끝난 사용자"로 판명돼 완료 플래그가
+  // 방금 세워졌을 수 있고, 그 사람이야말로 후기를 물어볼 대상이다.
+  try {
+    await maybeShowReviewPrompt();
+  } catch {
+    /* 후기 요청은 없어도 그만인 기능 — 실패를 사용자에게 보일 이유가 없다 */
   }
 });
