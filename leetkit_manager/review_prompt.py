@@ -47,10 +47,17 @@ _DEFAULTS = {
         "읽고 다음 버전에 반영합니다."
     ),
     "cta": "후기 남기기",
-    "min_days": 7,       # 첫 실행 후 이만큼 지나야 처음 묻는다
-    "min_launches": 3,   # 이만큼은 열어봐야 "써봤다"고 볼 수 있다
-    "snooze_days": 14,   # "나중에" 이후 다시 묻기까지
-    "max_asks": 3,       # 이 횟수를 넘기면 영영 안 묻는다
+    # 리틀리 후기는 아무 때나 못 남긴다 — 파일 받는 기간(구매 후 약 한 달)이 만료되면
+    # 후기란 자체가 사라진다. 그래서 모든 요청이 그 안에 들어가야 하고, 지나면 물어보는
+    # 것 자체가 누를 데 없는 안내가 된다. 아래 값은 3·10·17일째에 묻고 21일에 멈춘다.
+    #
+    # Manager는 매일 여는 앱이 아니라 설치·진단 도구다. 문턱을 높게 잡으면 조건을
+    # 만족하기 전에 기한이 먼저 끝난다 — 그래서 예전 값(7일·3회·14일 간격)보다 낮췄다.
+    "min_days": 3,        # 첫 실행 후 이만큼 지나야 처음 묻는다
+    "min_launches": 2,    # 설치하느라 연 첫 실행 말고 한 번은 더 열어봤어야 한다
+    "snooze_days": 7,     # "나중에" 이후 다시 묻기까지
+    "max_asks": 3,        # 이 횟수를 넘기면 영영 안 묻는다
+    "deadline_days": 21,  # 첫 실행 후 이만큼 지나면 아예 안 묻는다(후기 기간 만료)
 }
 
 _DAY = 86400.0
@@ -146,6 +153,15 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
     now = time.time() if now is None else now
     first = state.get("first_launch_at")
     if not isinstance(first, (int, float)) or now - first < _int(config, "min_days") * _DAY:
+        return None
+
+    # 후기 기간이 끝났으면 묻지 않는다. 리틀리 후기란은 파일 받는 기간이 만료되면
+    # 같이 사라져서, 지난 뒤의 요청은 누를 데 없는 안내가 된다.
+    #
+    # 구매 시각을 알 방법이 없어 첫 실행 시각을 대신 쓴다 — 보통 사서 바로 설치하므로
+    # 며칠 안쪽으로 붙지만, 늦게 설치한 사람은 실제 기한이 이미 줄어든 상태다.
+    # 그래서 마감선을 한 달이 아니라 그보다 짧게 잡아 여유를 둔다.
+    if now - first > _int(config, "deadline_days") * _DAY:
         return None
 
     last_ask = state.get("last_ask_at")

@@ -29,8 +29,9 @@ def _state(path, **fields) -> None:
 
 
 def _eligible_state(path, now: float) -> None:
-    """조건을 전부 만족하는 상태 — 각 테스트는 여기서 하나씩만 무너뜨린다."""
-    _state(path, first_launch_at=now - 30 * 86400, launches=10)
+    """조건을 전부 만족하는 상태 — 각 테스트는 여기서 하나씩만 무너뜨린다.
+    후기 기간(deadline_days) 안쪽이어야 한다 — 밖이면 다른 조건과 무관하게 안 뜬다."""
+    _state(path, first_launch_at=now - 10 * 86400, launches=10)
 
 
 class TestGate:
@@ -79,7 +80,7 @@ class TestGate:
 
     def test_too_few_launches_never_shows(self, _isolated_state):
         now = time.time()
-        _state(_isolated_state, first_launch_at=now - 30 * 86400, launches=2)
+        _state(_isolated_state, first_launch_at=now - 10 * 86400, launches=2)
         assert review_prompt.pending_prompt(_config(min_launches=3), ready=True, now=now) is None
 
     def test_too_soon_after_install_never_shows(self, _isolated_state):
@@ -101,39 +102,39 @@ class TestSnoozeAndStop:
         now = time.time()
         _state(
             _isolated_state,
-            first_launch_at=now - 30 * 86400,
+            first_launch_at=now - 10 * 86400,
             launches=10,
             asks=1,
             last_ask_at=now - 3 * 86400,
         )
-        assert review_prompt.pending_prompt(_config(snooze_days=14), ready=True, now=now) is None
+        assert review_prompt.pending_prompt(_config(snooze_days=7), ready=True, now=now) is None
 
     def test_asks_again_after_snooze_period(self, _isolated_state):
         now = time.time()
         _state(
             _isolated_state,
-            first_launch_at=now - 60 * 86400,
+            first_launch_at=now - 18 * 86400,
             launches=10,
             asks=1,
-            last_ask_at=now - 20 * 86400,
+            last_ask_at=now - 10 * 86400,
         )
-        assert review_prompt.pending_prompt(_config(snooze_days=14), ready=True, now=now) is not None
+        assert review_prompt.pending_prompt(_config(snooze_days=7), ready=True, now=now) is not None
 
     def test_stops_after_max_asks(self, _isolated_state):
         """몇 번 물어봤는데 안 남겼으면 그 사람은 안 남기는 거다 — 계속 묻지 않는다."""
         now = time.time()
         _state(
             _isolated_state,
-            first_launch_at=now - 200 * 86400,
+            first_launch_at=now - 18 * 86400,
             launches=50,
             asks=3,
-            last_ask_at=now - 100 * 86400,
+            last_ask_at=now - 10 * 86400,
         )
         assert review_prompt.pending_prompt(_config(max_asks=3), ready=True, now=now) is None
 
     def test_done_never_shows_again(self, _isolated_state):
         now = time.time()
-        _state(_isolated_state, first_launch_at=now - 30 * 86400, launches=10, done=True)
+        _state(_isolated_state, first_launch_at=now - 10 * 86400, launches=10, done=True)
         assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
 
     def test_mark_done_stops_future_prompts(self, _isolated_state):
@@ -217,3 +218,46 @@ class TestFetchConfig:
         assert data["enabled"] is False, "문구를 확정하기 전에는 꺼진 채로 나가야 한다"
         for key in ("url", "title", "body", "cta", "min_days", "min_launches", "snooze_days", "max_asks"):
             assert key in data
+
+
+class TestReviewWindowDeadline:
+    """리틀리 후기는 파일 받는 기간(구매 후 약 한 달)이 만료되면 후기란까지 사라진다 —
+    지난 뒤의 요청은 누를 데 없는 안내가 되므로 아예 묻지 않아야 한다."""
+
+    def test_stops_asking_after_the_deadline(self, _isolated_state):
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now - 25 * 86400, launches=10)
+        assert review_prompt.pending_prompt(_config(deadline_days=21), ready=True, now=now) is None
+
+    def test_still_asks_just_inside_the_deadline(self, _isolated_state):
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now - 20 * 86400, launches=10)
+        assert (
+            review_prompt.pending_prompt(_config(deadline_days=21), ready=True, now=now) is not None
+        )
+
+    def test_rare_user_who_qualifies_too_late_is_never_asked(self, _isolated_state):
+        """Manager는 매일 여는 앱이 아니다. 설치하고 한참 뒤에야 두 번째로 열면
+        실행 횟수 조건은 그때 채워지지만, 그때는 이미 후기를 남길 수 없다."""
+        now = time.time()
+        _state(_isolated_state, first_launch_at=now - 40 * 86400, launches=2)
+        assert review_prompt.pending_prompt(_config(), ready=True, now=now) is None
+
+    def test_shipped_schedule_fits_entirely_inside_the_window(self):
+        """배포되는 값이 기한을 넘기면 마지막 요청이 통째로 헛돈다 — 예전 값
+        (7일 시작·14일 간격·3회)은 3번째가 35일째라 실제로 그랬다."""
+        from pathlib import Path
+
+        config = json.loads(
+            (Path(__file__).parent.parent / "review_prompt.json").read_text(encoding="utf-8")
+        )
+        last_ask_day = config["min_days"] + config["snooze_days"] * (config["max_asks"] - 1)
+        assert last_ask_day <= config["deadline_days"], (
+            f"마지막 요청이 {last_ask_day}일째라 마감선({config['deadline_days']}일)을 넘는다"
+        )
+
+    def test_defaults_also_fit_inside_the_window(self):
+        """원격 설정을 못 받았을 때 쓰이는 코드 기본값도 같은 조건을 지켜야 한다."""
+        d = review_prompt._DEFAULTS
+        last_ask_day = d["min_days"] + d["snooze_days"] * (d["max_asks"] - 1)
+        assert last_ask_day <= d["deadline_days"]
