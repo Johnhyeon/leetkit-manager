@@ -1379,7 +1379,16 @@ document.getElementById("modal-key-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") confirmActivate();
   if (e.key === "Escape") closeActivateModal();
 });
-document.getElementById("refresh-btn").addEventListener("click", loadDiagnosis);
+// "진단 재실행"은 Lens만 다시 보고 매니저 자신은 안 봤다 — 켠 채로 오래 두면 그 사이
+// 새 버전이 나와도 다시 켜기 전까지 업데이트 버튼이 안 떴다. 여기서 같이 확인한다.
+document.getElementById("refresh-btn").addEventListener("click", async () => {
+  await loadDiagnosis();
+  try {
+    await checkSelfUpdate();
+  } catch {
+    /* 업데이트 확인 실패는 조용히 — 진단 결과는 이미 갱신됐다 */
+  }
+});
 
 // 이 버튼 한 자리가 Claude Desktop 상황에 맞게 바뀐다 — Lens는 이 앱 위에서만 동작하니,
 // 없는 사람에겐 "받기"가, 있는 사람에겐 "다시 시작"(등록 반영에 꼭 필요한 단계)이 맞다.
