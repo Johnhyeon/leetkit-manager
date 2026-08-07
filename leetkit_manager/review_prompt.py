@@ -39,9 +39,12 @@ _DEFAULTS = {
     # white-space: pre-line). 원격 설정에서 문구를 고칠 때 줄 나누기까지 같이
     # 조절할 수 있어야 한다 — 한 덩어리 줄글은 읽다가 그냥 닫힌다.
     "body": (
+        "구매하실 때 받으신 메일에서 남기실 수 있습니다.\n\n"
+        "제목: [리틀리] 디지털 파일이 도착했습니다💌\n\n"
+        "메일 안의 \"파일보기\"를 누르면\n"
+        "페이지 맨 아래에 후기 쓰는 곳이 있습니다.\n\n"
         "좋았던 점이든 아쉬웠던 점이든 괜찮습니다.\n"
-        "읽고 다음 버전에 반영합니다.\n\n"
-        "1분이면 끝납니다."
+        "읽고 다음 버전에 반영합니다."
     ),
     "cta": "후기 남기기",
     "min_days": 7,       # 첫 실행 후 이만큼 지나야 처음 묻는다
@@ -122,8 +125,12 @@ def pending_prompt(config: dict, *, ready: bool, now: float | None = None) -> di
     """지금 후기를 물어볼 때인지. 아니면 None.
 
     `ready`는 "설치가 실제로 끝났는가"(정상 Lens가 하나 이상). 아직 설치 중이거나
-    문제를 고치는 중인 사람에게 후기를 달라고 하면 역효과다."""
-    if not config.get("enabled") or not _usable_url(config) or not ready:
+    문제를 고치는 중인 사람에게 후기를 달라고 하면 역효과다.
+
+    URL은 있어도 되고 없어도 된다. 리틀리 후기란은 구매자마다 주소가 다르고 그 주소는
+    구매 확인 메일에만 있어서, 앱이 링크로 보낼 방법이 없다 — 그 경우엔 "메일 어디를
+    누르세요"라고 안내만 하고 버튼은 안 만든다. on/off는 `enabled` 하나로만 판단한다."""
+    if not config.get("enabled") or not ready:
         return None
 
     state = _load_state()

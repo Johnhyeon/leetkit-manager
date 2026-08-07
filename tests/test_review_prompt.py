@@ -46,18 +46,24 @@ class TestGate:
         _eligible_state(_isolated_state, now)
         assert review_prompt.pending_prompt(_config(enabled=False), ready=True, now=now) is None
 
-    def test_empty_url_never_shows(self, _isolated_state):
-        """링크가 정해지기 전에 나간 빌드에서 모달이 뜨면 누를 데가 없다."""
+    def test_empty_url_still_shows_as_guidance_only(self, _isolated_state):
+        """리틀리 후기란은 구매자마다 주소가 달라(구매 확인 메일의 '파일보기' 링크)
+        앱이 링크로 보낼 수 없다 — 그 경우엔 버튼 없이 안내만 띄운다."""
         now = time.time()
         _eligible_state(_isolated_state, now)
-        assert review_prompt.pending_prompt(_config(url=""), ready=True, now=now) is None
+        prompt = review_prompt.pending_prompt(_config(url=""), ready=True, now=now)
+        assert prompt is not None
+        assert prompt["url"] == ""
 
-    def test_non_https_url_is_rejected(self, _isolated_state):
-        """원격 파일이 브라우저를 여는 통로다 — https 아닌 스킴은 안 받는다."""
+    def test_non_https_url_is_dropped_but_guidance_remains(self, _isolated_state):
+        """원격 파일이 브라우저를 여는 통로다 — https 아닌 스킴은 주소로 안 쓴다.
+        그렇다고 모달까지 없애면 안내가 통째로 사라지므로, 버튼만 빠진다."""
         now = time.time()
         _eligible_state(_isolated_state, now)
         for bad in ("http://forms.example", "file:///C:/x", "javascript:alert(1)"):
-            assert review_prompt.pending_prompt(_config(url=bad), ready=True, now=now) is None
+            prompt = review_prompt.pending_prompt(_config(url=bad), ready=True, now=now)
+            assert prompt is not None
+            assert prompt["url"] == ""
 
     def test_not_ready_never_shows(self, _isolated_state):
         """아직 설치 중이거나 문제를 고치는 중인 사람에게 후기를 달라고 하면 역효과다."""
@@ -208,6 +214,6 @@ class TestFetchConfig:
 
         path = Path(__file__).parent.parent / "review_prompt.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["enabled"] is False, "링크를 정하기 전에는 꺼진 채로 나가야 한다"
+        assert data["enabled"] is False, "문구를 확정하기 전에는 꺼진 채로 나가야 한다"
         for key in ("url", "title", "body", "cta", "min_days", "min_launches", "snooze_days", "max_asks"):
             assert key in data

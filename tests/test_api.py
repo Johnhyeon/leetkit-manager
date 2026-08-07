@@ -176,3 +176,23 @@ class TestReviewPrompt:
         with patch.object(review_prompt, "mark_done") as mock_done:
             assert Api().review_prompt_never_again() is True
         mock_done.assert_called_once()
+
+    def test_guidance_only_prompt_reports_no_url(self):
+        """리틀리 후기란처럼 링크를 만들 수 없는 경우 — JS가 버튼을 감추도록 알려준다."""
+        pending = {"title": "t", "body": "b", "cta": "c", "url": ""}
+        api = Api()
+        with patch.object(review_prompt, "fetch_config", return_value={}), \
+             patch.object(review_prompt, "pending_prompt", return_value=pending), \
+             patch.object(review_prompt, "mark_asked"):
+            result = api.review_prompt(True)
+        assert result["has_url"] is False
+        assert api._review_url is None
+
+    def test_prompt_with_url_reports_has_url(self):
+        pending = {"title": "t", "body": "b", "cta": "c", "url": "https://forms.example"}
+        api = Api()
+        with patch.object(review_prompt, "fetch_config", return_value={}), \
+             patch.object(review_prompt, "pending_prompt", return_value=pending), \
+             patch.object(review_prompt, "mark_asked"):
+            result = api.review_prompt(True)
+        assert result["has_url"] is True

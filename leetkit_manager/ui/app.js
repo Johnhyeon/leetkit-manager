@@ -1845,7 +1845,20 @@ async function maybeShowReviewPrompt() {
 
   document.getElementById("review-title").textContent = prompt.title;
   document.getElementById("review-body").textContent = prompt.body;
-  document.getElementById("review-open").textContent = prompt.cta;
+
+  // 링크가 없으면(리틀리 후기란처럼 구매자마다 주소가 다른 경우) 여는 버튼을 아예
+  // 안 만든다 — 눌러도 아무 일 없는 버튼을 두면 "고장난 앱"으로 읽힌다.
+  const openBtn = document.getElementById("review-open");
+  openBtn.hidden = !prompt.has_url;
+  openBtn.textContent = prompt.cta;
+
+  // 여는 버튼이 빠지면 남는 둘이 다 흐린 보조 버튼이 되어, 읽고 나서 어디를 눌러야
+  // 창이 닫히는지 알 수 없다. 안내를 다 읽었다는 뜻의 버튼 하나를 주 버튼으로 세운다
+  // (동작은 그대로 "나중에" — 정해진 기간 뒤에 다시 묻는다).
+  const laterBtn = document.getElementById("review-later");
+  laterBtn.textContent = prompt.has_url ? "나중에" : "알겠습니다";
+  laterBtn.classList.toggle("primary", !prompt.has_url);
+
   document.getElementById("review-backdrop").hidden = false;
 }
 

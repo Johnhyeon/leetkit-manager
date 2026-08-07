@@ -406,7 +406,10 @@ class Api:
         if pending is None:
             self._review_url = None
             return None
-        self._review_url = pending.pop("url")
+        # 링크가 없을 수 있다 — 리틀리 후기란은 구매자마다 주소가 달라 앱이 열어줄
+        # 방법이 없고, 그때는 안내만 하고 버튼은 안 만든다(JS가 has_url을 보고 판단).
+        self._review_url = pending.pop("url") or None
+        pending["has_url"] = self._review_url is not None
         review_prompt.mark_asked()
         return pending
 
