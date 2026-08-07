@@ -1832,6 +1832,76 @@ async function finishOnboarding() {
   });
 }
 
+/* ---------- 업데이트 알림 ---------- */
+
+// 예전엔 새 버전이 나와도 카드 안의 작은 "업데이트" 버튼 하나가 전부여서, 그게
+// 있는 줄 모르면 옛 버전을 계속 썼다. 켤 때 한 번 정면으로 알린다.
+const UPDATE_NOTICE_KEY = "leetkit-manager-update-notice-dismissed";
+
+function lensesWithUpdates() {
+  return Object.values(lensDataCache).filter(
+    (l) => l.update_available && !l.not_installed && l.latest_version
+  );
+}
+
+// "나중에"를 고른 조합을 기억한다. 매번 다시 띄우면 잔소리가 되고, 아예 안 띄우면
+// 다음 새 버전을 놓친다 — 버전 조합이 바뀌었을 때만 다시 띄운다.
+function updateNoticeSignature(lenses) {
+  return lenses
+    .map((l) => `${l.name}@${l.latest_version}`)
+    .sort()
+    .join(",");
+}
+
+function closeUpdateModal() {
+  document.getElementById("update-backdrop").hidden = true;
+}
+
+function maybeShowUpdateNotice() {
+  // 설치를 아직 안 끝낸 사람에게는 마법사가 먼저다 — 그 위에 겹쳐 띄우면 흐름이 끊긴다.
+  if (!localStorage.getItem(ONBOARDING_DONE_KEY)) return;
+  if (document.querySelector(".modal-backdrop:not([hidden])")) return;
+
+  const lenses = lensesWithUpdates();
+  if (!lenses.length) return;
+  if (localStorage.getItem(UPDATE_NOTICE_KEY) === updateNoticeSignature(lenses)) return;
+
+  document.getElementById("update-list").innerHTML = lenses
+    .map(
+      (l) => `
+      <div class="update-row">
+        <span class="name">${escapeHtml(l.display_name)}</span>
+        <span class="versions">v${escapeHtml(l.installed_version || "?")} → <span class="to">v${escapeHtml(l.latest_version)}</span></span>
+      </div>`
+    )
+    .join("");
+  document.getElementById("update-backdrop").hidden = false;
+}
+
+document.getElementById("update-later").addEventListener("click", () => {
+  localStorage.setItem(UPDATE_NOTICE_KEY, updateNoticeSignature(lensesWithUpdates()));
+  closeUpdateModal();
+});
+
+// 창은 닫지 않는다 — 패치노트를 브라우저에서 읽고 돌아와 바로 "지금 업데이트"를
+// 누를 수 있어야 한다.
+document.getElementById("update-patchnotes").addEventListener("click", () => {
+  window.pywebview.api.open_patch_notes();
+});
+
+document.getElementById("update-now").addEventListener("click", async () => {
+  const lenses = lensesWithUpdates();
+  closeUpdateModal();
+  // 한 번에 하나씩 — uv tool install이 같은 디렉터리를 건드리므로 동시에 돌리면
+  // 서로의 파일을 쥔 채 실패한다. runAction이 진행률 오버레이까지 맡는다.
+  for (const lens of lenses) {
+    await runAction("install", lens.name);
+  }
+  recomputeSummaryFromCache();
+  const left = lensesWithUpdates();
+  showToast(left.length ? "일부 업데이트가 남았습니다 — 카드에서 다시 시도해주세요." : "업데이트를 마쳤습니다.");
+});
+
 /* ---------- 후기 요청 ---------- */
 
 // 후기를 물어봐도 되는 상태인지. "라이선스가 활성인 Lens가 하나라도 있고, 그게
@@ -1972,6 +2042,13 @@ window.addEventListener("pywebviewready", async () => {
     await maybeShowOnboardingIntro();
   } catch {
     /* 마법사를 못 띄워도 대시보드 자체는 쓸 수 있어야 한다 */
+  }
+  // 업데이트 알림이 후기 요청보다 먼저다 — 이건 지금 눌러서 할 일이 있는 알림이고,
+  // 후기는 부탁이다. 후기 쪽은 다른 모달이 떠 있으면 알아서 물러난다.
+  try {
+    maybeShowUpdateNotice();
+  } catch {
+    /* 알림을 못 띄워도 카드의 업데이트 버튼은 그대로 있다 */
   }
   // 마법사 판단이 끝난 뒤에 본다 — 위에서 "이미 다 끝난 사용자"로 판명돼 완료 플래그가
   // 방금 세워졌을 수 있고, 그 사람이야말로 후기를 물어볼 대상이다.

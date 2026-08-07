@@ -1026,6 +1026,44 @@ body {
   color: var(--text);
 }
 
+/* ---------- 업데이트 알림 모달 ---------- */
+
+.update-modal {
+  width: 440px;
+}
+
+.update-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 어떤 Lens가 몇 번에서 몇 번으로 가는지 — 이름과 버전을 양끝으로 벌려
+   여러 줄이어도 한눈에 훑을 수 있게 한다. */
+.update-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 15px;
+}
+
+.update-row .name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.update-row .versions {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.update-row .versions .to {
+  color: var(--ok);
+  font-weight: 700;
+}
+
 /* ---------- 후기 요청 모달 ---------- */
 
 .review-modal {
