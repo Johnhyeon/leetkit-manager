@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -149,10 +150,18 @@ class TestShippedFiles:
             assert dates == sorted(dates, reverse=True), f"{label}: 최신순이 아니다 {dates}"
             assert min(dates) >= "2026-08-06", f"{label}: 관리 시작일 이전 기록 {min(dates)}"
 
-    def test_versions_are_the_last_release_of_that_day(self):
-        """절 제목의 버전은 그날 마지막으로 나간 버전이어야 한다 — 그래야
-        "여기까지 쓰고 계십니다" 경계가 맞는다. 날짜가 겹치면 안 된다."""
+    def test_versions_are_unique_and_newest_first(self):
+        """버전은 안 겹치고 최신순이어야 한다 — 앱이 이 순서대로 그리고,
+        "여기까지 쓰고 계십니다" 경계도 이 순서를 믿는다.
+
+        같은 날짜가 두 번 나오는 건 허용한다. 처음엔 "날짜당 절 하나"로 묶었는데,
+        그건 이미 지나간 이력을 정리할 때 맞는 규칙이고 앞으로는 틀린다 — 한 번
+        내보낸 버전의 절은 그대로 굳어야 한다. 같은 날 두 번 내면서 하나로 합치면,
+        먼저 받은 사람에게 이미 갖고 있는 것까지 "업데이트하면 적용"으로 보여준다.
+        """
         for path, label in _ALL_PATCHNOTES:
             entries = patch_notes.parse(path.read_text(encoding="utf-8"))
-            dates = [e.date for e in entries]
-            assert len(dates) == len(set(dates)), f"{label}: 같은 날짜가 두 번 나온다 {dates}"
+            versions = [e.version for e in entries]
+            assert len(versions) == len(set(versions)), f"{label}: 같은 버전이 두 번 {versions}"
+            keys = [tuple(int(n) for n in re.findall(r"\d+", v)) for v in versions]
+            assert keys == sorted(keys, reverse=True), f"{label}: 최신순이 아니다 {versions}"
