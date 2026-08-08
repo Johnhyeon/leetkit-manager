@@ -1622,6 +1622,48 @@ function applyStepDemo(step) {
   }
 }
 
+// 설명 상자를 놓을 자리 — 아래 → 위 → 오른쪽 → 왼쪽 순으로 보고, 화면 안에 들어가면서
+// **가리키는 대상을 안 덮는** 첫 자리를 쓴다.
+//
+// 예전엔 아래·위 둘만 보고, 둘 다 안 되면 화면 안으로 밀어넣기만 했다. 그래서 설명이
+// 긴 단계에서 상자가 대상 위에 그대로 얹혔다 — "동작 버튼" 단계가 기본 창(1180x820)에서
+// 정확히 그랬다(상자 494px, 아래로 두면 화면을 넘고, 위로 뒤집으면 음수라 10으로 강제,
+// 결국 설명하려던 버튼 줄을 69% 덮음). 가리키면서 가리는 셈이라 제일 나쁜 모양이다.
+//
+// 옆자리는 세로로 안 되는 경우를 거의 다 흡수한다 — 상자가 360px이고 창은 최소 1040px이다.
+function placeTooltip(rect, tw, th, pad) {
+  const gap = 12; // 대상과 상자 사이 숨 쉴 틈
+  const edge = 10; // 화면 가장자리 여백
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+  const maxLeft = window.innerWidth - tw - edge;
+  const maxTop = window.innerHeight - th - edge;
+
+  const candidates = [
+    { top: rect.bottom + pad + gap, left: clamp(rect.left, edge, maxLeft) },
+    { top: rect.top - pad - gap - th, left: clamp(rect.left, edge, maxLeft) },
+    { left: rect.right + pad + gap, top: clamp(rect.top, edge, maxTop) },
+    { left: rect.left - pad - gap - tw, top: clamp(rect.top, edge, maxTop) },
+  ];
+
+  const onScreen = (c) =>
+    c.top >= edge && c.left >= edge && c.top + th <= window.innerHeight - edge && c.left + tw <= window.innerWidth - edge;
+  const coveredArea = (c) => {
+    const ox = Math.max(0, Math.min(c.left + tw, rect.right + pad) - Math.max(c.left, rect.left - pad));
+    const oy = Math.max(0, Math.min(c.top + th, rect.bottom + pad) - Math.max(c.top, rect.top - pad));
+    return ox * oy;
+  };
+
+  for (const c of candidates) {
+    if (onScreen(c) && coveredArea(c) === 0) return c;
+  }
+  // 어디에도 온전히 안 들어가면(대상이 화면을 거의 다 차지하는 경우) 화면 안으로
+  // 넣되 가장 덜 가리는 자리를 고른다. 아무것도 안 하고 대상 위에 얹는 것보단 낫다.
+  const fallback = candidates
+    .map((c) => ({ top: clamp(c.top, edge, Math.max(edge, maxTop)), left: clamp(c.left, edge, Math.max(edge, maxLeft)) }))
+    .sort((a, b) => coveredArea(a) - coveredArea(b));
+  return fallback[0];
+}
+
 function positionTour(i) {
   const step = tourSteps[i];
   const rect = step.el.getBoundingClientRect();
@@ -1651,11 +1693,9 @@ function positionTour(i) {
     tooltip.style.left = `${window.innerWidth - tw - 24}px`;
     tooltip.style.top = `${window.innerHeight - th - 24}px`;
   } else {
-    let top = rect.bottom + pad + 12;
-    if (top + th > window.innerHeight - 10) top = Math.max(10, rect.top - pad - th - 12);
-    const left = Math.min(Math.max(10, rect.left), window.innerWidth - tw - 10);
-    tooltip.style.top = `${top}px`;
-    tooltip.style.left = `${left}px`;
+    const spot = placeTooltip(rect, tw, th, pad);
+    tooltip.style.top = `${spot.top}px`;
+    tooltip.style.left = `${spot.left}px`;
   }
 
   step.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
