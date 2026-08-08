@@ -17,6 +17,8 @@ import subprocess
 import sys
 import threading
 
+from leetkit_manager.process_runner import child_env
+
 _DEFAULT_STEP_TIMEOUT = 30.0
 # 창 없는 exe에서 자식을 띄우면 빈 콘솔 창이 뜬다 — process_runner와 같은 이유로 막는다.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
@@ -37,6 +39,7 @@ class InteractiveProcess:
             errors="replace",
             bufsize=1,  # 줄 단위 버퍼링 — 한 줄 쓸 때마다 상대가 바로 읽을 수 있게
             creationflags=_NO_WINDOW,
+            env=child_env(),
         )
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._reader = threading.Thread(target=self._read_loop, daemon=True)

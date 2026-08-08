@@ -13,12 +13,46 @@ Manager가 각 Lens CLI를 subprocess로 부르는 유일한 경로. 여기서 �
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 
 DEFAULT_TIMEOUT = 30.0
+
+# PyInstaller onefile 부트로더가 자기 프로세스에 심는 변수들. 이걸 그대로 물려받은
+# 자식이 또 onefile exe면, 부트로더가 "나는 이미 풀린 뒤의 2단계다"라고 판단해서
+# **압축을 새로 풀지 않고 부모의 임시 폴더를 그대로 쓴다**. 그리고 부모가 끝나면
+# 그 폴더를 지운다 — 자식은 번들 파일이 통째로 사라진 채 남는다.
+#
+# 실제로 자체 업데이트에서 이걸로 죽었다: 새 exe를 띄우고 옛 프로세스가 종료되면,
+# 새 쪽이 webview를 초기화하는 순간
+#   FileNotFoundError: Cannot find Microsoft.Web.WebView2.Core.dll
+# 로 죽었다(부모의 _MEIxxxx가 이미 지워져서). 게다가 자식이 부모 폴더를 쓴다는 건
+# 새 버전이 아니라 **옛 코드를 돌리고 있었다**는 뜻이기도 하다. 손으로 다시 실행하면
+# 정상 추출이라 멀쩡했고, 그래서 "업데이트는 되어 있긴 한데 한 번 죽는다"로 보였다.
+#
+# 최소 재현으로 확인: 떼기 전 자식 _MEIPASS == 부모 것 → 부모 종료 후 파일 없음.
+# 떼고 나면 자식이 자기 폴더에 따로 풀고 부모가 죽어도 멀쩡하다.
+_PYI_BOOTLOADER_VARS = (
+    "_PYI_APPLICATION_HOME_DIR",
+    "_PYI_ARCHIVE_FILE",
+    "_PYI_PARENT_PROCESS_LEVEL",
+    "_MEIPASS2",  # PyInstaller 5.x 이하에서 쓰던 이름
+)
+
+
+def child_env() -> dict[str, str]:
+    """자식 프로세스에 넘길 환경변수. 부트로더 변수만 떼고 나머지는 그대로 물려준다.
+
+    exe로 만들지 않은 개발 환경에서는 뗄 게 없어 os.environ 사본과 같다.
+    """
+    env = os.environ.copy()
+    for key in _PYI_BOOTLOADER_VARS:
+        env.pop(key, None)
+    return env
+
 
 # 창 없는(--windowed) exe에서 자식 프로세스를 띄우면 Windows가 그때마다 새 콘솔 창을
 # 만든다 — 사용자 눈엔 "빈 검은 터미널"이 깜빡이거나, 설치처럼 오래 걸리는 명령에선
@@ -65,6 +99,7 @@ def run_cli(
             errors="replace",
             timeout=timeout,
             creationflags=_NO_WINDOW,
+            env=child_env(),
         )
     except subprocess.TimeoutExpired as e:
         stdout = e.stdout if isinstance(e.stdout, str) else ""
@@ -123,6 +158,7 @@ def run_cli_streaming(
             errors="replace",
             bufsize=1,
             creationflags=_NO_WINDOW,
+            env=child_env(),
         )
     except FileNotFoundError:
         return ProcessResult(

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import httpx
 
-from leetkit_manager.process_runner import ProcessResult, run_cli, run_cli_streaming
+from leetkit_manager.process_runner import ProcessResult, child_env, run_cli, run_cli_streaming
 
 _PYPI_TIMEOUT = 10.0
 # PyPI 다운로드가 걸리므로 doctor(30초)보다 넉넉하게. 120초는 실제로 부족했다 —
@@ -658,7 +658,9 @@ def launch_claude_desktop(exe_hint: str | None = None) -> bool:
         # .app 번들은 내부 실행 파일을 직접 띄우면 안 된다(런치 서비스를 거쳐야
         # Dock·활성화가 정상 동작한다). 설치 위치와 무관하게 앱 이름으로 띄운다.
         try:
-            return subprocess.run(["open", "-a", "Claude"], capture_output=True, timeout=15).returncode == 0
+            return subprocess.run(
+                ["open", "-a", "Claude"], capture_output=True, timeout=15, env=child_env()
+            ).returncode == 0
         except Exception:
             return False
 
@@ -682,13 +684,13 @@ def launch_claude_desktop(exe_hint: str | None = None) -> bool:
         try:
             subprocess.Popen(
                 ["explorer.exe", f"shell:AppsFolder\\{aumid}"],
-                creationflags=creationflags, close_fds=True,
+                creationflags=creationflags, close_fds=True, env=child_env(),
             )
             return True
         except Exception:
             pass
     try:
-        subprocess.Popen([exe], creationflags=creationflags, close_fds=True)
+        subprocess.Popen([exe], creationflags=creationflags, close_fds=True, env=child_env())
         return True
     except Exception:
         return False
@@ -888,10 +890,18 @@ def replace_running_exe(new_exe_path: Path) -> ProcessResult:
         # 아직 몇 초 더 살아 뮤텍스와 창을 쥐고 있어서, 새 쪽이 "이미 실행 중"으로
         # 판단하고 스스로 종료한 뒤 이 프로세스마저 닫히면 아무것도 안 남는다
         # (화면엔 "다시 시작합니다"만 뜨고 실제로는 아무 일도 안 일어났다).
+        # env: PyInstaller 부트로더 변수를 떼고 넘긴다. 안 떼면 새 exe가 압축을 새로
+        # 풀지 않고 **지금 이 프로세스의 임시 폴더를 그대로 쓴다** — 그러면 (1) 새
+        # 버전이 아니라 옛 코드가 돌고, (2) 이 프로세스가 끝나면서 그 폴더를 지워
+        # 새 쪽이 곧바로 죽는다. 실제로 이렇게 죽었다:
+        #   FileNotFoundError: Cannot find Microsoft.Web.WebView2.Core.dll
+        # --wait-for-exit이 "부모가 죽은 뒤에" 창을 열게 만들어서 100% 재현됐다.
+        # (process_runner.child_env의 설명·재현 결과 참고)
         subprocess.Popen(
             [str(current_exe), "--wait-for-exit", str(os.getpid())],
             creationflags=creationflags,
             close_fds=True,
+            env=child_env(),
         )
         return ProcessResult(
             cmd=[str(current_exe)], exit_code=0, stdout="", stderr="", timed_out=False, duration_s=0.0
@@ -920,6 +930,7 @@ def relaunch_after_exit() -> bool:
             creationflags=creationflags,
             close_fds=True,
             start_new_session=(sys.platform != "win32"),
+            env=child_env(),
         )
         return True
     except Exception:
