@@ -1711,8 +1711,110 @@ function endTour() {
 }
 
 document.getElementById("guide-btn").addEventListener("click", startTour);
-document.getElementById("patchnotes-btn").addEventListener("click", () => {
-  window.pywebview.api.open_patch_notes();
+/* ---------- 패치노트 ---------- */
+
+// checkSelfUpdate가 채운다 — 패치노트에서 "어디까지가 이미 쓰고 있는 버전인지"를
+// 가르는 기준이라, 화면의 v표시(#manager-version)와 같은 값을 따로 들고 있는다.
+let managerVersion = null;
+
+// 지금 이 사람 기준으로 각 제품이 어떤 상태인지. 목록만 늘어놓으면 남의 이야기가
+// 되고, "이건 이미 쓰고 계신 버전에 들어 있다 / 이건 업데이트하면 적용된다"를
+// 구분해줘야 읽을 이유가 생긴다. 진단 결과를 이미 들고 있어서 여기서 판단한다.
+function patchNotesState(name) {
+  if (name === "leetkit-manager") {
+    const btn = document.getElementById("self-update-btn");
+    return btn.hidden
+      ? { label: `v${managerVersion || "?"} · 최신`, installed: managerVersion, update: false }
+      : { label: "업데이트 있음", installed: managerVersion, update: true };
+  }
+  const lens = lensDataCache[name];
+  if (!lens) return { label: "", installed: null, update: false };
+  if (lens.not_installed) return { label: "아직 설치 안 함", installed: null, update: false };
+  if (lens.update_available && lens.latest_version) {
+    return {
+      label: `v${lens.installed_version} → v${lens.latest_version}`,
+      installed: lens.installed_version,
+      update: true,
+    };
+  }
+  return { label: `v${lens.installed_version} · 최신`, installed: lens.installed_version, update: false };
+}
+
+function renderPatchNotes(products) {
+  const html = products
+    .map((p) => {
+      const state = patchNotesState(p.name);
+      const entries = p.entries.length
+        ? p.entries
+            .map((e) => {
+              // 설치된 버전보다 높은 버전 = 아직 안 받은 것. 목록을 감추지 않고
+              // 표시만 다르게 한다 — 무엇이 기다리는지 보이는 게 누를 이유가 된다.
+              const pending = state.installed && versionGreater(e.version, state.installed);
+              // **굵게**를 살린다 — 마크다운 파일이라 쓰는 사람이 자연스럽게 쓰는 표기다.
+              // renderEmphasis가 escapeHtml을 먼저 통과시키므로 태그는 글자로만 남는다.
+              const items = e.items.map((t) => `<li>${renderEmphasis(t)}</li>`).join("");
+              return `
+        <div class="patchnotes-entry">
+          <div class="patchnotes-entry-head">
+            <span class="patchnotes-version">v${escapeHtml(e.version)}</span>
+            <span class="patchnotes-date">${escapeHtml(e.date)}</span>
+            ${pending ? `<span class="patchnotes-badge">업데이트하면 적용</span>` : ""}
+          </div>
+          <ul class="patchnotes-items">${items}</ul>
+          ${e.note ? `<div class="patchnotes-note">${renderEmphasis(e.note)}</div>` : ""}
+        </div>`;
+            })
+            .join("")
+        : `<div class="patchnotes-items">기록된 변경사항이 없습니다.</div>`;
+      return `
+      <div class="patchnotes-product">
+        <div class="patchnotes-product-head">
+          <span class="patchnotes-name">${escapeHtml(p.display_name)}</span>
+          <span class="patchnotes-state ${state.update ? "update" : ""}">${escapeHtml(state.label)}</span>
+        </div>
+        ${entries}
+      </div>`;
+    })
+    .join("");
+  document.getElementById("patchnotes-body").innerHTML = html;
+}
+
+// a > b ? 숫자로만 비교한다 — 여기서 틀려도 배지 하나가 잘못 붙을 뿐이라
+// package_service.version_gt처럼 엄밀할 필요는 없다. 못 읽으면 안 붙인다.
+function versionGreater(a, b) {
+  const parse = (v) => String(v).split(/[.\-+]/).map((n) => parseInt(n, 10));
+  const x = parse(a);
+  const y = parse(b);
+  if (x.some(isNaN) || y.some(isNaN)) return false;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d !== 0) return d > 0;
+  }
+  return false;
+}
+
+async function openPatchNotes() {
+  const body = document.getElementById("patchnotes-body");
+  body.innerHTML = `<div class="patchnotes-empty">불러오는 중…</div>`;
+  document.getElementById("patchnotes-backdrop").hidden = false;
+  let products = [];
+  try {
+    products = await window.pywebview.api.patch_notes();
+  } catch {
+    /* 아래에서 안내한다 */
+  }
+  // 넷 다 비어 있으면 네트워크 문제다 — 빈 상자를 보여주면 고장으로 읽힌다.
+  if (!products.length || products.every((p) => !p.entries.length)) {
+    body.innerHTML = `<div class="patchnotes-empty">패치노트를 불러오지 못했습니다.\n인터넷 연결을 확인하고 다시 눌러주세요.</div>`;
+    return;
+  }
+  renderPatchNotes(products);
+}
+
+document.getElementById("patchnotes-btn").addEventListener("click", openPatchNotes);
+
+document.getElementById("patchnotes-close").addEventListener("click", () => {
+  document.getElementById("patchnotes-backdrop").hidden = true;
 });
 document.getElementById("tour-skip").addEventListener("click", endTour);
 document.getElementById("tour-next").addEventListener("click", () => {
@@ -2266,9 +2368,7 @@ document.getElementById("update-later").addEventListener("click", async () => {
 
 // 창은 닫지 않는다 — 패치노트를 브라우저에서 읽고 돌아와 바로 "지금 업데이트"를
 // 누를 수 있어야 한다.
-document.getElementById("update-patchnotes").addEventListener("click", () => {
-  window.pywebview.api.open_patch_notes();
-});
+document.getElementById("update-patchnotes").addEventListener("click", openPatchNotes);
 
 document.getElementById("update-now").addEventListener("click", async () => {
   const lenses = lensesWithUpdates();
@@ -2467,6 +2567,7 @@ async function checkSelfUpdate() {
   const info = await window.pywebview.api.check_self_update();
   // 지금 돌고 있는 버전을 항상 보여준다. 어디에도 안 보여서 "업데이트했는데 버튼이 안
   // 사라진다" 같은 상황에서 실제로 몇 버전이 도는지 확인할 방법이 없었다.
+  managerVersion = info.current || null;
   document.getElementById("manager-version").textContent = info.current ? `v${info.current}` : "";
 
   const btn = document.getElementById("self-update-btn");

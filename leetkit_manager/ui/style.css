@@ -1224,6 +1224,120 @@ body {
 
 /* ---------- 후기 요청 모달 ---------- */
 
+/* ---------- 패치노트 ---------- */
+
+/* 목록이 길어질 수 있는 유일한 모달이라 높이를 묶고 안에서 스크롤시킨다 —
+   창 밖으로 넘치면 아래쪽 버전이 통째로 안 보인다. */
+.patchnotes-modal {
+  width: 560px;
+  max-height: calc(100vh - 80px);
+}
+
+.patchnotes-body {
+  overflow-y: auto;
+  /* 모달 전체 높이에서 제목·버튼 줄을 뺀 만큼 */
+  max-height: calc(100vh - 210px);
+  padding-right: 4px;
+}
+
+.patchnotes-product {
+  border-top: 1px solid var(--hairline);
+  padding-top: 14px;
+  margin-top: 14px;
+}
+
+.patchnotes-product:first-child {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.patchnotes-product-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.patchnotes-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 17px;
+}
+
+/* 지금 이 사람 기준의 상태 — "이미 쓰고 있음 / 업데이트하면 적용됨 / 아직 설치 안 함".
+   이게 없으면 목록이 그냥 남의 이야기가 된다. */
+.patchnotes-state {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.patchnotes-state.update {
+  color: var(--ok);
+}
+
+.patchnotes-entry {
+  margin-top: 12px;
+}
+
+.patchnotes-entry-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.patchnotes-version {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.patchnotes-date {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* 아직 안 깔린 버전 — 목록 자체를 숨기지 않고 표시만 다르게 한다.
+   "무엇이 기다리고 있는지" 보이는 편이 업데이트를 누를 이유가 된다. */
+.patchnotes-badge {
+  font-size: 12px;
+  color: var(--ok);
+  border: 1px solid var(--ok);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.patchnotes-items {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.patchnotes-items li {
+  margin-bottom: 2px;
+}
+
+/* 인용문으로 적어둔 주의사항 — 목록과 섞이면 그냥 지나쳐 읽힌다. */
+.patchnotes-note {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--warn);
+  background: var(--panel-raised);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+.patchnotes-empty {
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
 /* 첫 업데이트 안내 — 재시작 모달의 .restart-why와 같은 모양으로 둔다. 둘 다
    "한 번만 붙는 보조 설명"이라는 같은 역할이라, 다르게 생기면 새 종류로 읽힌다. */
 .update-first-note {

@@ -554,8 +554,25 @@ class Api:
             shortcut.mark_shortcut_offered(target_dir)
         return {"ok": link_path is not None, "path": str(link_path) if link_path else None}
 
+    def patch_notes(self) -> list[dict]:
+        """네 제품의 PATCHNOTES.md를 읽어 제품별·버전별로 돌려준다.
+
+        지금 깔린 버전과 대조하는 일(무엇이 이미 반영됐고 무엇이 업데이트하면
+        적용되는지)은 JS가 한다 — 진단 결과를 이미 들고 있어서 여기서 또 부르면
+        같은 subprocess를 두 번 돌리게 된다.
+
+        네트워크를 타므로 실패할 수 있는데, 실패는 곧 "빈 목록"이다. 리포 하나가
+        잠깐 안 열려도 나머지는 그대로 보인다(patch_notes.fetch_one 참고)."""
+        from leetkit_manager import patch_notes
+
+        try:
+            return patch_notes.fetch_all()
+        except Exception:
+            return []
+
     def open_patch_notes(self) -> None:
-        """패치노트(Notion) — 앱 안에 끼워 넣기엔 너무 크니 시스템 기본 브라우저로."""
+        """예전 진입점 — 브라우저로 Notion 페이지를 열었다. 지금은 앱 안에서 보여준다
+        (patch_notes 참고). 옛 UI 파일이 남아 있는 경우를 대비해 남겨둔다."""
         webbrowser.open(PATCH_NOTES_URL)
 
     def copy_to_clipboard(self, text: str) -> bool:
