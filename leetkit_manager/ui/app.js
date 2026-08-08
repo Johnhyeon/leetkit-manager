@@ -350,9 +350,9 @@ function renderDetailModal(lens) {
   document.getElementById("detail-title").textContent = `${lens.display_name} 상세`;
   document.getElementById("detail-body").innerHTML = `
     <div class="field-list">
-      <div class="field-row"><span class="field-label">버전</span><span class="field-value emph">${lens.installed_version ? "v" + lens.installed_version : "미설치"}</span></div>
+      <div class="field-row"><span class="field-label">버전</span><span class="field-value emph">${lens.installed_version ? "v" + escapeHtml(lens.installed_version) : "미설치"}</span></div>
       <div class="field-row"><span class="field-label">업데이트</span><span class="field-value emph">${updateLabel(lens.update_available)}</span></div>
-      <div class="field-row"><span class="field-label">라이선스</span><span class="field-value emph">${licenseLabel(lens.license_status)}${lens.license_id_masked ? " · " + lens.license_id_masked : ""}</span></div>
+      <div class="field-row"><span class="field-label">라이선스</span><span class="field-value emph">${licenseLabel(lens.license_status)}${lens.license_id_masked ? " · " + escapeHtml(lens.license_id_masked) : ""}</span></div>
       <div class="field-row"><span class="field-label">MCP 등록</span><span class="field-value emph">${targets}</span></div>
       <div class="field-row"><span class="field-label">최근 진단</span><span class="field-value emph">${formatCheckedAt(lens.checked_at)}</span></div>
     </div>
@@ -1505,7 +1505,38 @@ const TOUR_STEPS = [
       "MCP 등록 — 어떤 앱에 연결할지 고릅니다\n" +
       "활성화 — 라이선스 키를 넣습니다\n" +
       "복구 — 발견된 문제를 자동으로 고칩니다\n\n" +
+      // 아래 넷은 상황·Lens에 따라서만 나타난다. 특히 삭제는 빨간 버튼인데 설명이
+      // 아예 없어서, 가이드를 다 본 사람도 그게 뭘 지우는지 모르는 채로 남았다.
+      "상황에 따라 더 나타나는 버튼도 있습니다.\n\n" +
+      "설치 / 업데이트 — 아직 없거나 새 버전이 있을 때\n" +
+      "텔레그램 로그인 — TelegramLens 카드에만\n" +
+      "삭제 — 이 Lens를 지웁니다(빨간 버튼).\n" +
+      "받은 라이선스 키는 그대로라 다시 설치할 수 있습니다.\n\n" +
       "결과 복사는 \"문제 자세히\" 창 안에 있습니다.",
+  },
+  // 상단바 버튼은 여기서부터 왼→오른쪽이 아니라 "자주 쓰는 순"으로 설명한다.
+  // 예전엔 지원 문의·매니저 업데이트·가이드 셋만 있어서, 정작 제일 많이 누르는
+  // 진단 재실행과 문제 해결의 핵심인 Claude 다시 시작이 설명 없이 놓여 있었다.
+  {
+    selector: "#refresh-btn",
+    title: "진단 재실행",
+    desc:
+      "지금 상태를 처음부터 다시 검사합니다.\n" +
+      "Lens를 설치하거나 키를 넣은 뒤 눌러 확인하세요.\n\n" +
+      "새 버전이 나왔는지도 같이 확인해서,\n있으면 위 버튼들에 업데이트 표시가 뜹니다.",
+  },
+  {
+    selector: "#restart-claude-btn",
+    title: "Claude 다시 시작",
+    desc:
+      "MCP에 등록해도 Claude Desktop은 켜져 있는 동안에는\n그 내용을 읽지 않습니다. 껐다 켜야 반영됩니다.\n\n" +
+      "\"등록은 됐다는데 Claude에서 도구가 안 보인다\" —\n대부분 여기를 누르면 해결됩니다.",
+    requiresVisible: true,
+  },
+  {
+    selector: "#patchnotes-btn",
+    title: "패치노트",
+    desc: "업데이트마다 무엇이 바뀌었는지 적어둔 페이지를 엽니다.",
   },
   {
     selector: "#support-btn",
@@ -1518,8 +1549,11 @@ const TOUR_STEPS = [
     selector: "#self-update-btn",
     title: "매니저 업데이트",
     desc:
+      // 예전엔 "닫히니 바탕화면 아이콘으로 다시 실행하세요"라고 안내했는데,
+      // 지금은 새 버전이 스스로 뜬다 — 동작이 바뀐 뒤 설명이 안 따라왔었다.
+      // 못 띄운 경우에만 그때 토스트로 직접 열어달라고 말해준다.
       "LeetKit Manager 자체의 새 버전이 있을 때만 나타납니다.\n\n" +
-      "누르면 설치하고 앱이 자동으로 닫히니,\n바탕화면 아이콘으로 다시 실행하시면 됩니다.",
+      "누르면 설치한 뒤 앱이 잠깐 닫혔다가\n새 버전으로 다시 열립니다. 그대로 기다리시면 됩니다.",
     requiresVisible: true,
   },
   {

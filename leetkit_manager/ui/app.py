@@ -96,7 +96,10 @@ def run() -> None:
             width=1180,
             height=820,
             min_size=(1040, 700),
-            background_color="#16181b",
+            # style.css의 --bg와 같은 값이어야 한다. 페이지가 그려지기 전까지 보이는
+            # 색이라, 다르면 창을 열 때·크기를 바꿀 때 한 번씩 다른 색이 번쩍인다
+            # (팔레트를 #16181b에서 내렸는데 여기가 안 따라와 있었다).
+            background_color="#0d0f12",
         )
         # 텔레그램 로그인 중에 창을 X로 닫으면 자식 프로세스가 그대로 남아
         # session.session을 계속 쥔다 — 다음 로그인이 SQLite 잠금으로 실패한다.

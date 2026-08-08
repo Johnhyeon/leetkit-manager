@@ -392,23 +392,27 @@ class TestFetchConfig:
         assert "_읽는_곳" not in config
         assert config["enabled"] is True
 
-    def test_shipped_config_file_is_valid_and_off_by_default(self):
-        """리포에 커밋된 파일이 곧 배포되는 설정이다 — 깨져 있으면 전부 무력화된다."""
+    def test_shipped_config_file_is_valid(self):
+        """리포에 커밋된 파일이 곧 배포되는 설정이다 — 깨져 있으면 전부 무력화된다.
+
+        enabled는 켜고 끄는 스위치라 값을 고정하지 않는다(예전엔 False로 못박아 둬서,
+        문구를 확정하고 켠 순간 테스트가 대신 깨졌다). 대신 타입과 날짜들의 앞뒤가
+        맞는지를 본다 — 여기가 어긋나면 아무한테도 안 뜨거나 닫힌 창을 열려 있다고
+        말하게 되는데, 릴리스 없이 커밋만으로 배포되는 파일이라 되돌릴 틈이 없다."""
         data = _shipped_config()
-        assert data["enabled"] is False, "문구를 확정하기 전에는 꺼진 채로 나가야 한다"
-        for key in (
-            "url",
-            "title",
-            "body",
-            "cta",
-            "min_days",
-            "min_launches",
-            "snooze_days",
-            "max_asks",
-            "deadline_days",
-            "review_window_days",
-        ):
-            assert key in data
+        assert isinstance(data["enabled"], bool)
+        for key in ("url", "title", "body", "cta"):
+            assert isinstance(data[key], str), key
+        assert data["title"] and data["body"], "제목·본문이 비면 빈 모달이 뜬다"
+        for key in ("min_days", "min_launches", "snooze_days", "max_asks", "deadline_days", "review_window_days"):
+            assert isinstance(data[key], int) and data[key] >= 0, key
+
+        assert data["max_asks"] >= 1, "0이면 켜도 아무한테도 안 뜬다"
+        assert data["min_days"] < data["deadline_days"], "첫 요청 시점이 마감보다 늦으면 영영 안 뜬다"
+        assert data["deadline_days"] <= data["review_window_days"], (
+            "안내하는 기한(review_window_days)보다 늦게까지 물어보면, 이미 닫힌 후기란을 두고 "
+            "'며칠 남았다'고 말하게 된다"
+        )
 
 
 class TestFirstRunInsideTheWindow:

@@ -199,8 +199,10 @@ body {
   align-content: start;
 }
 
-/* 3개 중 마지막 카드는 남는 칸에 혼자 두지 않고 아래 줄 전체를 쓴다. */
-.card:last-child {
+/* 마지막 카드가 아래 줄에 혼자 남을 때만 줄 전체를 쓴다 — 2열 그리드이므로 개수가
+   홀수일 때가 그 경우다. 예전엔 개수와 무관하게 마지막을 전폭으로 만들어서, Lens가
+   2개나 4개가 되면 마지막 하나만 혼자 넓어지는 모양이 됐다(지금 3개라 안 드러날 뿐). */
+.card:last-child:nth-child(odd) {
   grid-column: 1 / -1;
 }
 
@@ -214,7 +216,7 @@ body {
 /* 디자인 안 7a — 전폭 카드는 안을 2단으로 나누고, 버튼은 그 아래 전폭에 왼쪽 정렬로.
    전폭인데 안이 1단이면 오른쪽 가로폭이 통째로 빈다. 버튼을 한쪽 단에 넣으면 위
    두 카드와 줄이 안 맞아서, 2단 아래 전폭에 두면 정렬도 맞고 균형도 유지된다. */
-.card:last-child {
+.card:last-child:nth-child(odd) {
   display: grid;
   grid-template-columns: 1fr 1px 1fr;
   grid-template-rows: 1fr auto;
@@ -222,8 +224,8 @@ body {
   row-gap: 14px;
 }
 
-.card:last-child .card-main,
-.card:last-child .card-status {
+.card:last-child:nth-child(odd) .card-main,
+.card:last-child:nth-child(odd) .card-status {
   display: flex;
   flex-direction: column;
   gap: 11px;
@@ -231,7 +233,7 @@ body {
   grid-row: 1;
 }
 
-.card:last-child .card-main {
+.card:last-child:nth-child(odd) .card-main {
   grid-column: 1;
 }
 
@@ -239,19 +241,19 @@ body {
    오른쪽에 보여줄 게 있을 때만 긋는다(:has). 문제도 진행중도 없으면 선만 덩그러니
    남아 "뭔가 안 뜬 것"처럼 보인다. :has를 모르는 렌더러에서는 이 규칙이 통째로
    무시돼 선이 안 그어질 뿐, 배치는 그대로다. */
-.card:last-child:has(.status-block, .progress-block, .problem-detail)::before {
+.card:last-child:nth-child(odd):has(.status-block, .progress-block, .problem-detail)::before {
   content: "";
   grid-column: 2;
   grid-row: 1;
   background: var(--hairline);
 }
 
-.card:last-child .card-status {
+.card:last-child:nth-child(odd) .card-status {
   grid-column: 3;
   justify-content: center; /* 알림이 하나뿐일 때 위에 붙지 않고 가운데 온다 */
 }
 
-.card:last-child .actions {
+.card:last-child:nth-child(odd) .actions {
   grid-column: 1 / -1;
   grid-row: 2;
   border-top: 1px solid var(--hairline);
@@ -1229,8 +1231,9 @@ body {
 /* 주 고객층(40-50대) 기준 — 본문을 카드 설명보다 한 단계 크게, 줄간격도 넉넉히.
    읽는 데 힘이 들면 그 자리에서 닫힌다.
    pre-line: 원격 설정(review_prompt.json)의 줄바꿈을 그대로 살린다 — 문구를 고칠 때
-   릴리스 없이 문단 나누기까지 조절할 수 있어야 한다. textContent로 넣으므로 HTML이
-   섞여 들어올 여지는 없다. */
+   릴리스 없이 문단 나누기까지 조절할 수 있어야 한다. **굵게**를 지원하느라 지금은
+   innerHTML로 넣지만, 그 전에 renderEmphasis가 escapeHtml을 먼저 통과시키므로
+   원격 문구의 태그는 글자로만 남는다(app.js renderEmphasis 참고). */
 .review-body {
   font-size: 15px;
   line-height: 1.7;
