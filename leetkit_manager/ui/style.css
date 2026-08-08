@@ -1226,37 +1226,78 @@ body {
 
 /* ---------- 패치노트 ---------- */
 
-/* 목록이 길어질 수 있는 유일한 모달이라 높이를 묶고 안에서 스크롤시킨다 —
-   창 밖으로 넘치면 아래쪽 버전이 통째로 안 보인다. */
+/* 넷을 세로로 쌓지 않고 탭으로 나눈 화면. 이력이 쌓일수록 세로 나열은 그냥 긴
+   스크롤이 되고, 자기가 쓰는 제품을 찾으려고 훑어야 한다. */
 .patchnotes-modal {
-  width: 560px;
+  width: 660px;
   max-height: calc(100vh - 80px);
 }
 
+.patchnotes-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+/* 탭 하나가 제품 하나. 이름 + 지금 상태를 두 줄로 — 주 고객층(40-50대) 기준으로
+   누를 곳이 충분히 크고, 어느 제품에 업데이트가 있는지 열자마자 보인다. */
+.patchnotes-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 8px;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.patchnotes-tab:hover {
+  border-color: var(--text-dim);
+}
+
+.patchnotes-tab.selected {
+  border-color: var(--ok);
+  background: var(--ok-dim);
+}
+
+.patchnotes-tab-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  /* 이름이 길어도(TelegramLens) 탭 폭을 밀어내지 않게 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patchnotes-tab-state {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.patchnotes-tab-state.update {
+  color: var(--ok);
+}
+
 .patchnotes-body {
+  margin-top: 14px;
   overflow-y: auto;
-  /* 모달 전체 높이에서 제목·버튼 줄을 뺀 만큼 */
-  max-height: calc(100vh - 210px);
+  /* 모달 전체 높이에서 제목·탭·버튼 줄을 뺀 만큼 */
+  max-height: calc(100vh - 280px);
   padding-right: 4px;
 }
 
-.patchnotes-product {
-  border-top: 1px solid var(--hairline);
-  padding-top: 14px;
-  margin-top: 14px;
-}
-
-.patchnotes-product:first-child {
-  border-top: 0;
-  padding-top: 0;
-  margin-top: 0;
-}
-
-.patchnotes-product-head {
+.patchnotes-panel-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
   flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
 }
 
 .patchnotes-name {
@@ -1265,8 +1306,6 @@ body {
   font-size: 17px;
 }
 
-/* 지금 이 사람 기준의 상태 — "이미 쓰고 있음 / 업데이트하면 적용됨 / 아직 설치 안 함".
-   이게 없으면 목록이 그냥 남의 이야기가 된다. */
 .patchnotes-state {
   font-size: 13px;
   color: var(--text-dim);
@@ -1277,18 +1316,23 @@ body {
 }
 
 .patchnotes-entry {
-  margin-top: 12px;
+  margin-top: 16px;
 }
+
+/* 아직 안 받은 버전은 배지("업데이트하면 적용")와 아래 구분선이 이미 말해준다.
+   여기에 왼쪽 선까지 그었더니 같은 말을 세 번 하는 데다, 그 선만 본문 열 밖으로
+   2px 삐져나와 정렬이 어긋나 보였다. 신호는 둘이면 충분하다. */
 
 .patchnotes-entry-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .patchnotes-version {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text);
 }
 
@@ -1297,8 +1341,6 @@ body {
   color: var(--text-dim);
 }
 
-/* 아직 안 깔린 버전 — 목록 자체를 숨기지 않고 표시만 다르게 한다.
-   "무엇이 기다리고 있는지" 보이는 편이 업데이트를 누를 이유가 된다. */
 .patchnotes-badge {
   font-size: 12px;
   color: var(--ok);
@@ -1307,21 +1349,41 @@ body {
   padding: 1px 8px;
 }
 
+/* "여기까지 쓰고 계십니다" — 이 선 하나가 "업데이트하면 뭐가 생기는데?"에 바로
+   답한다. 없으면 버전 번호를 하나하나 자기 것과 대조해봐야 한다. */
+.patchnotes-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.patchnotes-divider::before,
+.patchnotes-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+
 .patchnotes-items {
-  margin: 6px 0 0;
-  padding-left: 18px;
-  font-size: 14.5px;
-  line-height: 1.7;
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 15px;
+  line-height: 1.75;
   color: var(--text-muted);
 }
 
 .patchnotes-items li {
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 
 /* 인용문으로 적어둔 주의사항 — 목록과 섞이면 그냥 지나쳐 읽힌다. */
 .patchnotes-note {
-  margin-top: 8px;
+  margin-top: 10px;
   padding: 10px 12px;
   border-left: 2px solid var(--warn);
   background: var(--panel-raised);
@@ -1333,9 +1395,11 @@ body {
 }
 
 .patchnotes-empty {
-  font-size: 14.5px;
-  line-height: 1.7;
+  font-size: 15px;
+  line-height: 1.75;
   color: var(--text-muted);
+  white-space: pre-line;
+  padding: 8px 0;
 }
 
 /* 첫 업데이트 안내 — 재시작 모달의 .restart-why와 같은 모양으로 둔다. 둘 다

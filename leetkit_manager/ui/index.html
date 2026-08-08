@@ -131,7 +131,12 @@
 <div class="modal-backdrop" id="patchnotes-backdrop" hidden>
   <div class="modal patchnotes-modal">
     <div class="modal-title">패치노트</div>
-    <div class="patchnotes-body" id="patchnotes-body"></div>
+    <!-- 제품을 한 번에 하나만 본다. 넷을 세로로 쌓으면 이력이 늘수록 그냥 긴
+         스크롤이 되고, 자기가 쓰는 제품을 찾으려고 훑어야 한다. -->
+    <div class="patchnotes-tabs" id="patchnotes-tabs"></div>
+    <div class="patchnotes-body" id="patchnotes-body">
+      <div class="patchnotes-panel" id="patchnotes-panel"></div>
+    </div>
     <div class="modal-actions">
       <button class="action-btn primary" id="patchnotes-close">닫기</button>
     </div>

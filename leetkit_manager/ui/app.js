@@ -1721,63 +1721,134 @@ let managerVersion = null;
 // 되고, "이건 이미 쓰고 계신 버전에 들어 있다 / 이건 업데이트하면 적용된다"를
 // 구분해줘야 읽을 이유가 생긴다. 진단 결과를 이미 들고 있어서 여기서 판단한다.
 function patchNotesState(name) {
+  // label = 패널 머리말에 쓰는 자세한 표기, short = 탭에 들어가는 짧은 표기.
+  // 탭은 넷이 한 줄에 들어가야 해서 "v0.6.12 → v0.6.13" 같은 건 안 들어간다.
   if (name === "leetkit-manager") {
-    const btn = document.getElementById("self-update-btn");
-    return btn.hidden
-      ? { label: `v${managerVersion || "?"} · 최신`, installed: managerVersion, update: false }
-      : { label: "업데이트 있음", installed: managerVersion, update: true };
+    const hasUpdate = !document.getElementById("self-update-btn").hidden;
+    if (!managerVersion) return { label: "", short: "", installed: null, update: false };
+    return hasUpdate
+      ? { label: `v${managerVersion} · 업데이트 있음`, short: "업데이트 있음", installed: managerVersion, update: true }
+      : { label: `v${managerVersion} · 최신`, short: "최신", installed: managerVersion, update: false };
   }
   const lens = lensDataCache[name];
-  if (!lens) return { label: "", installed: null, update: false };
-  if (lens.not_installed) return { label: "아직 설치 안 함", installed: null, update: false };
+  if (!lens) return { label: "", short: "", installed: null, update: false };
+  if (lens.not_installed) {
+    return { label: "아직 설치 안 함", short: "미설치", installed: null, update: false };
+  }
   if (lens.update_available && lens.latest_version) {
     return {
       label: `v${lens.installed_version} → v${lens.latest_version}`,
+      short: "업데이트 있음",
       installed: lens.installed_version,
       update: true,
     };
   }
-  return { label: `v${lens.installed_version} · 최신`, installed: lens.installed_version, update: false };
+  return {
+    label: `v${lens.installed_version} · 최신`,
+    short: "최신",
+    installed: lens.installed_version,
+    update: false,
+  };
+}
+
+// 지금 고른 제품. 모달을 다시 열면 처음부터 — 지난번에 뭘 보고 있었는지는
+// 기억할 가치가 없고, 기억하면 "업데이트 있는 제품 먼저"라는 기본값을 덮어버린다.
+let patchNotesProducts = [];
+let patchNotesSelected = null;
+
+// `2026-08-08` → `2026년 8월 8일`. 숫자와 붙임표만 있는 날짜는 훑을 때 눈에 안 걸린다.
+// 형식이 다르면(사람이 손으로 쓰는 파일이다) 건드리지 않고 그대로 보여준다.
+function formatPatchDate(raw) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(raw).trim());
+  if (!m) return raw;
+  return `${m[1]}년 ${Number(m[2])}월 ${Number(m[3])}일`;
+}
+
+function renderPatchNotesTabs() {
+  document.getElementById("patchnotes-tabs").innerHTML = patchNotesProducts
+    .map((p) => {
+      const state = patchNotesState(p.name);
+      const selected = p.name === patchNotesSelected;
+      return `
+      <button class="patchnotes-tab${selected ? " selected" : ""}" data-product="${escapeAttr(p.name)}">
+        <span class="patchnotes-tab-name">${escapeHtml(p.display_name)}</span>
+        <span class="patchnotes-tab-state${state.update ? " update" : ""}">${escapeHtml(state.short)}</span>
+      </button>`;
+    })
+    .join("");
+}
+
+function renderPatchNotesPanel() {
+  const product = patchNotesProducts.find((p) => p.name === patchNotesSelected);
+  const panel = document.getElementById("patchnotes-panel");
+  if (!product) {
+    panel.innerHTML = "";
+    return;
+  }
+  const state = patchNotesState(product.name);
+  if (!product.entries.length) {
+    panel.innerHTML = `<div class="patchnotes-empty">아직 기록된 변경사항이 없습니다.</div>`;
+    return;
+  }
+
+  // 쓰고 있는 버전보다 위(=아직 안 받은 것)와 아래(=이미 쓰는 것)를 선으로 가른다.
+  // 이 선 하나가 "그래서 업데이트하면 뭐가 생기는데?"에 바로 답한다 — 없으면
+  // 버전 번호를 하나하나 자기 것과 대조해봐야 한다.
+  let dividerPlaced = false;
+  const rows = product.entries.map((e) => {
+    const pending = state.installed && versionGreater(e.version, state.installed);
+    let divider = "";
+    if (!pending && !dividerPlaced && state.installed) {
+      dividerPlaced = true;
+      // 첫 항목부터 이미 쓰는 버전이면 위에 새로 받을 게 없다는 뜻이라 선을 안 긋는다.
+      if (product.entries.indexOf(e) > 0) {
+        divider = `
+        <div class="patchnotes-divider">
+          <span>여기까지 쓰고 계십니다 · v${escapeHtml(state.installed)}</span>
+        </div>`;
+      }
+    }
+    // **굵게**를 살린다 — 마크다운 파일이라 쓰는 사람이 자연스럽게 쓰는 표기다.
+    // renderEmphasis가 escapeHtml을 먼저 통과시키므로 태그는 글자로만 남는다.
+    const items = e.items.map((t) => `<li>${renderEmphasis(t)}</li>`).join("");
+    return `${divider}
+      <div class="patchnotes-entry${pending ? " pending" : ""}">
+        <div class="patchnotes-entry-head">
+          <span class="patchnotes-version">v${escapeHtml(e.version)}</span>
+          <span class="patchnotes-date">${escapeHtml(formatPatchDate(e.date))}</span>
+          ${pending ? `<span class="patchnotes-badge">업데이트하면 적용</span>` : ""}
+        </div>
+        <ul class="patchnotes-items">${items}</ul>
+        ${e.note ? `<div class="patchnotes-note">${renderEmphasis(e.note)}</div>` : ""}
+      </div>`;
+  });
+
+  panel.innerHTML = `
+    <div class="patchnotes-panel-head">
+      <span class="patchnotes-name">${escapeHtml(product.display_name)}</span>
+      <span class="patchnotes-state${state.update ? " update" : ""}">${escapeHtml(state.label)}</span>
+    </div>
+    ${rows.join("")}`;
+  panel.scrollTop = 0; // 제품을 바꾸면 항상 맨 위부터 — 이전 제품의 스크롤 위치가 남으면 빈 화면처럼 보인다
 }
 
 function renderPatchNotes(products) {
-  const html = products
-    .map((p) => {
-      const state = patchNotesState(p.name);
-      const entries = p.entries.length
-        ? p.entries
-            .map((e) => {
-              // 설치된 버전보다 높은 버전 = 아직 안 받은 것. 목록을 감추지 않고
-              // 표시만 다르게 한다 — 무엇이 기다리는지 보이는 게 누를 이유가 된다.
-              const pending = state.installed && versionGreater(e.version, state.installed);
-              // **굵게**를 살린다 — 마크다운 파일이라 쓰는 사람이 자연스럽게 쓰는 표기다.
-              // renderEmphasis가 escapeHtml을 먼저 통과시키므로 태그는 글자로만 남는다.
-              const items = e.items.map((t) => `<li>${renderEmphasis(t)}</li>`).join("");
-              return `
-        <div class="patchnotes-entry">
-          <div class="patchnotes-entry-head">
-            <span class="patchnotes-version">v${escapeHtml(e.version)}</span>
-            <span class="patchnotes-date">${escapeHtml(e.date)}</span>
-            ${pending ? `<span class="patchnotes-badge">업데이트하면 적용</span>` : ""}
-          </div>
-          <ul class="patchnotes-items">${items}</ul>
-          ${e.note ? `<div class="patchnotes-note">${renderEmphasis(e.note)}</div>` : ""}
-        </div>`;
-            })
-            .join("")
-        : `<div class="patchnotes-items">기록된 변경사항이 없습니다.</div>`;
-      return `
-      <div class="patchnotes-product">
-        <div class="patchnotes-product-head">
-          <span class="patchnotes-name">${escapeHtml(p.display_name)}</span>
-          <span class="patchnotes-state ${state.update ? "update" : ""}">${escapeHtml(state.label)}</span>
-        </div>
-        ${entries}
-      </div>`;
-    })
-    .join("");
-  document.getElementById("patchnotes-body").innerHTML = html;
+  patchNotesProducts = products;
+  // 업데이트가 있는 제품을 먼저 보여준다 — 지금 이 사람이 알고 싶은 게 그거다.
+  const withUpdate = products.find((p) => p.entries.length && patchNotesState(p.name).update);
+  const withEntries = products.find((p) => p.entries.length);
+  patchNotesSelected = (withUpdate || withEntries || products[0]).name;
+  renderPatchNotesTabs();
+  renderPatchNotesPanel();
 }
+
+document.getElementById("patchnotes-tabs").addEventListener("click", (e) => {
+  const tab = e.target.closest("[data-product]");
+  if (!tab || tab.dataset.product === patchNotesSelected) return;
+  patchNotesSelected = tab.dataset.product;
+  renderPatchNotesTabs();
+  renderPatchNotesPanel();
+});
 
 // a > b ? 숫자로만 비교한다 — 여기서 틀려도 배지 하나가 잘못 붙을 뿐이라
 // package_service.version_gt처럼 엄밀할 필요는 없다. 못 읽으면 안 붙인다.
@@ -1794,8 +1865,9 @@ function versionGreater(a, b) {
 }
 
 async function openPatchNotes() {
-  const body = document.getElementById("patchnotes-body");
-  body.innerHTML = `<div class="patchnotes-empty">불러오는 중…</div>`;
+  const panel = document.getElementById("patchnotes-panel");
+  document.getElementById("patchnotes-tabs").innerHTML = "";
+  panel.innerHTML = `<div class="patchnotes-empty">불러오는 중…</div>`;
   document.getElementById("patchnotes-backdrop").hidden = false;
   let products = [];
   try {
