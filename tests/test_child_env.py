@@ -113,3 +113,41 @@ def test_every_spawn_site_passes_env():
                         break
             call = source[start:end]
             assert "env=" in call, f"{name}의 subprocess 호출에 env=child_env()가 없다:\n{call[:200]}"
+
+
+class TestMacRelaunch:
+    """맥은 exe가 아니라 uv로 깔리므로 위 부트로더 버그가 구조적으로 안 난다
+    (is_frozen_exe()가 False → GitHub exe 교체가 아니라 uv 경로를 탄다).
+
+    대신 맥에만 있는 실패 지점이 하나 있다 — `.app`을 더블클릭해 띄우면 그 프로세스의
+    PATH가 launchd 기본값(/usr/bin:/bin:...)이라 `~/.local/bin`이 안 들어 있다.
+    재실행 명령을 bare 이름으로 넘기면 그 자리에서 not found로 죽고, 화면에는
+    "다시 시작합니다"만 뜬 채 아무것도 안 열린다. 절대경로로 넘기는지 못박아 둔다.
+    """
+
+    def test_relaunch_uses_absolute_path_when_path_is_bare(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(package_service.sys, "platform", "darwin")
+        bin_dir = tmp_path / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "leetkit-manager").write_text("#!/bin/sh\n", encoding="utf-8")
+        monkeypatch.setattr(package_service.Path, "home", staticmethod(lambda: tmp_path))
+        # launchd PATH 재현 — uv가 깐 디렉터리가 PATH에 없다
+        monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        monkeypatch.delenv("UV_TOOL_BIN_DIR", raising=False)
+        monkeypatch.delenv("XDG_BIN_HOME", raising=False)
+
+        with patch.object(package_service.subprocess, "Popen") as popen:
+            assert package_service.relaunch_after_exit() is True
+
+        command = popen.call_args.args[0][0]
+        assert command == str(bin_dir / "leetkit-manager"), (
+            "bare 이름으로 넘기면 .app에서 띄운 맥에서는 못 찾는다"
+        )
+
+    def test_relaunch_does_not_pass_windows_only_flags(self, monkeypatch):
+        """POSIX에서 creationflags가 0이 아니면 Popen이 ValueError를 던진다."""
+        monkeypatch.setattr(package_service.sys, "platform", "darwin")
+        with patch.object(package_service.subprocess, "Popen") as popen:
+            package_service.relaunch_after_exit()
+        assert popen.call_args.kwargs["creationflags"] == 0
+        assert popen.call_args.kwargs["start_new_session"] is True

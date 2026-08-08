@@ -1554,12 +1554,18 @@ const TOUR_STEPS = [
   },
   {
     selector: "#restart-claude-btn",
-    title: "Claude 다시 시작",
-    desc:
-      "Claude Desktop은 켜질 때 설정을 읽고 Lens를 띄웁니다.\n" +
-      "그래서 켜져 있는 동안에 바꾼 것은 그대로 반영되지 않습니다.\n\n" +
-      "MCP 등록을 바꿨을 때, Lens를 업데이트·삭제했을 때\n이 버튼을 눌러주세요.\n\n" +
-      "\"등록은 됐다는데 도구가 안 보인다\",\n\"업데이트했는데 그대로다\" —\n대부분 여기를 누르면 해결됩니다.",
+    // 이 버튼은 한 자리에서 두 가지로 바뀐다 — Claude Desktop이 없으면 "받기".
+    // 설명이 "다시 시작" 하나로 고정돼 있으면, 정작 아직 안 깐 사람에게 엉뚱한
+    // 말을 하게 된다(Lens는 Claude 위에서만 도니 그 사람에겐 이게 더 중요하다).
+    title: (el) => (el.textContent.includes("받기") ? "Claude Desktop 받기" : "Claude 다시 시작"),
+    desc: (el) =>
+      el.textContent.includes("받기")
+        ? "Lens는 Claude Desktop 안에서 동작합니다.\n아직 없으시면 여기를 눌러 받으세요.\n\n" +
+          "설치가 끝나면 \"진단 재실행\"을 눌러주세요.\n그러면 이 버튼이 \"Claude 다시 시작\"으로 바뀝니다."
+        : "Claude Desktop은 켜질 때 설정을 읽고 Lens를 띄웁니다.\n" +
+          "그래서 켜져 있는 동안에 바꾼 것은 그대로 반영되지 않습니다.\n\n" +
+          "MCP 등록을 바꿨을 때, Lens를 업데이트·삭제했을 때\n이 버튼을 눌러주세요.\n\n" +
+          "\"등록은 됐다는데 도구가 안 보인다\",\n\"업데이트했는데 그대로다\" —\n대부분 여기를 누르면 해결됩니다.",
     requiresVisible: true,
   },
   {
@@ -1576,14 +1582,20 @@ const TOUR_STEPS = [
   },
   {
     selector: "#self-update-btn",
+    // 이 버튼은 새 버전이 있을 때만 나타난다 — requiresVisible로 두면 최신인 사람은
+    // 이 단계를 통째로 못 본다. 즉 "평소에는 아무도 설명을 못 받는" 단계였다.
+    // 안 보일 때는 버튼들이 모인 자리를 대신 가리키고, 어디에 생기는지 알려준다.
+    fallbackSelector: ".topbar-actions",
     title: "매니저 업데이트",
-    desc:
+    desc: (el, usedFallback) =>
       // 예전엔 "닫히니 바탕화면 아이콘으로 다시 실행하세요"라고 안내했는데,
       // 지금은 새 버전이 스스로 뜬다 — 동작이 바뀐 뒤 설명이 안 따라왔었다.
-      // 못 띄운 경우에만 그때 토스트로 직접 열어달라고 말해준다.
-      "LeetKit Manager 자체의 새 버전이 있을 때만 나타납니다.\n\n" +
-      "누르면 설치한 뒤 앱이 잠깐 닫혔다가\n새 버전으로 다시 열립니다. 그대로 기다리시면 됩니다.",
-    requiresVisible: true,
+      (usedFallback
+        ? "LeetKit Manager 자체에 새 버전이 나오면\n이 줄 맨 앞에 \"업데이트\" 버튼이 생깁니다.\n" +
+          "지금은 최신이라 안 보입니다.\n\n"
+        : "LeetKit Manager 자체의 새 버전이 있을 때만 나타납니다.\n\n") +
+      "누르면 설치한 뒤 앱이 잠깐 닫혔다가\n새 버전으로 다시 열립니다. 그대로 기다리시면 됩니다.\n\n" +
+      "Lens 업데이트와는 별개입니다 — 그쪽은 각 카드에서 합니다.",
   },
   {
     selector: "#guide-btn",
@@ -1649,10 +1661,42 @@ function positionTour(i) {
   step.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
+// 화면에 실제로 자리를 차지하고 있는지. hidden 속성만 보면 부모가 숨겨진 경우를 놓친다.
+function isOnScreen(el) {
+  return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+}
+
+// title·desc는 문자열이거나 (el, usedFallback) => 문자열이다. 버튼 하나가 상황에 따라
+// 다른 것을 뜻할 때(예: "Claude 다시 시작" / "Claude Desktop 받기") 설명도 같이
+// 바뀌어야 해서 — 고정 문구로 두면 둘 중 한쪽에겐 틀린 말을 하게 된다.
+function resolveStepText(value, el, usedFallback) {
+  // el이 없는 단계는 어차피 아래에서 걸러진다 — 여기서 함수를 부르면 그 전에 터진다.
+  if (typeof value !== "function") return value;
+  return el ? value(el, usedFallback) : "";
+}
+
 function startTour() {
-  tourSteps = TOUR_STEPS.map((s) => ({ ...s, el: document.querySelector(s.selector) })).filter(
-    (s) => s.el && (!s.requiresVisible || !s.el.hidden)
-  );
+  tourSteps = TOUR_STEPS.map((s) => {
+    let el = document.querySelector(s.selector);
+    let usedFallback = false;
+    // 가리킬 대상이 지금 안 보이면, 대신 가리킬 자리를 준 단계는 그 자리로 넘어간다.
+    // 안 그러면 "새 버전이 있을 때만 나타나는 버튼"처럼, 정작 평소에는 아무도
+    // 설명을 못 받는 단계가 생긴다.
+    if (!isOnScreen(el) && s.fallbackSelector) {
+      const fallback = document.querySelector(s.fallbackSelector);
+      if (isOnScreen(fallback)) {
+        el = fallback;
+        usedFallback = true;
+      }
+    }
+    return {
+      ...s,
+      el,
+      usedFallback,
+      title: resolveStepText(s.title, el, usedFallback),
+      desc: resolveStepText(s.desc, el, usedFallback),
+    };
+  }).filter((s) => s.el && (s.usedFallback || !s.requiresVisible || !s.el.hidden));
   if (!tourSteps.length) return;
   tourIndex = 0;
   document.getElementById("tour-overlay").hidden = false;
