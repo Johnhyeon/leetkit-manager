@@ -304,20 +304,52 @@ def register_api_key(
             f"{lens.display_name}는 credential_kind={credential_kind!r}를 지원하지 않습니다. "
             f"지원: {lens.extra_credentials or '(없음)'}"
         )
-    cmd = [package_service.resolve_lens_command(lens.setup_cmd), "--api-key-stdin", "--json", "--non-interactive"]
+    base = [package_service.resolve_lens_command(lens.setup_cmd), "--api-key-stdin", "--json", "--non-interactive"]
+
+    # --target을 안 주면 Lens는 "auto"로 떨어지는데, auto는 claude CLI와 Claude Desktop
+    # 설정 폴더만 보고 **Codex는 절대 감지하지 않는다**(dartlens/setup_claude.py의
+    # _resolve_targets). 그래서 Codex에 등록해둔 사람이 키를 넣으면 Codex 항목만 빠진
+    # 채로 끝났다 — 키 자체는 OS 자격 증명 저장소에 들어가서 동작은 하지만, 결과에
+    # Codex가 안 잡혀 "등록 안 됨"으로 보인다. 지금 등록돼 있는 곳을 그대로 넘긴다.
+    #
+    # 예전엔 targets를 받아도 `"both"` 아니면 `targets[0]` 하나로 접었다 — claude와
+    # codex가 같이 등록된 사람은 codex가 통째로 버려졌다. setup_lens와 같은 방식으로
+    # 나눠 부른다(Lens CLI의 --target이 한 번에 한 값만 받는다).
+    target_groups: list[str] = []
     if targets:
-        target_arg = "both" if set(targets) >= {"claude-desktop", "claude-code"} else targets[0]
-        cmd += ["--target", target_arg]
-    process, payload = run_json_cli(cmd, timeout=timeout, input_text=api_key)
-    if process.error == "not_found":
-        return SetupResult(
-            ok=False, error_code="not_installed",
-            error=f"{lens.display_name}가 아직 설치되지 않았습니다. 먼저 '설치' 버튼을 눌러주세요.",
-        )
-    if payload is None:
-        error = _unsupported_flag_message(lens, process) or f"setup 응답을 파싱할 수 없습니다 (exit={process.exit_code})."
-        return SetupResult(ok=False, error=error)
-    return SetupResult.from_json(payload, exit_code=process.exit_code)
+        remaining = list(dict.fromkeys(targets))
+        if _CLAUDE_PAIR <= set(remaining):
+            target_groups.append("both")
+            remaining = [t for t in remaining if t not in _CLAUDE_PAIR]
+        target_groups += remaining
+    else:
+        target_groups = [""]  # --target 없이 한 번 (기존 auto 동작)
+
+    merged_targets: list = []
+    ok = True
+    error: str | None = None
+    error_code: str | None = None
+    raw: dict = {}
+    for target_arg in target_groups:
+        cmd = base + (["--target", target_arg] if target_arg else [])
+        process, payload = run_json_cli(cmd, timeout=timeout, input_text=api_key)
+        if process.error == "not_found":
+            return SetupResult(
+                ok=False, error_code="not_installed",
+                error=f"{lens.display_name}가 아직 설치되지 않았습니다. 먼저 '설치' 버튼을 눌러주세요.",
+            )
+        if payload is None:
+            ok = False
+            error = _unsupported_flag_message(lens, process) or f"setup 응답을 파싱할 수 없습니다 (exit={process.exit_code})."
+            continue
+        result = SetupResult.from_json(payload, exit_code=process.exit_code)
+        merged_targets.extend(result.targets)
+        raw = result.raw
+        if not result.ok:
+            ok = False
+            error = result.error
+            error_code = result.error_code
+    return SetupResult(ok=ok, targets=merged_targets, error=error, error_code=error_code, raw=raw)
 
 
 def repair_lens(

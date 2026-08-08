@@ -244,10 +244,20 @@ class Api:
         }
 
     def register_api_key(self, lens_name: str, credential_kind: str, api_key: str) -> dict:
-        """라이선스 키 말고 추가로 필요한 자격증명(DartLens의 DART API 키 등) 등록."""
+        """라이선스 키 말고 추가로 필요한 자격증명(DartLens의 DART API 키 등) 등록.
+
+        지금 등록돼 있는 MCP 대상을 같이 넘긴다. 안 넘기면 Lens가 "auto"로 떨어지는데,
+        auto는 Claude 쪽만 감지하고 **Codex는 절대 안 잡는다** — Codex에 등록해둔
+        사람이 키를 넣으면 Codex만 빠진 채로 끝났다. 아직 아무 데도 등록 안 했으면
+        빈 목록이 되고, 그때는 예전처럼 auto로 둔다(등록이 먼저인 순서라 그게 맞다)."""
         lens = get_lens(lens_name)
         try:
-            result = orchestrator.register_api_key(lens, credential_kind, api_key)
+            diag = orchestrator.diagnose_lens(lens)
+            targets = list((diag.report.targets if diag.report else []) or [])
+        except Exception:
+            targets = []  # 진단이 안 되도 키 등록 자체는 막지 않는다
+        try:
+            result = orchestrator.register_api_key(lens, credential_kind, api_key, targets=targets or None)
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         return {
