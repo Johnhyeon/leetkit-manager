@@ -1224,6 +1224,56 @@ body {
 
 /* ---------- 후기 요청 모달 ---------- */
 
+/* 첫 업데이트 안내 — 재시작 모달의 .restart-why와 같은 모양으로 둔다. 둘 다
+   "한 번만 붙는 보조 설명"이라는 같은 역할이라, 다르게 생기면 새 종류로 읽힌다. */
+.update-first-note {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-muted);
+  white-space: pre-line;
+}
+
+.update-first-note[hidden] {
+  display: none;
+}
+
+.restart-modal {
+  width: 460px;
+}
+
+/* 후기 모달과 같은 크기·줄간격 — 주 고객층(40-50대) 기준으로 본문을 카드보다 한
+   단계 크게 둔다. 여기는 안 하면 새 버전이 적용되지 않는 필수 단계라 특히 그렇다. */
+.restart-body {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+/* 처음 업데이트하는 사람에게만 한 번 붙는 "왜 껐다 켜야 하나" 설명. 매번 보여주면
+   아는 사람에겐 잔소리라 첫 회에만 뜬다. 본문과 섞이면 그냥 지나쳐 읽히므로
+   상자로 떼어놓되, 읽어도 되고 넘겨도 되는 보조 설명이라 한 단계 흐리게. */
+.restart-why {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-muted);
+  white-space: pre-line;
+}
+
+.restart-why[hidden] {
+  display: none;
+}
+
 .review-modal {
   width: 440px;
 }

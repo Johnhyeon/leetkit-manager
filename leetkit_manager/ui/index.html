@@ -117,10 +117,28 @@
   <div class="modal update-modal">
     <div class="modal-title">업데이트가 있습니다</div>
     <div class="update-list" id="update-list"></div>
+    <!-- 처음 업데이트하는 사람에게만 한 번. 무슨 일이 일어나는지 모르는 채로 누르는
+         버튼이 제일 무섭다 — 걸리는 시간과 Claude를 건드린다는 사실을 미리 말해둔다. -->
+    <div class="update-first-note" id="update-first-note" hidden></div>
     <div class="modal-actions">
       <button class="action-btn" id="update-later">나중에</button>
       <button class="action-btn" id="update-patchnotes">패치노트 보기</button>
       <button class="action-btn primary" id="update-now">지금 업데이트</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lens를 업데이트·삭제한 뒤 Claude Desktop이 켜져 있을 때. 토스트로는 부족한
+     자리다 — 몇 초 뒤 사라지는 데다, 안 하면 새 버전이 적용되지 않는 필수 단계라
+     읽고 바로 누를 수 있는 버튼이 같이 있어야 한다. -->
+<div class="modal-backdrop" id="restart-backdrop" hidden>
+  <div class="modal restart-modal">
+    <div class="modal-title" id="restart-title">Claude Desktop을 다시 시작해주세요</div>
+    <div class="restart-body" id="restart-body"></div>
+    <div class="restart-why" id="restart-why" hidden></div>
+    <div class="modal-actions">
+      <button class="action-btn" id="restart-later">나중에 직접 할게요</button>
+      <button class="action-btn primary" id="restart-now">지금 다시 시작</button>
     </div>
   </div>
 </div>

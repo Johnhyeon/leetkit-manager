@@ -528,6 +528,12 @@ async function runAction(action, lensName, extra, opts = {}) {
       }
     } else if (action === "install") {
       const displayName = (lensDataCache[lensName] || {}).display_name || lensName;
+      // 지금 Claude Desktop에 물려 있는지 / 새로 까는 건지를 **바꾸기 전에** 봐둔다.
+      // 새로 까는 경우엔 아직 등록 전이라 재시작을 권할 자리가 아니고(MCP 등록 모달이
+      // 따로 안내한다), 이미 쓰던 걸 올리는 경우에만 껐다 켜라고 해야 한다.
+      const before = lensDataCache[lensName] || {};
+      const wasOnClaudeDesktop = (before.targets || []).includes("claude-desktop");
+      const wasInstalled = !before.not_installed;
       showBusyOverlay(`${displayName}를 설치하는 중…`);
       const stopPolling = startInstallProgressPolling((text) => updateBusyOverlay(`${displayName} · ${text}`));
       let result, lens;
@@ -554,9 +560,25 @@ async function runAction(action, lensName, extra, opts = {}) {
               : `설치/업데이트 실패 — ${result.error || "원인을 알 수 없습니다"}`
           );
         }
+      } else if (!opts.skipRestartPrompt) {
+        // 성공했는데 아무 말도 안 하고 있었다 — 카드가 "최신"으로 바뀌는 게 전부라,
+        // 켜져 있는 Claude가 아직 옛 버전을 돌리고 있다는 걸 알 방법이 없었다.
+        // 윈도우는 파일 잠금 때문에 대개 claude_blocking으로 걸려 껐다 켜는 흐름을
+        // 타지만, 맥은 잠금이 없어 켜진 채로 "성공"하고 조용히 옛 버전이 남는다.
+        await noteLensFilesChanged({
+          registeredOnClaudeDesktop: wasOnClaudeDesktop && wasInstalled,
+          headline: wasInstalled
+            ? `${displayName} 업데이트 완료${lens && lens.installed_version ? ` (v${lens.installed_version})` : ""}.`
+            : `${displayName} 설치 완료.`,
+          afterRestart: "아직 이전 버전을 쓰고 있습니다.",
+          whenClosed: "다음에 Claude Desktop을 열면 새 버전이 적용됩니다.",
+        });
       }
     } else if (action === "uninstall") {
       const displayName = (lensDataCache[lensName] || {}).display_name || lensName;
+      // 삭제해도 MCP 설정은 남는다(패키지만 지운다) — 켜져 있는 Claude에는 도구가
+      // 그대로 보이고, 누르면 그때서야 실패한다. 지우기 전에 물려 있었는지 봐둔다.
+      const wasOnClaudeDesktop = ((lensDataCache[lensName] || {}).targets || []).includes("claude-desktop");
       showBusyOverlay(`${displayName}를 삭제하는 중…`);
       let result, lens;
       try {
@@ -567,7 +589,12 @@ async function runAction(action, lensName, extra, opts = {}) {
       }
       replaceCard(lensName, lens);
       if (result.ok) {
-        showToast("삭제되었습니다 — 다시 설치할 수 있습니다.");
+        await noteLensFilesChanged({
+          registeredOnClaudeDesktop: wasOnClaudeDesktop,
+          headline: `${displayName}를 삭제했습니다 — 다시 설치할 수 있습니다.`,
+          afterRestart: "삭제된 도구를 아직 들고 있습니다.",
+          whenClosed: "다음에 Claude Desktop을 열면 정리됩니다.",
+        });
       } else if (result.claude_blocking) {
         await offerCloseClaudeAndRetry(lensName, "uninstall");
       } else {
@@ -1529,8 +1556,10 @@ const TOUR_STEPS = [
     selector: "#restart-claude-btn",
     title: "Claude 다시 시작",
     desc:
-      "MCP에 등록해도 Claude Desktop은 켜져 있는 동안에는\n그 내용을 읽지 않습니다. 껐다 켜야 반영됩니다.\n\n" +
-      "\"등록은 됐다는데 Claude에서 도구가 안 보인다\" —\n대부분 여기를 누르면 해결됩니다.",
+      "Claude Desktop은 켜질 때 설정을 읽고 Lens를 띄웁니다.\n" +
+      "그래서 켜져 있는 동안에 바꾼 것은 그대로 반영되지 않습니다.\n\n" +
+      "MCP 등록을 바꿨을 때, Lens를 업데이트·삭제했을 때\n이 버튼을 눌러주세요.\n\n" +
+      "\"등록은 됐다는데 도구가 안 보인다\",\n\"업데이트했는데 그대로다\" —\n대부분 여기를 누르면 해결됩니다.",
     requiresVisible: true,
   },
   {
@@ -1967,6 +1996,78 @@ function onboardingHandleModalClosed(closedSubStep) {
   }
 }
 
+// 처음 업데이트하는 사람에게 "왜 껐다 켜야 하는지"를 한 번만 설명한다. 매번 붙이면
+// 아는 사람에겐 잔소리이고, 한 번도 안 하면 시킨 대로 눌러놓고 이유를 모른 채 남는다.
+const RESTART_EXPLAINED_KEY = "leetkit-manager-restart-explained";
+
+// Lens 파일을 바꾼 뒤(업데이트·삭제) Claude Desktop이 켜져 있으면 재시작을 권한다.
+// 띄웠으면 true — 안 켜져 있으면 지금 다시 시작할 대상이 없으므로 false를 주고,
+// 호출한 쪽이 그 상황에 맞는 안내를 대신 한다("다음에 열면 적용됩니다").
+//
+// 토스트로 하지 않는 이유: 안 하면 새 버전이 적용되지 않는 **필수** 단계인데,
+// 토스트는 몇 초 뒤 사라지고 누를 것도 없다. 실제로 이 한 걸음을 건너뛴 채
+// "업데이트했는데 그대로다"라고 느끼기 딱 좋은 자리다.
+async function offerClaudeRestart(bodyText) {
+  let running = false;
+  try {
+    running = await window.pywebview.api.claude_desktop_running();
+  } catch {
+    return false; // 확인 실패 — 확실하지 않은 걸 시키지 않는다
+  }
+  if (!running) return false;
+
+  document.getElementById("restart-body").textContent = bodyText;
+
+  const whyEl = document.getElementById("restart-why");
+  const alreadyExplained = localStorage.getItem(RESTART_EXPLAINED_KEY);
+  if (alreadyExplained) {
+    whyEl.hidden = true;
+  } else {
+    whyEl.textContent =
+      "처음이시니 한 번만 설명드릴게요.\n\n" +
+      "Claude Desktop은 켜질 때 Lens 프로그램을 같이 띄웁니다. " +
+      "그래서 새 파일을 받아도, 이미 떠 있는 쪽은 받기 전 버전 그대로 돌아갑니다.\n\n" +
+      "껐다 켜면 새로 받은 파일로 다시 뜹니다. 대화 내용은 지워지지 않습니다.";
+    whyEl.hidden = false;
+    localStorage.setItem(RESTART_EXPLAINED_KEY, "1");
+  }
+
+  document.getElementById("restart-backdrop").hidden = false;
+  return true;
+}
+
+function closeRestartModal() {
+  document.getElementById("restart-backdrop").hidden = true;
+  // 이 모달 때문에 물러났던 후기 요청을 이어붙인다(maybeShowReviewPrompt는 다른
+  // 모달이 떠 있으면 물러난다) — 일괄 업데이트 끝에 둘이 겹치는 경로가 있다.
+  handOffToReviewPrompt();
+}
+
+document.getElementById("restart-later").addEventListener("click", () => {
+  closeRestartModal();
+  showToast("Claude Desktop을 껐다 켜면 적용됩니다 — 위 \"Claude 다시 시작\" 버튼으로도 됩니다.");
+});
+
+document.getElementById("restart-now").addEventListener("click", async (e) => {
+  await restartClaudeDesktop(e.currentTarget);
+  closeRestartModal();
+});
+
+// Lens를 업데이트·삭제한 뒤 부른다. Claude Desktop에 등록돼 있지 않으면 지금 다시
+// 읽어갈 쪽이 없으므로 아무 말도 하지 않는다(신규 설치 직후가 그렇다 — 그쪽은
+// MCP 등록 모달이 따로 안내한다).
+async function noteLensFilesChanged({ registeredOnClaudeDesktop, headline, afterRestart, whenClosed }) {
+  if (!registeredOnClaudeDesktop) {
+    showToast(headline);
+    return;
+  }
+  const shown = await offerClaudeRestart(
+    `${headline}\n\n지금 켜져 있는 Claude Desktop은 ${afterRestart}\n껐다 켜야 반영됩니다.`
+  );
+  // 안 켜져 있으면 시킬 일이 없다 — 다음에 열면 알아서 적용된다는 사실만 알려준다.
+  if (!shown) showToast(`${headline} ${whenClosed}`);
+}
+
 // MCP 등록을 반영하는 마지막 한 걸음. 트레이에 남는 특성상 "완전히 종료"가 실제로
 // 막히는 구간이라, 설명 대신 버튼으로 대신해준다.
 async function restartClaudeDesktop(btn) {
@@ -2051,6 +2152,10 @@ async function finishOnboarding() {
 // 예전엔 새 버전이 나와도 카드 안의 작은 "업데이트" 버튼 하나가 전부여서, 그게
 // 있는 줄 모르면 옛 버전을 계속 썼다. 켤 때 한 번 정면으로 알린다.
 const UPDATE_NOTICE_KEY = "leetkit-manager-update-notice-dismissed";
+// 첫 업데이트 안내를 이미 보여줬는지. 재시작 설명(RESTART_EXPLAINED_KEY)과 따로
+// 세는 이유: 카드에서 바로 업데이트한 사람은 이 모달을 안 보고 재시작 안내만 보고,
+// "나중에"만 누른 사람은 반대다 — 한 키로 묶으면 한쪽이 설명을 통째로 못 받는다.
+const UPDATE_EXPLAINED_KEY = "leetkit-manager-update-explained";
 
 function lensesWithUpdates() {
   return Object.values(lensDataCache).filter(
@@ -2089,6 +2194,23 @@ function maybeShowUpdateNotice() {
       </div>`
     )
     .join("");
+
+  // 처음 업데이트하는 사람에게만 한 번 — 누르면 무슨 일이 일어나는지, 얼마나
+  // 걸리는지, Claude를 건드리는지. 모르는 채로 누르는 버튼이 제일 무섭고,
+  // 그래서 "나중에"만 계속 누르다 옛 버전에 머무는 일이 생긴다.
+  const noteEl = document.getElementById("update-first-note");
+  if (localStorage.getItem(UPDATE_EXPLAINED_KEY)) {
+    noteEl.hidden = true;
+  } else {
+    noteEl.textContent =
+      "처음이시죠? \"지금 업데이트\"를 누르면 새 파일을 받아 바꿔 끼웁니다. " +
+      "Lens 하나에 1~2분쯤 걸립니다.\n\n" +
+      "Claude Desktop이 켜져 있으면 잠시 껐다 켜도 될지 먼저 여쭤봅니다. " +
+      "대화 내용은 지워지지 않습니다.";
+    noteEl.hidden = false;
+    localStorage.setItem(UPDATE_EXPLAINED_KEY, "1");
+  }
+
   document.getElementById("update-backdrop").hidden = false;
 }
 
@@ -2113,10 +2235,14 @@ document.getElementById("update-now").addEventListener("click", async () => {
   // 묻고, 끝나면 다시 켜준다.
   const closedClaude = await closeClaudeForBulkUpdate(lenses.length);
 
+  // 껐다 켜라는 안내가 Lens마다 따로 뜨면 3개일 때 3번이다 — 낱개 안내는 끄고
+  // 아래에서 다 끝난 뒤 한 번만 말한다(물어보는 것도 한 번, 안내도 한 번).
+  const onClaudeDesktop = lenses.filter((l) => (l.targets || []).includes("claude-desktop"));
+
   // 한 번에 하나씩 — uv tool install이 같은 디렉터리를 건드리므로 동시에 돌리면
   // 서로의 파일을 쥔 채 실패한다. runAction이 진행률 오버레이까지 맡는다.
   for (const lens of lenses) {
-    await runAction("install", lens.name, undefined, { skipClaudePrompt: true });
+    await runAction("install", lens.name, undefined, { skipClaudePrompt: true, skipRestartPrompt: true });
   }
   recomputeSummaryFromCache();
 
@@ -2131,14 +2257,30 @@ document.getElementById("update-now").addEventListener("click", async () => {
   }
 
   const left = lensesWithUpdates();
-  showToast(
-    left.length
-      ? "일부 업데이트가 남았습니다 — 카드에서 다시 시도해주세요."
-      : closedClaude
-      ? "업데이트를 마치고 Claude Desktop을 다시 켰습니다."
-      : "업데이트를 마쳤습니다."
-  );
-  await handOffToReviewPrompt();
+  if (left.length) {
+    showToast("일부 업데이트가 남았습니다 — 카드에서 다시 시도해주세요.");
+    await handOffToReviewPrompt();
+    return;
+  }
+  if (closedClaude) {
+    // 우리가 껐다 켰으니 새 버전으로 이미 다시 떴다 — 더 시킬 게 없다.
+    showToast("업데이트를 마치고 Claude Desktop을 다시 켰습니다.");
+    await handOffToReviewPrompt();
+    return;
+  }
+
+  // 여기까지 왔다는 건 Claude가 꺼져 있었거나("잠시 껐다 켤까요?"를 안 물어봤다),
+  // 물어봤는데 사용자가 거절했다는 뜻이다. 거절한 경우 Claude는 여전히 옛 버전을
+  // 돌리고 있는데, 예전엔 그냥 "업데이트를 마쳤습니다"로 끝나서 끝난 줄 알았다.
+  const done = onClaudeDesktop.map((l) => l.display_name).join(", ");
+  await noteLensFilesChanged({
+    registeredOnClaudeDesktop: onClaudeDesktop.length > 0,
+    headline: done ? `${done} 업데이트 완료.` : "업데이트를 마쳤습니다.",
+    afterRestart: "아직 이전 버전을 쓰고 있습니다.",
+    whenClosed: "다음에 Claude Desktop을 열면 새 버전이 적용됩니다.",
+  });
+  // 재시작 모달을 띄웠으면 그게 닫힐 때 이어서 후기를 묻는다(closeRestartModal).
+  if (document.getElementById("restart-backdrop").hidden) await handOffToReviewPrompt();
 });
 
 // 일괄 업데이트 전에 Claude Desktop을 닫을지 한 번만 묻는다. 닫았으면 true —
