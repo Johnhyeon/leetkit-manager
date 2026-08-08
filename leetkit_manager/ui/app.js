@@ -331,6 +331,42 @@ function renderCheckItem(c, lensName) {
   return `<div class="${cls}"><span class="check-id">${label}</span>${escapeHtml(c.summary)}${linesHtml}${actionHtml}</div>`;
 }
 
+// MCP 등록을 마친 뒤, 그것만으로는 도구가 안 도는 경우를 한 줄로 알려준다.
+// 정상이면 "이미 돼 있다"고 확인해주고(CLI가 하던 안심), 빠졌으면 무엇을 눌러야
+// 하는지 말해준다. 여기서 보는 값은 방금 다시 받은 진단 결과라 항상 최신이다.
+function credentialStatusNote(lens) {
+  if (!lens || !Array.isArray(lens.checks)) return "";
+  const missing = [];
+  const ready = [];
+  for (const check of lens.checks) {
+    // 자격증명 성격의 항목만 본다 — 설치·등록 상태는 이 자리에서 할 말이 아니다.
+    if (!["LICENSE_ACTIVE", "DART_API_KEY", "TELEGRAM_LOGIN"].includes(check.id)) continue;
+    const label = CHECK_ID_LABEL[check.id] || check.id;
+    (check.status === "ok" ? ready : missing).push(label);
+  }
+  if (missing.length) {
+    const list = missing.join(", ");
+    return `${list}${particle(list, "이", "가")} 아직입니다 — 카드에서 마저 끝내주세요. 그 전까지는 도구가 잠겨 있습니다.`;
+  }
+  if (ready.length) {
+    // 키는 설정 파일이 아니라 OS 자격 증명 저장소에 들어간다. 파일만 보면 없어
+    // 보이므로, 이미 돼 있다는 걸 말해주지 않으면 멀쩡한 걸 다시 넣게 된다.
+    const list = ready.join(", ");
+    return `${list}${particle(list, "은", "는")} 이미 등록돼 있어 그대로 씁니다.`;
+  }
+  return "";
+}
+
+// 받침 유무에 맞는 조사를 고른다. "DART API 키은(는)"처럼 괄호로 뭉개면 읽는 사람이
+// 매번 걸린다 — 목록 항목이 상황마다 바뀌어서 문구를 고정으로 쓸 수 없는 자리다.
+// 한글 음절이 아닌 글자로 끝나면(영문·숫자) 판단할 수 없으니 받침 없는 쪽으로 둔다.
+function particle(word, withBatchim, withoutBatchim) {
+  const last = (word || "").trim().slice(-1);
+  const code = last.charCodeAt(0);
+  if (!(code >= 0xac00 && code <= 0xd7a3)) return withoutBatchim;
+  return (code - 0xac00) % 28 ? withBatchim : withoutBatchim;
+}
+
 function renderDetailModal(lens) {
   const targets = lens.targets.length
     ? lens.targets.map((t) => TARGET_LABEL[t] || escapeHtml(t)).join(" · ")
@@ -1091,6 +1127,19 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     if (notes.length) {
       notes.push("처음 도구를 쓸 때 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.");
     }
+
+    // 등록만으로는 도구가 안 도는 경우를 말해준다.
+    //
+    // 실사용에서 나온 혼란: Codex에 등록한 뒤 "DART 인증키가 등록 안 됐다"는 말을
+    // 들었다. 실제로는 키가 정상이었고 — 키는 설정 파일이 아니라 OS 자격 증명
+    // 저장소에 들어가므로 설정 파일만 보면 없어 보인다 — 아무도 그 사실을 말해주지
+    // 않은 게 문제였다. CLI는 "이미 등록된 키를 재사용합니다"라고 알려주는데
+    // 매니저는 "등록 완료"만 하고 끝났다.
+    //
+    // 더 나쁜 쪽은 키가 정말 없을 때다. 등록은 "완료"라고 뜨는데 도구는 안 돈다.
+    // 지금 상태를 그대로 말해주면 둘 다 사라진다.
+    const credentialNote = credentialStatusNote(lens);
+    if (credentialNote) notes.push(credentialNote);
 
     // 체크를 푼 곳은 실제로 해제된다 — 그걸 말해주지 않으면 정말 지워졌는지 알 수 없다.
     const removedLabels = (result.removed || []).map((t) => TARGET_LABEL[t] || t);
