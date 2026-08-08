@@ -8,6 +8,20 @@ from unittest.mock import patch
 
 from leetkit_manager import patch_notes
 
+# 네 제품의 실제 파일. 리포가 나란히 있는 개발 환경에서만 전부 검사하고,
+# 없으면(리포 하나만 받은 경우) 있는 것만 본다.
+_REPO_ROOT = Path("..").resolve()
+_ALL_PATCHNOTES = [
+    (path, label)
+    for path, label in (
+        (Path("PATCHNOTES.md"), "LeetKit Manager"),
+        (_REPO_ROOT / "mcp" / "PATCHNOTES.md", "StockLens"),
+        (_REPO_ROOT / "mcp-dart" / "PATCHNOTES.md", "DartLens"),
+        (_REPO_ROOT / "telegramlens" / "PATCHNOTES.md", "TelegramLens"),
+    )
+    if path.is_file()
+]
+
 SAMPLE = """# StockLens 패치노트
 
 <!--
@@ -106,8 +120,39 @@ class TestShippedFiles:
         assert entries[0].items
 
     def test_no_developer_jargon_leaks_into_customer_text(self):
-        """고객은 원인이 아니라 자기가 겪던 증상으로 기억한다."""
-        entries = patch_notes.parse(Path("PATCHNOTES.md").read_text(encoding="utf-8"))
-        text = " ".join(i for e in entries for i in e.items)
-        for word in ("PyInstaller", "subprocess", "_MEIPASS", "traceback", "commit", "refactor"):
-            assert word.lower() not in text.lower(), f"개발 용어가 고객 화면에 나간다: {word}"
+        """고객은 원인이 아니라 자기가 겪던 증상으로 기억한다.
+
+        여기 걸리는 말들은 앱 화면에 한 번도 안 나오는 것들이다 — 패치노트에서
+        처음 보면 "이게 뭐지" 하고 멈춘다. uv가 대표적이다(없으면 앱이 알아서
+        깔아주므로 사용자는 그 이름을 볼 일이 없다). 반대로 "MCP 등록"이나
+        "DART 인증키"는 화면의 버튼·입력칸에 그대로 있는 말이라 쓰는 게 맞다.
+        """
+        # 한글 조사가 붙으면 단어 경계가 안 잡혀서 부분 일치로 본다.
+        banned = (
+            "uv", "PyInstaller", "subprocess", "_MEIPASS", "traceback", "commit",
+            "refactor", "PATH", "데몬", "백필", "stepper", "doctor", "CLI", "PID",
+            "JSON", "config", "SDK", "venv", "CI",
+        )
+        for path, label in _ALL_PATCHNOTES:
+            entries = patch_notes.parse(path.read_text(encoding="utf-8"))
+            text = " ".join([i for e in entries for i in e.items] + [e.note for e in entries])
+            for word in banned:
+                assert word.lower() not in text.lower(), f"{label}에 개발 용어가 나간다: {word}"
+
+    def test_every_product_has_history_from_the_start(self):
+        """이력 관리는 2026-08-06(첫 배포)부터다. 최신 하나만 있으면 "이전에
+        무엇이 바뀌었나"를 볼 수 없고, 화면의 이력 기능이 빈 채로 남는다."""
+        for path, label in _ALL_PATCHNOTES:
+            entries = patch_notes.parse(path.read_text(encoding="utf-8"))
+            assert len(entries) >= 2, f"{label}: 이력이 {len(entries)}개뿐"
+            dates = [e.date for e in entries]
+            assert dates == sorted(dates, reverse=True), f"{label}: 최신순이 아니다 {dates}"
+            assert min(dates) >= "2026-08-06", f"{label}: 관리 시작일 이전 기록 {min(dates)}"
+
+    def test_versions_are_the_last_release_of_that_day(self):
+        """절 제목의 버전은 그날 마지막으로 나간 버전이어야 한다 — 그래야
+        "여기까지 쓰고 계십니다" 경계가 맞는다. 날짜가 겹치면 안 된다."""
+        for path, label in _ALL_PATCHNOTES:
+            entries = patch_notes.parse(path.read_text(encoding="utf-8"))
+            dates = [e.date for e in entries]
+            assert len(dates) == len(set(dates)), f"{label}: 같은 날짜가 두 번 나온다 {dates}"
