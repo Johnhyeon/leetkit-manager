@@ -122,7 +122,7 @@ def _cmd_gui(args: argparse.Namespace) -> int:
     wait_for = getattr(args, "wait_for_exit", None)
     if wait_for:
         _wait_for_pid_exit(wait_for)
-    run()
+    run(debug=bool(getattr(args, "debug", False)))
     return 0
 
 
@@ -131,6 +131,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # 서브커맨드 없이 바로가기로 뜨는 경우가 기본이라 최상위에도 둔다(자체 업데이트가
     # 새 버전을 띄울 때 `<exe> --wait-for-exit <pid>` 형태로 붙인다).
     p.add_argument("--wait-for-exit", type=int, help=argparse.SUPPRESS)
+    p.add_argument("--debug", action="store_true", help="웹 검사기를 켠 채로 실행(문제 진단용)")
     sub = p.add_subparsers(dest="command")
 
     diagnose = sub.add_parser("diagnose", help="전체 Lens 진단 대시보드(텍스트)")
@@ -145,6 +146,10 @@ def _build_parser() -> argparse.ArgumentParser:
     selftest.set_defaults(func=_cmd_selftest)
 
     gui = sub.add_parser("gui", help="데스크톱 대시보드(pywebview) 실행")
+    # 문의 대응용 — 화면은 멀쩡한데 버튼만 안 먹는 식의 문제는 자바스크립트 오류가
+    # 조용히 삼켜진 경우가 대부분이다. 켜면 창에서 우클릭 → 요소 검사로 그 오류를
+    # 직접 읽을 수 있다.
+    gui.add_argument("--debug", action="store_true", help="웹 검사기를 켠 채로 실행(문제 진단용)")
     gui.add_argument("--wait-for-exit", type=int, help=argparse.SUPPRESS)
     gui.set_defaults(func=_cmd_gui)
 

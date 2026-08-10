@@ -68,3 +68,30 @@ class TestWaitForExit:
         편이 낫다(single_instance의 판단 기준과 같은 정신)."""
         with patch("psutil.pid_exists", return_value=True):
             cli._wait_for_pid_exit(1234, timeout_s=0.5)
+
+
+class TestDebugFlag:
+    """화면은 멀쩡한데 버튼만 안 먹는 식의 문제는 자바스크립트 오류가 조용히 삼켜진
+    경우가 대부분이다 — 그 오류를 직접 읽을 방법이 있어야 원인을 추측하지 않는다."""
+
+    def test_off_by_default(self):
+        for argv in ([], ["gui"]):
+            assert cli._build_parser().parse_args(argv).debug is False, argv
+
+    def test_accepted_both_at_top_level_and_on_gui(self):
+        """바로가기는 서브커맨드 없이 뜨고, 문의 안내는 `gui --debug`로 준다 —
+        둘 중 하나만 받으면 안내한 대로 쳤는데 안 되는 일이 생긴다."""
+        assert cli._build_parser().parse_args(["--debug"]).debug is True
+        assert cli._build_parser().parse_args(["gui", "--debug"]).debug is True
+
+    def test_passed_through_to_the_window(self):
+        args = cli._build_parser().parse_args(["gui", "--debug"])
+        with patch("leetkit_manager.ui.app.run") as mock_run:
+            cli._cmd_gui(args)
+        mock_run.assert_called_once_with(debug=True)
+
+    def test_not_passed_when_absent(self):
+        args = cli._build_parser().parse_args([])
+        with patch("leetkit_manager.ui.app.run") as mock_run:
+            cli._cmd_gui(args)
+        mock_run.assert_called_once_with(debug=False)

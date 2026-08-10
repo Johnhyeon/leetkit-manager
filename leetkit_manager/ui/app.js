@@ -1963,7 +1963,10 @@ async function openPatchNotes() {
   }
   // 넷 다 비어 있으면 네트워크 문제다 — 빈 상자를 보여주면 고장으로 읽힌다.
   if (!products.length || products.every((p) => !p.entries.length)) {
-    body.innerHTML = `<div class="patchnotes-empty">패치노트를 불러오지 못했습니다.\n인터넷 연결을 확인하고 다시 눌러주세요.</div>`;
+    // 예전엔 여기서 없는 변수(body)를 써서 ReferenceError가 났다 — 못 불러왔다는
+    // 안내 대신 "불러오는 중…"인 채로 창이 굳었고, 그 창이 화면을 덮고 있어서
+    // 뒤에 있던 모달의 버튼까지 안 눌리는 것처럼 보였다.
+    panel.innerHTML = `<div class="patchnotes-empty">패치노트를 불러오지 못했습니다.\n인터넷 연결을 확인하고 다시 눌러주세요.</div>`;
     return;
   }
   renderPatchNotes(products);

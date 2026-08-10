@@ -53,7 +53,7 @@ def _apply_macos_app_identity() -> None:
         pass
 
 
-def run() -> None:
+def run(*, debug: bool = False) -> None:
     if single_instance.is_already_running():
         # 창 없는 exe에선 stderr가 없어 print가 사라진다 — 기존 창을 앞으로 가져오거나
         # 최소한 메시지 상자를 띄운다(single_instance.notify_already_running 참고).
@@ -111,10 +111,14 @@ def run() -> None:
         storage_path = str(Path.home() / ".leetkit-manager" / "webview")
         icon_path = _UI_DIR / "icon.ico"
         _apply_macos_app_identity()
+        # debug=True면 웹 검사기가 열린다(창에서 우클릭 → 요소 검사). 화면은 그대로인데
+        # 버튼만 안 먹는 식의 문제는 자바스크립트 오류가 조용히 삼켜진 경우가 대부분이라,
+        # 그 오류를 직접 읽을 방법이 없으면 원인 추측만 하게 된다. 평소엔 꺼둔다.
         webview.start(
             private_mode=False,
             storage_path=storage_path,
             icon=str(icon_path) if icon_path.exists() else None,
+            debug=debug,
         )
     finally:
         single_instance.release()
