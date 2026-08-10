@@ -322,14 +322,17 @@ class Api:
             "error": None if result.ok else _install_failure_reason(result.install),
         }
 
-    def uninstall(self, lens_name: str) -> dict:
+    def uninstall(self, lens_name: str, remove_license: bool = False) -> dict:
         """`uv tool uninstall` + PATH에 남은 옛 pip 설치 잔재까지 함께 정리 — 재설치가
         필요한 경우(예: "호환되지 않는 Lens 버전"이 업데이트로도 안 풀리는 경우)를
         위해 카드에서 바로 지울 수 있게 한다. 자세한 이유는
-        orchestrator.uninstall_lens() 참고. 라이선스/API 키 등 자격증명은 그대로 남아
-        재설치 후 다시 입력할 필요가 없다."""
+        orchestrator.uninstall_lens() 참고.
+
+        기본값은 라이선스/API 키를 남긴다 — 지웠다 다시 까는 게 대부분이라 그때마다
+        키를 다시 넣게 하면 안 된다. `remove_license=True`면 이 컴퓨터에 저장된
+        라이선스 키까지 지운다(쓰던 컴퓨터를 정리하는 경우)."""
         lens = get_lens(lens_name)
-        result = orchestrator.uninstall_lens(lens)
+        result = orchestrator.uninstall_lens(lens, remove_license=bool(remove_license))
         blocking = _is_claude_blocking(result.uninstall)
         error = None
         if not result.ok:
@@ -338,7 +341,12 @@ class Api:
                 if blocking
                 else (redaction.redact(result.uninstall.stderr) or "삭제에 실패했습니다.")
             )
-        return {"ok": result.ok, "error": error, "claude_blocking": blocking}
+        return {
+            "ok": result.ok,
+            "error": error,
+            "claude_blocking": blocking,
+            "license_removed": result.license_removed,
+        }
 
     def install_progress(self) -> str | None:
         """설치 중 화면에 보여줄 현재 단계. UI가 짧은 주기로 읽어간다 —

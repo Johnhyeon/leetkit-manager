@@ -664,3 +664,85 @@ class TestUnregisterLens:
             result = orchestrator.unregister_lens(STOCKLENS, ["codex"])
         assert result.ok is False
         assert result.error == "권한 없음"
+
+
+def _ok_process():
+    return ProcessResult(cmd=["uv"], exit_code=0, stdout="", stderr="", timed_out=False, duration_s=0.0)
+
+
+def _fail_process():
+    return ProcessResult(
+        cmd=["uv"], exit_code=1, stdout="", stderr="boom", timed_out=False, duration_s=0.0
+    )
+
+
+def _stub_successful_uninstall(monkeypatch):
+    """패키지 삭제가 성공하고 doctor가 "미설치"로 답하는 상태를 만든다 —
+    여기 테스트들은 라이선스 처리만 본다."""
+    monkeypatch.setattr(orchestrator.package_service, "uninstall_version", lambda *a, **k: _ok_process())
+    monkeypatch.setattr(orchestrator.package_service, "find_legacy_pip_shadow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        orchestrator,
+        "diagnose_lens",
+        lambda lens, **k: orchestrator.LensDiagnosis(
+            lens=lens, report=None, process=_ok_process(), not_installed=True
+        ),
+    )
+
+
+def _stub_failed_uninstall(monkeypatch):
+    monkeypatch.setattr(orchestrator.package_service, "uninstall_version", lambda *a, **k: _fail_process())
+    monkeypatch.setattr(orchestrator.package_service, "looks_like_file_in_use", lambda *a, **k: False)
+    monkeypatch.setattr(orchestrator.package_service, "find_legacy_pip_shadow", lambda *a, **k: None)
+
+
+class TestRemoveLicenseOnUninstall:
+    """쓰던 컴퓨터를 정리할 때(팔거나 넘기거나) 라이선스가 남아 있으면 다음 사람이
+    그대로 쓴다 — 삭제할 때 같이 지울지 고를 수 있어야 한다."""
+
+    def _license_at(self, tmp_path, lens, monkeypatch):
+        home = tmp_path / lens.home_dir
+        home.mkdir(parents=True, exist_ok=True)
+        key = home / "license.key"
+        key.write_text("KEY", encoding="utf-8")
+        monkeypatch.setenv(lens.home_env, str(home))
+        return key
+
+    def test_removes_the_license_file(self, tmp_path, monkeypatch):
+        key = self._license_at(tmp_path, STOCKLENS, monkeypatch)
+        assert orchestrator.remove_license_file(STOCKLENS) is True
+        assert not key.exists()
+
+    def test_reports_false_when_there_was_no_license(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(STOCKLENS.home_env, str(tmp_path / "empty"))
+        assert orchestrator.remove_license_file(STOCKLENS) is False
+
+    def test_honours_the_home_override(self, tmp_path, monkeypatch):
+        """홈을 옮겨 쓰는 사람의 키를 못 찾고 "지웠다"고 하면 안 된다."""
+        key = self._license_at(tmp_path, DARTLENS, monkeypatch)
+        assert orchestrator.remove_license_file(DARTLENS) is True
+        assert not key.exists()
+
+    def test_uninstall_keeps_the_license_by_default(self, tmp_path, monkeypatch):
+        """삭제의 대부분은 "지웠다 다시 깔기"다 — 그때마다 키를 다시 넣게 하면 안 된다."""
+        key = self._license_at(tmp_path, STOCKLENS, monkeypatch)
+        with patch.object(orchestrator, "remove_license_file") as mock_remove:
+            _stub_successful_uninstall(monkeypatch)
+            result = orchestrator.uninstall_lens(STOCKLENS)
+        mock_remove.assert_not_called()
+        assert result.license_removed is False
+        assert key.exists()
+
+    def test_uninstall_removes_the_license_when_asked(self, tmp_path, monkeypatch):
+        self._license_at(tmp_path, STOCKLENS, monkeypatch)
+        _stub_successful_uninstall(monkeypatch)
+        result = orchestrator.uninstall_lens(STOCKLENS, remove_license=True)
+        assert result.license_removed is True
+
+    def test_failed_uninstall_leaves_the_license_alone(self, tmp_path, monkeypatch):
+        """패키지도 못 지웠는데 키만 날리면, 사용자는 쓰던 걸 못 쓰게 된다."""
+        key = self._license_at(tmp_path, STOCKLENS, monkeypatch)
+        _stub_failed_uninstall(monkeypatch)
+        result = orchestrator.uninstall_lens(STOCKLENS, remove_license=True)
+        assert result.license_removed is False
+        assert key.exists(), "삭제 실패 시엔 키가 남아 있어야 한다"

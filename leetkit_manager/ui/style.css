@@ -1184,6 +1184,33 @@ body {
   color: var(--text);
 }
 
+/* ---------- 삭제 확인 모달 ---------- */
+
+/* 체크박스를 글 옆에 붙이지 않고 위에 맞춰 둔다 — 설명이 두세 줄이라 가운데 정렬하면
+   네모가 문단 한가운데에 떠 보인다. */
+.uninstall-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.uninstall-option input {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.uninstall-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
 /* ---------- 업데이트 알림 모달 ---------- */
 
 .update-modal {

@@ -19,6 +19,11 @@ class LensSpec:
     doctor_cmd: str
     setup_cmd: str
     activate_cmd: str
+    # 이 Lens가 라이선스 키를 두는 곳. 각 Lens licensing.py의 `_home()` 규칙과 같아야
+    # 한다 — (홈 경로를 바꾸는 환경변수, 기본 폴더명). 이 컴퓨터에서 라이선스까지
+    # 지울 때 쓴다(삭제 시 선택).
+    home_env: str = ""
+    home_dir: str = ""
     # 이 Lens의 `<cmd> --repair <id> --yes`가 지원하는 repair id 전체.
     # 비어 있으면 이 Lens는 자동 복구를 전혀 지원하지 않는다(명령 안내만 가능).
     repair_ids: tuple[str, ...] = field(default_factory=tuple)
@@ -39,6 +44,8 @@ STOCKLENS = LensSpec(
     doctor_cmd="stocklens-doctor",
     setup_cmd="stocklens-setup",
     activate_cmd="stocklens-activate",
+    home_env="STOCKLENS_HOME",
+    home_dir=".stocklens",
     repair_ids=(),
 )
 
@@ -49,6 +56,8 @@ DARTLENS = LensSpec(
     doctor_cmd="dartlens-doctor",
     setup_cmd="dartlens-setup",
     activate_cmd="dartlens-activate",
+    home_env="DARTLENS_HOME",
+    home_dir=".dartlens",
     repair_ids=("corp-code-cache",),
     extra_credentials=("dart_api",),
     auto_repair_after_install=("corp-code-cache",),
@@ -61,6 +70,8 @@ TELEGRAMLENS = LensSpec(
     doctor_cmd="telegramlens-doctor",
     setup_cmd="telegramlens-setup",
     activate_cmd="telegramlens-activate",
+    home_env="TELEGRAMLENS_HOME",
+    home_dir=".telegramlens",
     # 실제 구현은 daemon/status-files를 하나의 scope로 합쳐 두었다 — repair_id "daemon"
     # 하나로 데몬 좀비 정리+상태파일 복구+정체 백필 표시를 모두 수행한다.
     repair_ids=("daemon",),

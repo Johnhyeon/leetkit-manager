@@ -618,7 +618,7 @@ async function runAction(action, lensName, extra, opts = {}) {
       showBusyOverlay(`${displayName}를 삭제하는 중…`);
       let result, lens;
       try {
-        result = await window.pywebview.api.uninstall(lensName);
+        result = await window.pywebview.api.uninstall(lensName, extra === "with-license");
         lens = await window.pywebview.api.diagnose_one(lensName, false);
       } finally {
         hideBusyOverlay();
@@ -627,7 +627,9 @@ async function runAction(action, lensName, extra, opts = {}) {
       if (result.ok) {
         await noteLensFilesChanged({
           registeredOnClaudeDesktop: wasOnClaudeDesktop,
-          headline: `${displayName}를 삭제했습니다 — 다시 설치할 수 있습니다.`,
+          headline: result.license_removed
+            ? `${displayName}를 삭제했습니다 — 라이선스도 이 컴퓨터에서 지웠습니다.`
+            : `${displayName}를 삭제했습니다 — 다시 설치할 수 있습니다.`,
           afterRestart: "삭제된 도구를 아직 들고 있습니다.",
           whenClosed: "다음에 Claude Desktop을 열면 정리됩니다.",
         });
@@ -1392,12 +1394,7 @@ document.addEventListener("click", (e) => {
     return;
   }
   if (action === "uninstall") {
-    const lens = lensDataCache[lensName];
-    const displayName = lens ? lens.display_name : lensName;
-    if (!confirm(`${displayName}를 삭제할까요?\n\n라이선스·API 키 등 설정은 남아있어서, 다시 설치하면 자동으로 이어집니다.`)) {
-      return;
-    }
-    runAction("uninstall", lensName);
+    openUninstallModal(lensName);
     return;
   }
   if (action === "telegram-login") {
@@ -2453,6 +2450,38 @@ async function finishOnboarding() {
     showToast("설정은 언제든 각 카드에서 다시 바꿀 수 있습니다.");
   });
 }
+
+/* ---------- 삭제 확인 ---------- */
+
+// 예전엔 브라우저 confirm() 한 줄이었다 — 라이선스를 같이 지울지 고를 수가 없어서,
+// 쓰던 컴퓨터를 정리하는 사람도 키를 그대로 두고 갈 수밖에 없었다.
+let uninstallTargetLens = null;
+
+function openUninstallModal(lensName) {
+  uninstallTargetLens = lensName;
+  const lens = lensDataCache[lensName];
+  const displayName = lens ? lens.display_name : lensName;
+  document.getElementById("uninstall-title").textContent = `${displayName} 삭제`;
+  document.getElementById("uninstall-msg").textContent =
+    "프로그램을 지웁니다. 다시 설치하면 그대로 이어서 쓰실 수 있습니다.";
+  // 기본은 남기기 — 삭제의 대부분은 "지웠다 다시 깔기"라, 매번 키를 다시 넣게 하면 안 된다.
+  document.getElementById("uninstall-with-license").checked = false;
+  document.getElementById("uninstall-backdrop").hidden = false;
+}
+
+function closeUninstallModal() {
+  document.getElementById("uninstall-backdrop").hidden = true;
+  uninstallTargetLens = null;
+}
+
+document.getElementById("uninstall-cancel").addEventListener("click", closeUninstallModal);
+
+document.getElementById("uninstall-confirm").addEventListener("click", () => {
+  const lensName = uninstallTargetLens;
+  const withLicense = document.getElementById("uninstall-with-license").checked;
+  closeUninstallModal();
+  if (lensName) runAction("uninstall", lensName, withLicense ? "with-license" : null);
+});
 
 /* ---------- 업데이트 알림 ---------- */
 

@@ -113,6 +113,24 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="uninstall-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-title" id="uninstall-title"></div>
+    <div class="modal-msg" id="uninstall-msg"></div>
+    <label class="uninstall-option">
+      <input type="checkbox" id="uninstall-with-license">
+      <span>
+        이 컴퓨터에서 <strong>라이선스도 함께 삭제</strong>
+        <span class="uninstall-hint">이 컴퓨터를 더 이상 쓰지 않으신다면 함께 지워주세요. 남겨두면 이 컴퓨터를 쓰는 다른 사람이 그대로 사용할 수 있습니다. 다시 쓰시려면 구매하실 때 받으신 키를 다시 넣으시면 됩니다.</span>
+      </span>
+    </label>
+    <div class="modal-actions">
+      <button class="action-btn" id="uninstall-cancel">취소</button>
+      <button class="action-btn danger" id="uninstall-confirm">삭제</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="update-backdrop" hidden>
   <div class="modal update-modal">
     <div class="modal-title">업데이트가 있습니다</div>

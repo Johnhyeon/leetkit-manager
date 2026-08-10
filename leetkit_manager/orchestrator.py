@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -434,13 +435,41 @@ class UninstallResult:
     ok: bool
     uninstall: ProcessResult
     post_doctor: LensDiagnosis | None
+    # 이 컴퓨터에 저장돼 있던 라이선스 키까지 지웠는지. 화면에 뭘 안내할지가 갈린다 —
+    # 지웠으면 "다시 쓰려면 키를 다시 넣어야 한다"고 말해줘야 한다.
+    license_removed: bool = False
 
 
-def uninstall_lens(lens: LensSpec) -> UninstallResult:
+def remove_license_file(lens: LensSpec) -> bool:
+    """이 컴퓨터에 저장된 이 Lens의 라이선스 키를 지운다. 지웠으면 True.
+
+    쓰던 컴퓨터를 정리할 때(팔거나, 넘기거나, 더 안 쓸 때) 라이선스가 남아 있으면
+    다음 사람이 그대로 쓴다 — 삭제할 때 같이 지울지 물어보는 이유다.
+
+    경로는 각 Lens licensing.py의 `_home()` 규칙과 같다(LensSpec.home_env/home_dir).
+    홈을 옮겨 쓰는 사람도 있으므로 환경변수 우회를 그대로 따라간다."""
+    if not lens.home_dir:
+        return False
+    base = os.environ.get(lens.home_env) if lens.home_env else None
+    path = (Path(base) if base else Path.home() / lens.home_dir) / "license.key"
+    try:
+        if not path.is_file():
+            return False
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def uninstall_lens(lens: LensSpec, *, remove_license: bool = False) -> UninstallResult:
     """`uv tool uninstall <package>` — 재설치가 필요한 경우(PATH에 uv 관리 밖의 낡은
     실행 파일이 남아 "호환되지 않는 버전"으로 계속 잡히는 등)를 위한 진입점.
-    라이선스 키·API 키 등 Lens 자신의 데이터 파일은 건드리지 않는다(패키지만 제거) —
-    재설치 후 자격증명을 다시 입력할 필요가 없게. 실패해도 예외를 던지지 않는다.
+    실패해도 예외를 던지지 않는다.
+
+    기본값은 패키지만 지우고 라이선스 키·API 키는 남긴다 — "호환되지 않는 버전"을
+    풀려고 지웠다 다시 까는 경우가 대부분이고, 그때마다 키를 다시 넣게 하면 안 된다.
+    `remove_license=True`면 이 컴퓨터에 저장된 라이선스 키까지 지운다(쓰던 컴퓨터를
+    정리하는 경우).
 
     uv로 설치된 것만 지우면 끝나지 않는 경우가 실사용 중 확인됐다 — 옛
     `pip install <lens>-mcp` 잔재가 PATH에서 uv가 새로 설치한 버전보다 먼저 잡히면,
@@ -460,9 +489,18 @@ def uninstall_lens(lens: LensSpec) -> UninstallResult:
     overall_ok = uv_result.ok and (legacy_result is None or legacy_result.ok)
     representative = uv_result if not uv_result.ok else (legacy_result or uv_result)
 
+    # 패키지를 지운 뒤에 키를 지운다 — 순서가 반대면 삭제가 실패했을 때 키만 날아간다.
+    license_removed = remove_license_file(lens) if (remove_license and overall_ok) else False
+
     post_doctor = diagnose_lens(lens) if overall_ok else None
     ok = bool(overall_ok and post_doctor is not None and post_doctor.not_installed)
-    return UninstallResult(lens=lens, ok=ok, uninstall=representative, post_doctor=post_doctor)
+    return UninstallResult(
+        lens=lens,
+        ok=ok,
+        uninstall=representative,
+        post_doctor=post_doctor,
+        license_removed=license_removed,
+    )
 
 
 # ── TelegramLens 로그인 마법사 ──────────────────────────────────────────
