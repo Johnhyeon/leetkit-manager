@@ -1507,16 +1507,32 @@ async function openSupportModal() {
   document.getElementById("support-subject").textContent = "";
   document.getElementById("support-body").textContent = "";
 
+  const statusEl = document.getElementById("support-status");
   try {
-    supportInfo = await window.pywebview.api.create_support_bundle();
-    document.getElementById("support-status").textContent = "폴더가 열렸습니다 — zip 파일을 첨부해 보내주세요.";
-    document.getElementById("support-status").className = "modal-msg ok";
-    document.getElementById("support-to").textContent = supportInfo.to;
-    document.getElementById("support-subject").textContent = supportInfo.subject;
-    document.getElementById("support-body").textContent = supportInfo.body;
-  } catch {
-    document.getElementById("support-status").textContent = "번들을 만들지 못했습니다.";
-    document.getElementById("support-status").className = "modal-msg fail";
+    const info = await window.pywebview.api.create_support_bundle();
+
+    // 만들지도 못했으면 왜 그런지 알려준다 — 도움이 필요한 사람이 도움을 요청할
+    // 방법까지 잃으면 안 되니, 메일 주소는 그대로 띄워준다.
+    if (info.ok === false) {
+      statusEl.textContent = `파일을 만들지 못했습니다. ${info.error || ""}\n아래 주소로 이 문구와 함께 메일 주세요.`;
+      statusEl.className = "modal-msg fail";
+      document.getElementById("support-to").textContent = info.to || "";
+      return;
+    }
+
+    supportInfo = info;
+    // 폴더가 실제로 열렸을 때만 열렸다고 한다. 못 열었으면 어디 있는지 알려줘야
+    // 사용자가 열리지도 않은 창을 찾지 않는다(맥에서 권한 때문에 막힐 수 있다).
+    statusEl.textContent = info.revealed
+      ? "폴더가 열렸습니다 — zip 파일을 첨부해 보내주세요."
+      : `아래 파일을 첨부해 보내주세요.\n${info.zip_path}`;
+    statusEl.className = "modal-msg ok";
+    document.getElementById("support-to").textContent = info.to;
+    document.getElementById("support-subject").textContent = info.subject;
+    document.getElementById("support-body").textContent = info.body;
+  } catch (e) {
+    statusEl.textContent = `번들을 만들지 못했습니다. ${(e && e.message) || ""}`.trim();
+    statusEl.className = "modal-msg fail";
   }
 }
 

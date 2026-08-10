@@ -475,9 +475,22 @@ class Api:
         고객이 어떤 메일 앱에든 붙여넣을 받는사람/제목/본문 반환."""
         from leetkit_manager import support_bundle
 
-        zip_path = support_bundle.create_bundle()
-        support_bundle.reveal_in_file_manager(zip_path)
-        return support_bundle.mail_compose_info(zip_path)
+        try:
+            zip_path = support_bundle.create_bundle()
+        except Exception as e:
+            # 여기서 막히면 도움이 필요한 사람이 도움을 요청할 방법을 잃는다 —
+            # 최소한 왜 막혔는지는 알려줘야 메일로라도 그 문구를 보낼 수 있다.
+            return {
+                "ok": False,
+                "error": f"{type(e).__name__}: {e}",
+                "to": support_bundle.SUPPORT_EMAIL,
+            }
+        revealed = support_bundle.reveal_in_file_manager(zip_path)
+        info = support_bundle.mail_compose_info(zip_path)
+        # 폴더를 못 열었으면 "열렸습니다"라고 하면 안 된다 — 경로를 알려줘야 찾는다.
+        info["ok"] = True
+        info["revealed"] = revealed
+        return info
 
     def open_purchase_page(self) -> bool:
         """구매 페이지 열기 — 라이선스 모달의 "아직 없으신가요?"에서만 부른다."""
