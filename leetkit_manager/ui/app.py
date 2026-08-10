@@ -53,6 +53,37 @@ def _apply_macos_app_identity() -> None:
         pass
 
 
+def _accept_first_click_on_macos() -> None:
+    """macOS에서 버튼을 한 번에 누를 수 있게 한다.
+
+    증상: 맥에서 어떤 버튼이든 한 번 눌러서는 아무 일도 안 일어나고, 두 번 눌러야
+    작동한다.
+
+    원인: macOS는 앱이 활성 상태가 아닐 때 들어온 첫 클릭을 "창을 앞으로 가져오기"에
+    써버리고 그 아래 컨트롤에는 전달하지 않는다. 네이티브 앱은 뷰가
+    `acceptsFirstMouse:`에 YES를 돌려줘서 그 클릭까지 받게 하는데, pywebview의 코코아
+    백엔드에는 이 재정의가 아예 없다(설치된 webview/platforms/cocoa.py 확인). 그래서
+    창이 활성이 아닐 때마다 한 번씩 헛클릭이 생기고, 사용자 눈에는 "버튼이 안 먹는다"로
+    보인다. Windows에는 이 개념 자체가 없어서 같은 코드가 멀쩡히 돈다.
+
+    카테고리로 WKWebView에 그 메서드를 붙인다 — pywebview가 쓰는 뷰가 이 클래스를
+    상속하고, 자기 쪽에서 재정의하지 않으므로 이걸로 덮인다.
+
+    실패해도 창은 떠야 한다. 최악의 경우 예전처럼 두 번 눌러야 할 뿐이다.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import objc  # type: ignore[import-not-found]
+        from WebKit import WKWebView  # type: ignore[import-not-found]
+
+        class _FirstMouse(objc.Category(WKWebView)):  # type: ignore[misc]
+            def acceptsFirstMouse_(self, event):  # noqa: N802 — ObjC 셀렉터 이름
+                return True
+    except Exception:
+        pass
+
+
 def run(*, debug: bool = False) -> None:
     if single_instance.is_already_running():
         # 창 없는 exe에선 stderr가 없어 print가 사라진다 — 기존 창을 앞으로 가져오거나
@@ -111,6 +142,7 @@ def run(*, debug: bool = False) -> None:
         storage_path = str(Path.home() / ".leetkit-manager" / "webview")
         icon_path = _UI_DIR / "icon.ico"
         _apply_macos_app_identity()
+        _accept_first_click_on_macos()
         # debug=True면 웹 검사기가 열린다(창에서 우클릭 → 요소 검사). 화면은 그대로인데
         # 버튼만 안 먹는 식의 문제는 자바스크립트 오류가 조용히 삼켜진 경우가 대부분이라,
         # 그 오류를 직접 읽을 방법이 없으면 원인 추측만 하게 된다. 평소엔 꺼둔다.

@@ -95,3 +95,39 @@ class TestDebugFlag:
         with patch("leetkit_manager.ui.app.run") as mock_run:
             cli._cmd_gui(args)
         mock_run.assert_called_once_with(debug=False)
+
+
+class TestMacFirstClick:
+    """맥에서 버튼을 한 번 눌러서는 안 먹고 두 번 눌러야 작동하던 문제.
+    macOS가 비활성 창의 첫 클릭을 활성화에 써버리는데, pywebview의 코코아 백엔드에
+    `acceptsFirstMouse:` 재정의가 없어서 그 클릭이 버려진다."""
+
+    def test_is_a_no_op_off_macos(self):
+        """Windows·Linux에는 이 개념이 없다 — 여기서 뭔가 하려 들면 안 된다."""
+        from leetkit_manager.ui import app
+
+        with patch.object(app.sys, "platform", "win32"), \
+             patch.dict("sys.modules", {"objc": None, "WebKit": None}):
+            app._accept_first_click_on_macos()  # 예외가 새어나오면 실패
+
+    def test_survives_missing_pyobjc(self):
+        """PyObjC가 없거나 구조가 바뀌어도 창은 떠야 한다 — 최악이라도 예전처럼
+        두 번 누르면 되지, 앱이 안 뜨면 아무것도 못 한다."""
+        from leetkit_manager.ui import app
+
+        with patch.object(app.sys, "platform", "darwin"), \
+             patch.dict("sys.modules", {"WebKit": None}):
+            app._accept_first_click_on_macos()
+
+    def test_run_calls_it_before_showing_the_window(self):
+        """창이 뜬 뒤에 붙이면 이미 첫 클릭을 놓친 뒤다."""
+        import inspect
+
+        from leetkit_manager.ui import app
+
+        # 주석에도 webview.start()를 언급하는 자리가 있어서, 문자열 검색이 아니라
+        # 실제 호출이 있는 줄 번호로 비교한다.
+        lines = inspect.getsource(app.run).splitlines()
+        call = next(i for i, l in enumerate(lines) if l.strip().startswith("_accept_first_click_on_macos("))
+        start = next(i for i, l in enumerate(lines) if l.strip().startswith("webview.start("))
+        assert call < start
