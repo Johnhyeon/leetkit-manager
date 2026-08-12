@@ -2553,6 +2553,33 @@ function renderExpiredUsage(usage) {
   box.hidden = false;
 }
 
+// 상품이 둘로 갈리면서 "무엇을 사면 무엇이 열리는지"를 여기서 말해줘야 한다. 이걸
+// 안 하면 단품을 산 사람이 Manager를 열었을 때 나머지가 잠긴 걸 보고 "돈 냈는데 왜
+// 안 되죠?"가 된다 — 문의 부담이자 환불 위험이다.
+//
+// 가격은 일부러 안 적는다. 앱에 박으면 가격이 바뀔 때 릴리스해야 갱신되고, 그 사이
+// 옛 값을 보여주면 안 적느니만 못하다. 구성(무엇이 들어있나)은 잘 안 바뀌고, 정확한
+// 가격은 구매 버튼이 여는 상품 페이지에 언제나 최신으로 있다.
+function renderExpiredProducts(usage) {
+  const messages = (usage || []).find((u) => u.key === "telegram_messages");
+  // 체험 중 모은 텔레그램 데이터는 풀 패키지에서만 이어진다 — 사실이면서, 비싼 쪽을
+  // 정당화하고 동시에 오해로 인한 환불을 막는다. 모은 게 없으면 이 줄은 안 쓴다.
+  const carryOver = messages
+    ? `<div class="expired-product-note">체험 중 모으신 메시지 ${escapeHtml(messages.value)}은 풀 패키지에서 이어서 쓰실 수 있습니다.</div>`
+    : "";
+
+  document.getElementById("expired-products").innerHTML = `
+    <div class="expired-product">
+      <span class="name">StockLens 단품</span>
+      <span class="what">시세 · 재무 · 차트</span>
+    </div>
+    <div class="expired-product">
+      <span class="name">풀 패키지</span>
+      <span class="what">위 전부 + 공시(DartLens) + 텔레그램(TelegramLens)</span>
+    </div>
+    ${carryOver}`;
+}
+
 async function maybeShowExpiredNotice() {
   if (!localStorage.getItem(ONBOARDING_DONE_KEY)) return;
   if (document.querySelector(".modal-backdrop:not([hidden])")) return;
@@ -2577,6 +2604,8 @@ async function maybeShowExpiredNotice() {
     /* 못 읽으면 그냥 안 보여준다 — 없는 숫자를 지어내지 않는다 */
   }
   renderExpiredUsage(usage);
+
+  renderExpiredProducts(usage);
 
   document.getElementById("expired-keep").textContent =
     "설정과 모아둔 데이터는 그대로 있습니다. 구매하신 키를 넣으시면 이어서 쓰실 수 있고, 처음부터 다시 하실 필요는 없습니다.";

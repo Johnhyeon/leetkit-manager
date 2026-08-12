@@ -1246,6 +1246,43 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* 무엇을 사면 무엇이 열리는지. 가격이 아니라 구성을 보여주는 자리라, 이름과 내용을
+   위아래로 두어 한 줄씩 읽히게 한다. */
+.expired-products {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.expired-product {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--hairline);
+}
+
+.expired-product .name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.expired-product .what {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* 체험 중 모은 데이터가 어디서 이어지는지 — 오해로 인한 환불을 막는 한 줄이라
+   앞의 두 줄보다 눈에 걸려야 한다. */
+.expired-product-note {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ok);
+}
+
 /* "지워지지 않는다"는 사실은 결정을 쉽게 만든다 — 처음부터 다시 안 해도 되니까. */
 .expired-keep {
   font-size: 13px;

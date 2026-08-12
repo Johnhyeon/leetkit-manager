@@ -126,7 +126,8 @@ def _top_tool(records: list[dict]) -> str | None:
 
 
 def summary() -> list[dict]:
-    """[{label, value}] — 보여줄 게 없으면 빈 목록.
+    """[{key, label, value}] — 보여줄 게 없으면 빈 목록. key는 화면이 특정 항목을
+    집어 쓰려고 붙인다(예: 텔레그램 수집량은 풀 패키지 안내에 다시 인용된다).
 
     값은 화면에 그대로 나가므로 여기서 사람이 읽는 형태로 만든다.
     """
@@ -136,27 +137,27 @@ def summary() -> list[dict]:
     dart = _dartlens_metrics()
     calls = len(stock) + len(dart)
     if calls:
-        rows.append({"label": "Claude에게 물어본 횟수", "value": f"{calls:,}회"})
+        rows.append({"key": "calls", "label": "Claude에게 물어본 횟수", "value": f"{calls:,}회"})
 
     days = _days_used(stock + dart)
     if days:
-        rows.append({"label": "사용하신 날", "value": f"{days:,}일"})
+        rows.append({"key": "days", "label": "사용하신 날", "value": f"{days:,}일"})
 
     if stock:
-        rows.append({"label": "StockLens 시세·재무 조회", "value": f"{len(stock):,}회"})
+        rows.append({"key": "stocklens", "label": "StockLens 시세·재무 조회", "value": f"{len(stock):,}회"})
     if dart:
-        rows.append({"label": "DartLens 공시·재무 조회", "value": f"{len(dart):,}회"})
+        rows.append({"key": "dartlens", "label": "DartLens 공시·재무 조회", "value": f"{len(dart):,}회"})
 
     top = _top_tool(stock + dart)
     if top:
-        rows.append({"label": "가장 많이 쓰신 기능", "value": top})
+        rows.append({"key": "top_tool", "label": "가장 많이 쓰신 기능", "value": top})
 
     tg = _telegram_counts()
     if tg.get("messages"):
-        rows.append({"label": "TelegramLens가 모은 메시지", "value": f"{tg['messages']:,}건"})
+        rows.append({"key": "telegram_messages", "label": "TelegramLens가 모은 메시지", "value": f"{tg['messages']:,}건"})
     if tg.get("channels"):
-        rows.append({"label": "추적한 채널", "value": f"{tg['channels']:,}개"})
+        rows.append({"key": "telegram_channels", "label": "추적한 채널", "value": f"{tg['channels']:,}개"})
     if tg.get("stocks"):
-        rows.append({"label": "언급을 포착한 종목", "value": f"{tg['stocks']:,}개"})
+        rows.append({"key": "telegram_stocks", "label": "언급을 포착한 종목", "value": f"{tg['stocks']:,}개"})
 
     return rows
