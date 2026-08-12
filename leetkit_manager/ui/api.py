@@ -67,6 +67,7 @@ def _diagnosis_to_dict(d: LensDiagnosis) -> dict:
         "update_available": report.update_available if report else None,
         "license_status": report.license.status if report else None,
         "license_id_masked": report.license.license_id_masked if report else None,
+        "license_expires_on": report.license.expires_on if report else None,
         "targets": report.targets if report else [],
         "checked_at": report.checked_at if report else None,
         "overall": report.overall if report else None,
@@ -491,6 +492,17 @@ class Api:
         info["ok"] = True
         info["revealed"] = revealed
         return info
+
+    def trial_usage(self) -> list[dict]:
+        """체험 기간에 쌓인 기록 — 기간이 끝난 화면에서 보여줄 숫자.
+
+        실패는 곧 "빈 목록"이다. 숫자를 지어내느니 그 줄을 안 보여주는 게 낫다."""
+        from leetkit_manager import trial_usage
+
+        try:
+            return trial_usage.summary()
+        except Exception:
+            return []
 
     def open_purchase_page(self) -> bool:
         """구매 페이지 열기 — 라이선스 모달의 "아직 없으신가요?"에서만 부른다."""

@@ -49,8 +49,13 @@ class CheckResult:
 
 @dataclass
 class LicenseInfo:
-    status: str  # "active" | "missing" | "invalid"
+    # "active" | "missing" | "invalid" | "expired" | "revoked" | "clock"
+    # 뒤의 셋은 키 자체는 진짜인데 지금 못 쓰는 상태다 — 할 일이 서로 달라서
+    # (구매 / 문의 / 시계 맞추기) 한 덩어리로 뭉치면 안 된다.
+    status: str
     license_id_masked: str | None = None
+    # 기간이 있는 키(체험판·구독)만 채워진다. ISO 날짜 문자열.
+    expires_on: str | None = None
 
     @classmethod
     def from_json(cls, payload: dict | None) -> "LicenseInfo":
@@ -58,6 +63,7 @@ class LicenseInfo:
         return cls(
             status=payload.get("status") or "unknown",
             license_id_masked=payload.get("license_id_masked"),
+            expires_on=payload.get("expires_on"),
         )
 
 

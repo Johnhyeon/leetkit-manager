@@ -46,7 +46,36 @@ function updateLabel(updateAvailable) {
 }
 
 function licenseLabel(status) {
-  return { active: "활성", missing: "없음", invalid: "유효하지 않음" }[status] || "확인 필요";
+  return (
+    {
+      active: "활성",
+      missing: "없음",
+      invalid: "유효하지 않음",
+      expired: "기간 종료",
+      revoked: "사용 중지됨",
+      clock: "날짜 확인 필요",
+    }[status] || "확인 필요"
+  );
+}
+
+// 남은 날짜. 오늘이 만료일이면 0(= "오늘까지"), 지났으면 음수.
+function daysUntil(isoDate) {
+  if (!isoDate) return null;
+  const end = new Date(isoDate + "T00:00:00Z");
+  if (isNaN(end)) return null;
+  const today = new Date();
+  const utcToday = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return Math.round((end.getTime() - utcToday) / 86400000);
+}
+
+// 기간이 있는 키에만 붙는 꼬리표. 남은 날이 적을수록 눈에 띄게 한다 — 마지막 날에야
+// 알게 되면 결정할 시간이 없다.
+function trialBadge(lens) {
+  const left = daysUntil(lens.license_expires_on);
+  if (left === null || lens.license_status !== "active") return "";
+  const cls = left <= 2 ? "warn" : "";
+  const text = left <= 0 ? "오늘까지" : `${left}일 남음`;
+  return ` · <span class="trial-badge ${cls}">${text}</span>`;
 }
 
 function formatCheckedAt(iso) {
@@ -204,7 +233,7 @@ function renderCard(lens) {
       </div>
       <div class="field-list">
         <div class="field-row"><span class="field-label">업데이트</span><span class="field-value">${updateLabel(lens.update_available)}</span></div>
-        <div class="field-row"><span class="field-label">라이선스</span><span class="field-value emph">${licenseLabel(lens.license_status)}${lens.license_id_masked ? ' · <span class="mono">' + escapeHtml(lens.license_id_masked) + "</span>" : ""}</span></div>
+        <div class="field-row"><span class="field-label">라이선스</span><span class="field-value emph">${licenseLabel(lens.license_status)}${lens.license_id_masked ? ' · <span class="mono">' + escapeHtml(lens.license_id_masked) + "</span>" : ""}${trialBadge(lens)}</span></div>
         <div class="field-row"><span class="field-label">MCP 등록</span><span class="field-value">${targets}</span></div>
         <div class="field-row"><span class="field-label">최근 진단</span><span class="field-value mono">${formatCheckedAt(lens.checked_at)}</span></div>
       </div>
@@ -2470,6 +2499,89 @@ async function finishOnboarding() {
   });
 }
 
+/* ---------- 기간 종료 안내 ---------- */
+
+// 체험이 끝난 그 순간이 사는 사람과 떠나는 사람이 갈리는 자리다. 다만 여기서
+// 하지 않기로 한 것들이 있다 — 가짜 마감("오늘까지 할인"), 죄책감("이만큼 써놓고"),
+// 데이터 인질("구매 안 하면 지웁니다"). 셋 다 한 번 들키면 그 뒤 모든 문구가
+// 의심받고, 우리가 파는 게 "믿을 수 있는 데이터"라 그 손해가 특히 크다.
+//
+// 대신 사실만 쓴다: (1) 본인이 체험 기간에 쌓은 기록, (2) 그게 지워지지 않고 그대로
+// 남는다는 것, (3) 사는 곳. 남의 광고 문구보다 자기가 만든 숫자가 훨씬 세다.
+const EXPIRED_SHOWN_KEY = "leetkit-manager-expired-shown";
+
+function expiredLenses() {
+  return Object.values(lensDataCache).filter((l) => l.license_status === "expired");
+}
+
+function closeExpiredModal() {
+  document.getElementById("expired-backdrop").hidden = true;
+}
+
+function renderExpiredUsage(usage) {
+  const box = document.getElementById("expired-usage");
+  const rows = (usage || []).filter((u) => u.value);
+  if (!rows.length) {
+    // 기록을 못 읽었으면 빈 상자를 보여주지 않는다 — "0건"으로 읽히면
+    // "안 썼네"가 되어 오히려 반대로 설득된다.
+    box.hidden = true;
+    return;
+  }
+  box.innerHTML = rows
+    .map(
+      (u) => `<div class="expired-usage-row"><span>${escapeHtml(u.label)}</span>
+        <span class="num">${escapeHtml(String(u.value))}</span></div>`
+    )
+    .join("");
+  box.hidden = false;
+}
+
+async function maybeShowExpiredNotice() {
+  if (!localStorage.getItem(ONBOARDING_DONE_KEY)) return;
+  if (document.querySelector(".modal-backdrop:not([hidden])")) return;
+
+  const expired = expiredLenses();
+  if (!expired.length) return;
+
+  // 같은 조합으로 한 번만. 켤 때마다 같은 말을 반복하면 안내가 아니라 압박이 된다.
+  const signature = expired.map((l) => l.name).sort().join(",");
+  if (localStorage.getItem(EXPIRED_SHOWN_KEY) === signature) return;
+  localStorage.setItem(EXPIRED_SHOWN_KEY, signature);
+
+  const names = expired.map((l) => l.display_name).join(", ");
+  document.getElementById("expired-title").textContent = `${names} 사용 기간이 끝났습니다`;
+  document.getElementById("expired-lead").textContent =
+    "써보시는 동안 도움이 되셨길 바랍니다.\n계속 쓰시려면 라이선스를 구매하시면 됩니다.";
+
+  let usage = [];
+  try {
+    usage = await window.pywebview.api.trial_usage();
+  } catch {
+    /* 못 읽으면 그냥 안 보여준다 — 없는 숫자를 지어내지 않는다 */
+  }
+  renderExpiredUsage(usage);
+
+  document.getElementById("expired-keep").textContent =
+    "설정과 모아둔 데이터는 그대로 있습니다. 구매하신 키를 넣으시면 이어서 쓰실 수 있고, 처음부터 다시 하실 필요는 없습니다.";
+
+  document.getElementById("expired-backdrop").hidden = false;
+}
+
+document.getElementById("expired-later").addEventListener("click", closeExpiredModal);
+
+// 이미 산 사람이 여기서 막히면 안 된다 — 결제하고 온 사람이 가장 먼저 찾는 버튼이다.
+document.getElementById("expired-have-key").addEventListener("click", () => {
+  const target = expiredLenses()[0];
+  closeExpiredModal();
+  if (target) openActivateModal(target.name);
+});
+
+// 창은 닫지 않는다 — 사고 돌아와 바로 "키가 있어요"를 누를 수 있어야 한다.
+document.getElementById("expired-buy").addEventListener("click", async () => {
+  await window.pywebview.api.open_purchase_page();
+  showToast("브라우저에서 구매 페이지를 열었습니다.");
+});
+
 /* ---------- 삭제 확인 ---------- */
 
 // 예전엔 브라우저 confirm() 한 줄이었다 — 라이선스를 같이 지울지 고를 수가 없어서,
@@ -2860,6 +2972,12 @@ window.addEventListener("pywebviewready", async () => {
   }
   // 업데이트 알림이 후기 요청보다 먼저다 — 이건 지금 눌러서 할 일이 있는 알림이고,
   // 후기는 부탁이다. 후기 쪽은 다른 모달이 떠 있으면 알아서 물러난다.
+  // 기간이 끝난 건 지금 당장 막혀 있는 상태다 — 업데이트·후기보다 먼저 말해야 한다.
+  try {
+    await maybeShowExpiredNotice();
+  } catch {
+    /* 못 띄워도 카드에 "기간 종료"는 그대로 보인다 */
+  }
   try {
     maybeShowUpdateNotice();
   } catch {
