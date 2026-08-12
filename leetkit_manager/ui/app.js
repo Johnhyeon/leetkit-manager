@@ -2573,7 +2573,7 @@ function renderExpiredProducts(usage) {
   document.getElementById("expired-products").innerHTML = `
     <div class="expired-product">
       <span class="name">LeetKit STOCK</span>
-      <span class="what">StockLens(시세 재무 차트)</span>
+      <span class="what">StockLens(시세 · 재무 · 차트)</span>
     </div>
     <div class="expired-product">
       <span class="name">LeetKit FULL Package</span>
