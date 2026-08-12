@@ -213,6 +213,17 @@ function renderCard(lens) {
     lens.name === "telegramlens"
       ? `<button class="action-btn" data-action="telegram-login" data-lens="${lens.name}">텔레그램 로그인</button>`
       : "";
+  // 라이선스가 없거나 기간이 끝난 카드에는 살 곳을 바로 준다.
+  //
+  // 상품이 단품(StockLens)과 풀 패키지로 나뉘면서, 단품만 산 사람의 화면에는 잠긴
+  // 카드가 항상 남는다. 그 사람에게 그건 고장이 아니라 "아직 안 산 것"인데, 지금은
+  // [활성화]만 있어서 "키를 넣어야 하는데 키가 없다"는 막다른 길로 보인다. 버튼
+  // 하나가 그 상태를 설명해준다 — 별도 안내문을 다는 것보다 이쪽이 낫다.
+  const needsPurchase = ["missing", "expired"].includes(lens.license_status);
+  const purchaseBtn = needsPurchase
+    ? `<button class="action-btn" data-action="purchase" data-lens="${lens.name}">구매</button>`
+    : "";
+
   // 업데이트로도 안 풀리는 "호환되지 않는 버전"(예: PATH에 uv 관리 밖의 낡은 실행 파일이
   // 남아있는 경우) 대응 — 완전히 지우고 새로 설치할 수 있게. 이미 설치된 것만 지울 게
   // 있으므로 미설치 상태에선 안 보여준다.
@@ -248,6 +259,7 @@ function renderCard(lens) {
         <button class="action-btn" data-action="diagnose" data-lens="${lens.name}">진단</button>
         <button class="action-btn" data-action="register" data-lens="${lens.name}">MCP 등록</button>
         <button class="action-btn" data-action="activate" data-lens="${lens.name}">활성화</button>
+        ${purchaseBtn}
         ${telegramLoginBtn}
         ${repairBtn}
         ${installOrUpdateBtn}
@@ -1420,6 +1432,11 @@ document.addEventListener("click", (e) => {
   }
   if (action === "resolve-check") {
     resolveCheck(btn.dataset.lens, btn.dataset.checkId, btn.dataset.resolver, btn.dataset.repairId);
+    return;
+  }
+  if (action === "purchase") {
+    window.pywebview.api.open_purchase_page();
+    showToast("브라우저에서 구매 페이지를 열었습니다.");
     return;
   }
   if (action === "uninstall") {
