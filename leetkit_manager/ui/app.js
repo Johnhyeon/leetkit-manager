@@ -2565,16 +2565,18 @@ function renderExpiredProducts(usage) {
   // 체험 중 모은 텔레그램 데이터는 풀 패키지에서만 이어진다 — 사실이면서, 비싼 쪽을
   // 정당화하고 동시에 오해로 인한 환불을 막는다. 모은 게 없으면 이 줄은 안 쓴다.
   const carryOver = messages
-    ? `<div class="expired-product-note">체험 중 모으신 메시지 ${escapeHtml(messages.value)}은 풀 패키지에서 이어서 쓰실 수 있습니다.</div>`
+    ? `<div class="expired-product-note">체험 중 모으신 메시지 ${escapeHtml(messages.value)}은 LeetKit FULL Package에서 이어서 쓰실 수 있습니다.</div>`
     : "";
 
+  // 상품명은 판매 페이지와 정확히 같은 이름을 쓴다 — 여기서 "단품"이라고 부르고
+  // 결제 화면에서 "LeetKit STOCK"이 나오면 같은 물건인지 확신이 안 선다.
   document.getElementById("expired-products").innerHTML = `
     <div class="expired-product">
-      <span class="name">StockLens 단품</span>
-      <span class="what">시세 · 재무 · 차트</span>
+      <span class="name">LeetKit STOCK</span>
+      <span class="what">StockLens(시세 재무 차트)</span>
     </div>
     <div class="expired-product">
-      <span class="name">풀 패키지</span>
+      <span class="name">LeetKit FULL Package</span>
       <span class="what">위 전부 + 공시(DartLens) + 텔레그램(TelegramLens)</span>
     </div>
     ${carryOver}`;
