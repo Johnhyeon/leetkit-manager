@@ -78,15 +78,57 @@ def _claude_mcp_logs(folder: Path) -> list[Path]:
     return sorted(out)
 
 
+def _claude_store_logs_dirs() -> list[Path]:
+    """Microsoft Store 버전 Claude Desktop의 샌드박스 로그 폴더들.
+
+    Store 앱은 %APPDATA% 를 패키지 안으로 리디렉션하므로 표준 경로에는 아무것도
+    쌓이지 않는다. setup_claude 는 config 를 이미 이렇게 찾고 있었는데 로그만
+    빠져 있었다 — 실제 문의(2026-08-13, 뉴질랜드 사용자)에서 번들에 Claude 로그가
+    한 건도 안 담겨 고객에게 따로 압축을 부탁해야 했다. 패키지 해시는 사용자마다
+    다를 수 있어 glob 으로 찾는다.
+    """
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if not local_appdata:
+        return []
+    packages = Path(local_appdata) / "Packages"
+    if not packages.is_dir():
+        return []
+    out: list[Path] = []
+    for pattern in ("Claude_*", "*Claude*"):
+        for pkg in sorted(packages.glob(pattern)):
+            candidate = pkg / "LocalCache" / "Roaming" / "Claude" / "logs"
+            if candidate.is_dir() and candidate not in out:
+                out.append(candidate)
+    return out
+
+
 def _claude_desktop_logs_dir() -> Path:
     """Claude Desktop이 로그를 쌓는 폴더. Windows에서 실측 확인(%APPDATA%/Claude/logs) —
-    macOS는 Electron 기본 관례(~/Library/Logs/<앱이름>)를 따른다고 가정한다(미검증)."""
-    if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA")
-        return Path(appdata) / "Claude" / "logs" if appdata else Path.home() / "AppData" / "Roaming" / "Claude" / "logs"
+    macOS는 Electron 기본 관례(~/Library/Logs/<앱이름>)를 따른다고 가정한다(미검증).
+
+    Windows에서는 표준 설치판과 Store 버전 경로가 동시에 남아 있을 수 있다(Store를
+    지워도 폴더가 남는다). 그래서 존재 여부가 아니라 **실제로 MCP 로그가 들어 있는
+    쪽**을 고른다 — 빈 잔재 폴더를 골라 "해당하는 파일 없음"을 적어 보내면 받아보는
+    쪽이 또 헛다리를 짚는다.
+    """
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Logs" / "Claude"
-    return Path.home() / ".config" / "Claude" / "logs"
+    if sys.platform != "win32":
+        return Path.home() / ".config" / "Claude" / "logs"
+
+    appdata = os.environ.get("APPDATA")
+    standard = (
+        Path(appdata) / "Claude" / "logs" if appdata
+        else Path.home() / "AppData" / "Roaming" / "Claude" / "logs"
+    )
+    candidates = [standard, *_claude_store_logs_dirs()]
+    for folder in candidates:
+        if _claude_mcp_logs(folder):
+            return folder
+    for folder in candidates:
+        if folder.is_dir():
+            return folder
+    return standard
 
 
 def _stocklens_logs_dir() -> Path:
