@@ -37,18 +37,38 @@ _RECENT_LOG_FILES = 7  # 로그 파일이 날짜별로 쌓이는 Lens는 최근 
 _MAX_CLAUDE_LOG_BYTES = 20 * 1024 * 1024  # Claude 쪽 로그는 회전 없이 계속 자라므로 안전 상한.
 
 # Claude Desktop 자신이 남기는 MCP 서버별 stdout/stderr 캡처 — Lens 홈 디렉터리 로그와는
-# 별개다("이 도구가 왜 응답이 없었는지"는 보통 Lens 쪽이 아니라 여기 있다). 파일명이 설정
-# 파일의 mcpServers 키를 그대로 따르므로, 이름이 바뀐 legacy 키(dart-mcp, stock-data 등)도
-# 같이 챙긴다. mcp.log는 어느 서버가 응답 없는지 등 전체 그림 파악에 유용해 함께 담는다.
-_CLAUDE_MCP_LOG_NAMES = (
-    "mcp.log",
-    "mcp-server-stocklens.log",
-    "mcp-server-stock-data.log",
-    "mcp-server-stocklens-report.log",
-    "mcp-server-dartlens.log",
-    "mcp-server-dart-mcp.log",
-    "mcp-server-telegramlens.log",
-)
+# 별개다("이 도구가 왜 응답이 없었는지"는 보통 Lens 쪽이 아니라 여기 있다). mcp.log는
+# 어느 서버가 응답 없는지 등 전체 그림 파악에 유용해 함께 담는다.
+#
+# 파일명은 설정 파일의 mcpServers 키를 그대로 따르는데, 그 키는 사용자가 정한다.
+# 예전엔 우리가 쓸 법한 이름을 통째로 나열해뒀다 — 실제 문의(2026-08-13)에서 키를
+# `stocklens-mcp`로 등록한 PC의 `mcp-server-stocklens-mcp.log`가 그 목록에 없어서
+# 통째로 빠졌다. 번들엔 폴더 자체가 안 생기고 못 담았다는 메모도 안 남아(파일이 아예
+# 없는 경우와 구분이 안 된다), 받아보는 쪽은 로그가 원래 없는 줄 안다.
+#
+# 그래서 이름을 정확히 맞히는 대신 Lens 이름이 들어간 mcp-server-*.log 를 모두 담는다.
+# 남의 MCP 서버 로그(notion 등)까지 쓸어담지는 않는다 — 우리 문제와 무관하고, 그쪽
+# 비밀까지 대신 내보낼 이유가 없다.
+_CLAUDE_MCP_LOG_KEYWORDS = ("stocklens", "stock-data", "dartlens", "dart-mcp", "telegramlens")
+
+
+def _claude_mcp_logs(folder: Path) -> list[Path]:
+    """mcp.log + Lens 이름이 들어간 mcp-server-*.log 전부."""
+    try:
+        entries = list(folder.iterdir())
+    except OSError:
+        return []
+    out = []
+    for f in entries:
+        name = f.name.lower()
+        if not name.endswith(".log"):
+            continue
+        if name == "mcp.log" or (
+            name.startswith("mcp-server-")
+            and any(k in name for k in _CLAUDE_MCP_LOG_KEYWORDS)
+        ):
+            out.append(f)
+    return sorted(out)
 
 
 def _claude_desktop_logs_dir() -> Path:
@@ -129,13 +149,19 @@ def _safe_files(notes: list[str] | None = None) -> list[tuple[str, Path]]:
 
     claude_logs = _claude_desktop_logs_dir()
     if _probe("Claude Desktop 로그", claude_logs, notes):
-        for name in _CLAUDE_MCP_LOG_NAMES:
-            f = claude_logs / name
+        matched = _claude_mcp_logs(claude_logs)
+        if not matched:
+            # 한 건도 없으면 그 사실을 적는다 — 폴더는 읽었는데 파일이 없는 것과
+            # 우리가 못 알아본 것은 받아보는 쪽에서 구분이 안 된다.
+            notes.append(f"- Claude Desktop MCP 로그: 해당하는 파일 없음 ({claude_logs})")
+        for f in matched:
             try:
-                if f.is_file() and f.stat().st_size <= _MAX_CLAUDE_LOG_BYTES:
-                    found.append((f"claude-desktop-logs/{name}", f))
+                if f.stat().st_size <= _MAX_CLAUDE_LOG_BYTES:
+                    found.append((f"claude-desktop-logs/{f.name}", f))
+                else:
+                    notes.append(f"- Claude Desktop 로그 {f.name}: 너무 커서 제외")
             except OSError:
-                notes.append(f"- Claude Desktop 로그 {name}: 읽지 못함")
+                notes.append(f"- Claude Desktop 로그 {f.name}: 읽지 못함")
 
     return [(arc, p) for arc, p in found if p.is_file()]
 

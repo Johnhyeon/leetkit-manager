@@ -176,6 +176,55 @@ class TestSummaryAsksWhetherDataCanBeFetched:
         assert run.call_args.kwargs["timeout"] * len(support_bundle.LENSES) <= 45
 
 
+class TestClaudeMcpLogsAreFoundByKeyword:
+    """실제 문의(2026-08-13)에서 나온 문제 — MCP 키를 `stocklens-mcp`로 등록한 PC의
+    `mcp-server-stocklens-mcp.log`가 하드코딩 목록에 없어 통째로 빠졌다. 파일명은
+    사용자가 정한 설정 키를 따르므로 이름을 맞히려 들면 계속 놓친다."""
+
+    def _logs(self, tmp_path: Path, *names: str) -> Path:
+        d = tmp_path / "logs"
+        d.mkdir(exist_ok=True)
+        for n in names:
+            (d / n).write_text("x", encoding="utf-8")
+        return d
+
+    def test_config_key_variants_are_collected(self, tmp_path):
+        d = self._logs(
+            tmp_path,
+            "mcp-server-stocklens-mcp.log",      # 예전 목록이 놓치던 이름
+            "mcp-server-stocklens.log",
+            "mcp-server-dartlens.log",
+            "mcp-server-dart-mcp.log",
+            "mcp-server-telegramlens.log",
+            "mcp.log",
+        )
+        got = {p.name for p in support_bundle._claude_mcp_logs(d)}
+        assert "mcp-server-stocklens-mcp.log" in got
+        assert len(got) == 6, got
+
+    def test_other_servers_are_left_alone(self, tmp_path):
+        """남의 MCP 서버 로그까지 대신 내보낼 이유가 없다."""
+        d = self._logs(tmp_path, "mcp-server-notion-personal.log", "mcp-server-stocklens.log")
+        got = {p.name for p in support_bundle._claude_mcp_logs(d)}
+        assert got == {"mcp-server-stocklens.log"}
+
+    def test_non_log_files_are_skipped(self, tmp_path):
+        d = self._logs(tmp_path, "mcp-server-stocklens.log.bak", "main.log")
+        assert support_bundle._claude_mcp_logs(d) == []
+
+    def test_unreadable_folder_is_not_fatal(self, tmp_path):
+        with patch.object(Path, "iterdir", side_effect=OSError("nope")):
+            assert support_bundle._claude_mcp_logs(tmp_path) == []
+
+    def test_finding_nothing_is_written_down(self, tmp_path, monkeypatch):
+        """폴더는 읽었는데 한 건도 못 알아본 경우와 파일이 원래 없는 경우를 구분해야 한다."""
+        d = self._logs(tmp_path, "main.log")
+        monkeypatch.setattr(support_bundle, "_claude_desktop_logs_dir", lambda: d)
+        notes: list[str] = []
+        support_bundle._safe_files(notes)
+        assert any("해당하는 파일 없음" in n for n in notes), notes
+
+
 class TestRevealReportsWhatHappened:
     """예전엔 무조건 "폴더가 열렸습니다"라고 안내했다 — 안 열려도 그렇게 말하면
     사용자는 열리지도 않은 창을 찾는다."""
