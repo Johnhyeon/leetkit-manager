@@ -121,11 +121,16 @@ def _fill_update_info(lens: LensSpec, report: DoctorReport) -> None:
 
 
 def run_full_diagnosis(
-    lenses: tuple[LensSpec, ...] = LENSES, *, online: bool = False
+    lenses: tuple[LensSpec, ...] = LENSES, *, online: bool = False,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> list[LensDiagnosis]:
     """전체 진단 — Lens별 doctor JSON을 병렬이 아니라 순차 호출한다(2.4 진단 흐름).
-    한 Lens가 30초 timeout으로 끊겨도 다음 Lens 호출은 그대로 진행된다."""
-    return [diagnose_lens(lens, online=online) for lens in lenses]
+    한 Lens가 timeout으로 끊겨도 다음 Lens 호출은 그대로 진행된다.
+
+    `timeout`을 받는 이유: online=True는 Lens마다 실제 데이터소스에 붙어보기 때문에,
+    네트워크가 죽은 PC에서는 Lens 하나가 기본 30초를 다 쓰고 끊긴다. 호출자가
+    "3개 합쳐 이 시간 안에는 끝나야 한다"를 정할 수 있어야 한다(지원 번들 생성 등)."""
+    return [diagnose_lens(lens, online=online, timeout=timeout) for lens in lenses]
 
 
 def has_actionable_problem(diagnosis: LensDiagnosis) -> bool:

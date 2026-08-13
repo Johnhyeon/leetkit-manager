@@ -8,6 +8,7 @@ TelegramLens의 `session.session`/`credentials.json`처럼 절대 밖으로 나�
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -19,6 +20,18 @@ from leetkit_manager import orchestrator, redaction
 from leetkit_manager.lens_contract import LENSES
 
 SUPPORT_EMAIL = "osy980315@gmail.com"
+
+# zip 안 폴더 이름(_safe_files가 정하는 접두어) → 화면에 쓰는 Lens 이름.
+_LENS_DISPLAY_BY_DIR = {
+    "stocklens": "StockLens",
+    "dartlens": "DartLens",
+    "telegramlens": "TelegramLens",
+}
+
+# Lens 3개 순차 × 실제 데이터소스 연결 확인. 네트워크가 죽은 PC에서 Lens 하나가
+# 기본 30초를 다 쓰면 번들 생성이 90초 넘게 멈춘 것처럼 보인다 — 사용자는 그쯤이면
+# 창을 닫는다. Lens당 12초로 묶어 최악의 경우에도 40초 안에 끝나게 한다.
+_DIAGNOSIS_TIMEOUT = 12.0
 
 _RECENT_LOG_FILES = 7  # 로그 파일이 날짜별로 쌓이는 Lens는 최근 N개만 담는다.
 _MAX_CLAUDE_LOG_BYTES = 20 * 1024 * 1024  # Claude 쪽 로그는 회전 없이 계속 자라므로 안전 상한.
@@ -127,17 +140,87 @@ def _safe_files(notes: list[str] | None = None) -> list[tuple[str, Path]]:
     return [(arc, p) for arc, p in found if p.is_file()]
 
 
-def _summary_text(notes: list[str] | None = None) -> str:
+def _recent_call_failures(files: list[tuple[str, Path]]) -> list[str]:
+    """번들에 담기는 metrics_*.jsonl을 그대로 세어 Lens별 실패를 한 줄로 요약한다.
+
+    각 줄은 `{"tool": ..., "error": "ConnectError"|null, ...}` 형태의 JSON 한 줄이다.
+    형태가 다르거나 깨진 줄은 조용히 건너뛴다 — 요약 한 줄 만들려다 번들 생성 자체가
+    실패하면 안 된다(도움을 요청할 방법을 잃는 쪽이 더 나쁘다).
+
+    세는 것은 '기록된 error'뿐이다. StockLens의 search_stock처럼 예외를 삼키고 빈
+    결과를 돌려주는 도구는 error가 null로 남아 여기 안 잡히지만, 그런 경우에도 같은
+    시간대의 다른 도구가 실패로 남기 때문에 신호를 놓치지는 않는다.
+    """
+    tallies: dict[str, dict] = {}
+    for arcname, path in files:
+        lens_dir = arcname.split("/")[0]
+        display = _LENS_DISPLAY_BY_DIR.get(lens_dir)
+        if not display or "metrics_" not in arcname:
+            continue
+        t = tallies.setdefault(display, {"total": 0, "failed": 0, "kinds": {}, "last": None})
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            t["total"] += 1
+            err = row.get("error")
+            if not err:
+                continue
+            t["failed"] += 1
+            t["kinds"][str(err)] = t["kinds"].get(str(err), 0) + 1
+            t["last"] = (row.get("timestamp") or "?", row.get("tool") or "?")
+
+    out: list[str] = []
+    for display in (lens.display_name for lens in LENSES):
+        t = tallies.get(display)
+        if not t or not t["failed"]:
+            continue
+        kinds = ", ".join(
+            f"{k} {v}건" for k, v in sorted(t["kinds"].items(), key=lambda kv: -kv[1])
+        )
+        stamp, tool = t["last"]
+        out.append(f"- {display}: {t['total']}건 중 {t['failed']}건 실패 — {kinds} (마지막 {stamp} {tool})")
+    return out
+
+
+def _summary_text(
+    notes: list[str] | None = None, files: list[tuple[str, Path]] | None = None
+) -> str:
     lines = [
         "LeetKit Manager 진단 요약",
         f"생성 시각: {datetime.now().isoformat(timespec='seconds')}",
         f"운영체제: {sys.platform}",
         "",
     ]
-    for lens in LENSES:
-        diag = orchestrator.diagnose_lens(lens)
+
+    # 번들에 담긴 호출 기록부터 센다 — 실사용에서 확인된 문제: 네이버/DART에 아예
+    # 연결이 안 되는 PC가 보내온 번들의 summary.txt가 "정상 / 문제 없음"이었다.
+    # 같은 zip 안 metrics_*.jsonl에는 ConnectError가 스무 건 넘게 쌓여 있었는데도
+    # 요약이 그걸 안 읽었다. 요약과 로그가 서로 반대말을 하면 받아보는 쪽은 로그를
+    # 한 줄씩 세기 전까지 헛다리를 짚는다. 이건 이미 기록된 사실이라 네트워크를
+    # 새로 부르지 않고도 확실하다 — 그래서 온라인 진단보다 먼저 적는다.
+    failures = _recent_call_failures(files or [])
+    if failures:
+        lines.append("최근 도구 호출 실패 (담긴 기록 기준)")
+        lines.extend(failures)
+        lines.append("")
+
+    # online=True — 오프라인 진단은 "설치·라이선스·설정이 멀쩡한가"만 본다. 지원
+    # 번들을 만드는 순간은 정의상 뭔가 안 되고 있는 때인데, 정작 "데이터를 가져올 수
+    # 있는가"를 안 물어보면 아무 문제도 못 찾는다.
+    for diag in orchestrator.run_full_diagnosis(LENSES, online=True, timeout=_DIAGNOSIS_TIMEOUT):
         version = diag.report.installed_version if diag.report else "?"
-        lines.append(f"[{lens.display_name}] v{version} — {diag.readiness}")
+        lines.append(f"[{diag.lens.display_name}] v{version} — {diag.readiness}")
         if diag.report:
             problems = [c for c in diag.report.checks if c.status not in ("ok", "active", "skip", "info-skip")]
             in_progress = [c for c in diag.report.checks if c.status == "active"]
@@ -191,7 +274,7 @@ def create_bundle(dest_dir: Path | None = None) -> Path:
     files = _safe_files(notes)
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("summary.txt", _summary_text(notes))
+        zf.writestr("summary.txt", _summary_text(notes, files))
         for arcname, path in files:
             zf.writestr(arcname, _redacted_file_text(path))
 

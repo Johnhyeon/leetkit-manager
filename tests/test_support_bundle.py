@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -7,6 +8,11 @@ from unittest.mock import patch
 import pytest
 
 from leetkit_manager import support_bundle
+
+# 아래 _no_real_diagnosis 픽스처가 모듈 속성을 모의객체로 바꾸기 전에 진짜 함수를
+# 붙잡아 둔다 — 요약 본문 자체를 검사하는 테스트는 이걸 직접 부른다. 내부에서
+# orchestrator 등은 호출 시점에 모듈에서 다시 찾으므로 패치는 그대로 먹는다.
+_real_summary_text = support_bundle._summary_text
 
 
 @pytest.fixture(autouse=True)
@@ -97,6 +103,77 @@ class TestUnreadableSourcesAreRecorded:
              patch.object(support_bundle, "_safe_files", side_effect=lambda notes: notes.append("- 못 읽음") or []):
             support_bundle.create_bundle()
         assert spy.call_args[0][0] == ["- 못 읽음"]
+
+
+class TestSummaryCountsRecordedFailures:
+    """실제 접수된 문의(2026-08-13)에서 나온 문제 — 네이버/DART에 연결이 전혀 안 되는
+    PC가 보낸 번들의 summary.txt가 "정상 / 문제 없음"이었다. 같은 zip 안
+    metrics_*.jsonl에는 ConnectError가 스무 건 넘게 있었는데 요약이 그걸 안 읽었다."""
+
+    def _metrics(self, tmp_path: Path, name: str, rows: list[dict]) -> Path:
+        f = tmp_path / name
+        f.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+        return f
+
+    def test_connect_errors_are_counted_per_lens(self, tmp_path):
+        sl = self._metrics(tmp_path, "sl.jsonl", [
+            {"timestamp": "2026-08-13T21:49:57", "tool": "get_chart", "error": "ConnectError"},
+            {"timestamp": "2026-08-13T22:15:10", "tool": "get_volume_ranking", "error": "ConnectError"},
+            {"timestamp": "2026-08-13T22:04:59", "tool": "search_stock", "error": None},
+        ])
+        dl = self._metrics(tmp_path, "dl.jsonl", [
+            {"timestamp": "2026-08-13T22:04:38", "tool": "search_company", "error": "ConnectError"},
+        ])
+        out = support_bundle._recent_call_failures([
+            ("stocklens/metrics_20260813.jsonl", sl),
+            ("dartlens/metrics_20260813.jsonl", dl),
+        ])
+        assert any("StockLens: 3건 중 2건 실패" in x and "ConnectError 2건" in x for x in out), out
+        assert any("DartLens: 1건 중 1건 실패" in x for x in out), out
+        # 마지막 실패가 언제 어느 도구였는지까지 있어야 로그를 안 열고도 시간대가 잡힌다.
+        assert any("get_volume_ranking" in x for x in out), out
+
+    def test_a_healthy_log_produces_no_line(self, tmp_path):
+        ok = self._metrics(tmp_path, "sl.jsonl", [
+            {"timestamp": "2026-08-13T22:04:59", "tool": "search_stock", "error": None},
+        ])
+        assert support_bundle._recent_call_failures([("stocklens/metrics_x.jsonl", ok)]) == []
+
+    def test_broken_lines_do_not_sink_the_bundle(self, tmp_path):
+        f = tmp_path / "sl.jsonl"
+        f.write_text('{"tool": "a", "error": "ConnectError"}\n서걱\n[]\n', encoding="utf-8")
+        out = support_bundle._recent_call_failures([("stocklens/metrics_x.jsonl", f)])
+        assert any("1건 중 1건 실패" in x for x in out), out
+
+    def test_non_metrics_files_are_ignored(self, tmp_path):
+        f = tmp_path / "daemon_status.json"
+        f.write_text('{"error": "ConnectError"}', encoding="utf-8")
+        assert support_bundle._recent_call_failures([("telegramlens/daemon_status.json", f)]) == []
+
+    def test_the_counts_reach_the_summary(self, tmp_path):
+        sl = self._metrics(tmp_path, "sl.jsonl", [
+            {"timestamp": "2026-08-13T21:49:57", "tool": "get_chart", "error": "ConnectError"},
+        ])
+        with patch.object(support_bundle.orchestrator, "run_full_diagnosis", return_value=[]):
+            text = _real_summary_text([], [("stocklens/metrics_x.jsonl", sl)])
+        assert "최근 도구 호출 실패" in text
+        assert "StockLens: 1건 중 1건 실패" in text
+
+
+class TestSummaryAsksWhetherDataCanBeFetched:
+    """번들을 만드는 순간은 정의상 뭔가 안 되고 있는 때다 — 설치·설정만 보고
+    "데이터를 가져올 수 있는가"를 안 물어보면 아무 문제도 못 찾는다."""
+
+    def test_diagnosis_runs_online(self):
+        with patch.object(support_bundle.orchestrator, "run_full_diagnosis", return_value=[]) as run:
+            _real_summary_text([], [])
+        assert run.call_args.kwargs["online"] is True
+
+    def test_diagnosis_is_time_boxed(self):
+        with patch.object(support_bundle.orchestrator, "run_full_diagnosis", return_value=[]) as run:
+            _real_summary_text([], [])
+        # Lens 3개 순차 — 묶어두지 않으면 죽은 네트워크에서 번들 생성이 멈춘 것처럼 보인다.
+        assert run.call_args.kwargs["timeout"] * len(support_bundle.LENSES) <= 45
 
 
 class TestRevealReportsWhatHappened:
