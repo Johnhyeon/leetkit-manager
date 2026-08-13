@@ -29,6 +29,9 @@ def _empty_sources(tmp_path, monkeypatch):
         monkeypatch.setenv(env, str(tmp_path / env))
     monkeypatch.setattr(support_bundle, "_stocklens_logs_dir", lambda: tmp_path / "nope")
     monkeypatch.setattr(support_bundle, "_claude_desktop_logs_dir", lambda: tmp_path / "nope2")
+    # _desktop_dir 은 레지스트리에서 진짜 바탕화면을 읽는다 — 안 막으면 테스트가
+    # 개발자 바탕화면에 zip을 뿌린다. 개별 테스트는 필요하면 다시 덮어쓴다.
+    monkeypatch.setattr(support_bundle, "_desktop_dir", lambda: tmp_path / "desktop")
 
 
 class TestDestinationFallback:
@@ -39,12 +42,27 @@ class TestDestinationFallback:
         home = tmp_path / "home"
         (home / "Desktop").mkdir(parents=True)
         monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        monkeypatch.setattr(support_bundle, "_desktop_dir", lambda: home / "Desktop")
         assert support_bundle._writable_dest_dir() == home / "Desktop"
+
+    def test_follows_a_redirected_desktop(self, tmp_path, monkeypatch):
+        """한국어 윈도우 + OneDrive면 바탕화면이 옮겨가고 예전 자리에 빈 껍데기가
+        남는다. 거기 저장하면 성공은 하는데 사용자 눈에는 아무것도 안 보인다."""
+        home = tmp_path / "home"
+        (home / "Desktop").mkdir(parents=True)          # 껍데기 (쓰기도 된다)
+        real = home / "OneDrive" / "바탕 화면"
+        real.mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        monkeypatch.setattr(support_bundle, "_desktop_dir", lambda: real)
+        assert support_bundle._writable_dest_dir() == real
 
     def test_falls_back_to_home_when_the_desktop_is_blocked(self, tmp_path, monkeypatch):
         home = tmp_path / "home"
         home.mkdir()
         monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        # _desktop_dir 은 실제 레지스트리를 읽는다 — 안 막으면 이 PC의 진짜 바탕화면을
+        # 반환해서 테스트가 이 컴퓨터 설정에 휘둘린다.
+        monkeypatch.setattr(support_bundle, "_desktop_dir", lambda: home / "Desktop")
         real_write = Path.write_text
 
         def blocked(self, *a, **k):
@@ -59,6 +77,7 @@ class TestDestinationFallback:
         home = tmp_path / "home"
         home.mkdir()
         monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        monkeypatch.setattr(support_bundle, "_desktop_dir", lambda: home / "Desktop")
         real_write = Path.write_text
 
         def blocked(self, *a, **k):
@@ -172,8 +191,12 @@ class TestSummaryAsksWhetherDataCanBeFetched:
     def test_diagnosis_is_time_boxed(self):
         with patch.object(support_bundle.orchestrator, "run_full_diagnosis", return_value=[]) as run:
             _real_summary_text([], [])
-        # Lens 3개 순차 — 묶어두지 않으면 죽은 네트워크에서 번들 생성이 멈춘 것처럼 보인다.
-        assert run.call_args.kwargs["timeout"] * len(support_bundle.LENSES) <= 45
+        # 상한: 죽은 네트워크에서 번들 생성이 멈춘 것처럼 보이면 안 된다.
+        # 하한: 실측 telegramlens-doctor 6.2초 × (--online 재시도로 2회) 보다 넉넉해야
+        # 느린 PC에서 멀쩡한 Lens가 시간 초과로 찍히지 않는다.
+        per_lens = run.call_args.kwargs["timeout"]
+        assert per_lens >= 20, per_lens
+        assert per_lens * len(support_bundle.LENSES) <= 80, per_lens
 
 
 class TestClaudeMcpLogsAreFoundByKeyword:

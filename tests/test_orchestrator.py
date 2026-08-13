@@ -14,6 +14,60 @@ import pytest
 from conftest import load_fixture
 
 from leetkit_manager import orchestrator
+
+
+class TestOnlineFlagFallback:
+    """TelegramLens는 온라인 검사가 아예 없어 --online 옵션 자체가 없다. 지원 번들을
+    online=True로 만들자 멀쩡한 TelegramLens가 "호환되지 않는 Lens 버전"으로 보고됐다."""
+
+    def _proc(self, exit_code, stderr):
+        from leetkit_manager.process_runner import ProcessResult
+
+        return ProcessResult(
+            cmd=["telegramlens-doctor", "--json", "--online"],
+            exit_code=exit_code,
+            stdout="",
+            stderr=stderr,
+            error=None,
+            timed_out=False,
+            duration_s=0.1,
+        )
+
+    def test_unrecognized_online_flag_is_detected(self):
+        p = self._proc(2, "telegramlens-doctor: error: unrecognized arguments: --online")
+        assert orchestrator._online_flag_unsupported(p) is True
+
+    def test_other_exit_2_is_not_swallowed(self):
+        """진짜 고장난 exit=2를 조용히 재시도로 덮으면 안 된다."""
+        p = self._proc(2, "some other failure")
+        assert orchestrator._online_flag_unsupported(p) is False
+
+    def test_success_is_not_treated_as_unsupported(self):
+        assert orchestrator._online_flag_unsupported(self._proc(0, "")) is False
+
+
+class TestTimeoutIsNotCalledAVersionProblem:
+    """느린 PC에서 진단이 제한 시간을 넘기면 예전엔 "호환되지 않는 Lens 버전"으로 찍혔다.
+    사용자가 할 일이 정반대다 — 기다리기 vs 업데이트."""
+
+    def _diag(self, **kw):
+        from leetkit_manager.lens_contract import LENSES
+        from leetkit_manager.process_runner import ProcessResult
+
+        proc = ProcessResult(
+            cmd=["x"], exit_code=None, stdout="", stderr="",
+            error="timeout", timed_out=True, duration_s=25.0,
+        )
+        return orchestrator.LensDiagnosis(lens=LENSES[0], report=None, process=proc, **kw)
+
+    def test_timeout_reads_as_timeout(self):
+        assert self._diag(timed_out=True).readiness == "확인 시간 초과"
+
+    def test_timeout_still_counts_as_needing_attention(self):
+        assert orchestrator.has_actionable_problem(self._diag(timed_out=True)) is True
+
+    def test_real_version_mismatch_still_says_so(self):
+        assert self._diag(incompatible=True).readiness == "호환되지 않는 Lens 버전"
 from leetkit_manager.lens_contract import DARTLENS, STOCKLENS, TELEGRAMLENS
 from leetkit_manager.process_runner import ProcessResult
 

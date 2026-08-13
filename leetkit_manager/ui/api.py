@@ -104,15 +104,21 @@ def _problem_detail(d: LensDiagnosis) -> str | None:
     이름으로 PATH에 있음). 라벨만 보여주면 사용자도 나도 원인을 알 수 없어서
     "업데이트해도 그대로"에 갇힌다 — 실제 종료 코드와 출력 첫 줄을 그대로 보여준다.
     """
+    p = d.process
+    # 시간 초과는 버전 문제와 할 일이 정반대다 — 여기에 "삭제 후 재설치"를 붙이면
+    # 멀쩡한 설치를 지우게 만든다. 느린 PC나 쌓인 데이터가 많은 경우가 대부분이다.
+    if d.timed_out:
+        return redaction.redact(
+            f"진단 명령이 제한 시간({p.duration_s:.0f}초) 안에 끝나지 않았습니다. "
+            "PC가 느리거나 쌓인 데이터가 많으면 그럴 수 있습니다 — 잠시 뒤 다시 시도해보세요. "
+            "계속 그러면 문의해주세요."
+        )
     if not d.incompatible:
         return None
-    p = d.process
     parts = [f"진단 명령을 실행했지만 결과를 읽지 못했습니다 (종료 코드 {p.exit_code})."]
     snippet = _first_meaningful_line(p.stdout) or _first_meaningful_line(p.stderr)
     if snippet:
         parts.append(f"받은 응답: {snippet}")
-    if p.error == "timeout":
-        parts.append("응답이 제한 시간 안에 오지 않았습니다.")
     parts.append("대부분 옛 버전이 남아 있는 경우입니다 — '업데이트'가 안 되면 '삭제' 후 다시 설치해보세요.")
     return redaction.redact(" ".join(parts))
 

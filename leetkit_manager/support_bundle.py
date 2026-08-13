@@ -28,10 +28,17 @@ _LENS_DISPLAY_BY_DIR = {
     "telegramlens": "TelegramLens",
 }
 
-# Lens 3개 순차 × 실제 데이터소스 연결 확인. 네트워크가 죽은 PC에서 Lens 하나가
-# 기본 30초를 다 쓰면 번들 생성이 90초 넘게 멈춘 것처럼 보인다 — 사용자는 그쯤이면
-# 창을 닫는다. Lens당 12초로 묶어 최악의 경우에도 40초 안에 끝나게 한다.
-_DIAGNOSIS_TIMEOUT = 12.0
+# Lens 3개 순차 × 실제 데이터소스 연결 확인.
+#
+# 처음엔 12초로 잡았다가 실측에서 되돌렸다 — 이 PC에서 telegramlens-doctor 한 번이
+# 6.2초였고(텔레그램 DB를 훑는다), --online 을 모르는 Lens는 옵션을 빼고 한 번 더
+# 물어보므로 두 번 돈다. 사양이 낮거나 수집한 메시지가 많은 PC에서는 12초를 넘긴다.
+# 실제로 이 PC의 번들 생성에서도 한 번 넘겨서 멀쩡한 TelegramLens가 실패로 찍혔다.
+# 내 PC에서 아슬아슬한 값은 남의 PC에서 틀린 값이다.
+#
+# 그래도 상한은 둔다 — 네트워크가 죽은 PC에서 기본 30초를 셋이 다 쓰면 90초 넘게
+# 멈춘 것처럼 보이고, 사용자는 그쯤이면 창을 닫는다.
+_DIAGNOSIS_TIMEOUT = 25.0
 
 _RECENT_LOG_FILES = 7  # 로그 파일이 날짜별로 쌓이는 Lens는 최근 N개만 담는다.
 _MAX_CLAUDE_LOG_BYTES = 20 * 1024 * 1024  # Claude 쪽 로그는 회전 없이 계속 자라므로 안전 상한.
@@ -267,6 +274,29 @@ def _summary_text(
     return redaction.redact("\n".join(lines))
 
 
+def _desktop_dir() -> Path:
+    """사용자에게 실제로 보이는 바탕화면.
+
+    `Path.home()/"Desktop"` 이면 될 것 같지만 아니다 — 한국어 윈도우 + OneDrive 조합에서
+    바탕화면은 `C:\\Users\\<name>\\OneDrive\\바탕 화면` 으로 옮겨가고, 예전 자리에는 빈
+    `Desktop` 폴더가 껍데기로 남는다(실측: 그 폴더는 존재하고 쓰기도 된다). 그래서 저장은
+    성공하는데 사용자 눈에는 아무것도 안 보인다 — 실제로 이 문제로 "파일이 안 생긴다"고
+    한 번 헤맸다. 실제 위치는 레지스트리가 알고 있으니 그걸 묻는다.
+    """
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            key = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as k:
+                path = Path(winreg.QueryValueEx(k, "Desktop")[0])
+            if path.is_dir():
+                return path
+        except (OSError, ValueError, ImportError):
+            pass  # 못 물어보면 아래 관례적 위치로 — 최악이라도 어딘가에는 저장된다
+    return Path.home() / "Desktop"
+
+
 def _writable_dest_dir() -> Path:
     """zip을 저장할 수 있는 첫 번째 폴더. 바탕화면 → 홈 → 임시 폴더 순.
 
@@ -276,7 +306,7 @@ def _writable_dest_dir() -> Path:
     """
     import tempfile
 
-    for candidate in (Path.home() / "Desktop", Path.home(), Path(tempfile.gettempdir())):
+    for candidate in (_desktop_dir(), Path.home(), Path(tempfile.gettempdir())):
         try:
             candidate.mkdir(parents=True, exist_ok=True)
             probe = candidate / ".leetkit-write-test"

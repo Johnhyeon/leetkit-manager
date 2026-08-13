@@ -32,11 +32,18 @@ class LensDiagnosis:
     process: ProcessResult
     not_installed: bool = False
     incompatible: bool = False
+    timed_out: bool = False
 
     @property
     def readiness(self) -> str:
         if self.not_installed:
             return "미설치"
+        # 시간이 모자란 것과 버전이 안 맞는 것은 사용자가 할 일이 정반대다(기다리기 vs
+        # 업데이트). 예전엔 둘 다 "호환되지 않는 Lens 버전"으로 뭉뚱그려서, 느린 PC나
+        # 텔레그램 DB가 큰 사용자에게 멀쩡한 Lens를 고장났다고 말했다 — 이 PC에서도
+        # TelegramLens 진단이 6.2초 걸려 12초 제한을 넘길락 말락 했다.
+        if self.timed_out:
+            return "확인 시간 초과"
         if self.incompatible:
             return "호환되지 않는 Lens 버전"
         if self.report is None:
@@ -79,8 +86,19 @@ def _diagnose_lens_once(
     cmd = [package_service.resolve_lens_command(lens.doctor_cmd), "--json"] + (["--online"] if online else [])
     process, payload = run_json_cli(cmd, timeout=timeout)
 
+    # 이 Lens 가 --online 을 모르면 argparse 가 exit=2 로 죽고 stdout 에 JSON 이 없다 —
+    # 그러면 아래에서 "호환되지 않는 Lens 버전"으로 떨어진다. 실사용에서 확인됐다:
+    # TelegramLens 는 온라인 검사가 아예 없어서 이 옵션 자체가 없고, 지원 번들을
+    # online=True 로 만들자 멀쩡한 TelegramLens 가 고장난 것처럼 보고됐다. 옵션을 빼고
+    # 한 번 더 물어본다 — 온라인 검사만 못 할 뿐 나머지 진단은 그대로 쓸 수 있다.
+    # 필드에 남아있는 옛 StockLens/DartLens 도 같은 이유로 여기서 구제된다.
+    if online and payload is None and _online_flag_unsupported(process):
+        process, payload = run_json_cli(cmd[:-1], timeout=timeout)
+
     if process.error == "not_found":
         return LensDiagnosis(lens=lens, report=None, process=process, not_installed=True)
+    if process.timed_out:
+        return LensDiagnosis(lens=lens, report=None, process=process, timed_out=True)
     # dict가 아닌 유효 JSON(배열·문자열·숫자)도 파서는 그대로 통과시킨다 — 그대로
     # DoctorReport.from_json에 넘기면 payload.get에서 AttributeError가 나고, 그걸
     # 잡는 곳이 없어 진단 전체(다른 Lens 포함)가 죽는다. "호환되지 않는 버전"으로
@@ -106,6 +124,16 @@ def _diagnose_lens_once(
         return LensDiagnosis(lens=lens, report=report, process=process, incompatible=True)
 
     return LensDiagnosis(lens=lens, report=report, process=process)
+
+
+def _online_flag_unsupported(process: ProcessResult) -> bool:
+    """`--online` 을 몰라서 죽은 건지 판별. argparse 는 모르는 옵션에 exit=2 + stderr 에
+    "unrecognized arguments: --online" 을 남긴다. 다른 이유의 exit=2(진짜 고장)를
+    조용히 재시도로 덮지 않도록 두 신호를 모두 본다."""
+    if process.exit_code != 2:
+        return False
+    combined = f"{process.stdout}\n{process.stderr}".lower()
+    return "--online" in combined and "unrecognized arguments" in combined
 
 
 def _fill_update_info(lens: LensSpec, report: DoctorReport) -> None:
@@ -142,7 +170,7 @@ def has_actionable_problem(diagnosis: LensDiagnosis) -> bool:
     세면 StockLens의 실제 실패가 상단 요약의 "조치 필요"에서 통째로 빠진다.
     그래서 여기서는 checks를 직접 보고 판정한다(진행중 active·건너뜀은 문제가 아니다).
     """
-    if diagnosis.not_installed or diagnosis.incompatible:
+    if diagnosis.not_installed or diagnosis.incompatible or diagnosis.timed_out:
         return True
     if diagnosis.report is None:
         return True  # 진단 자체를 못 한 상태 — 확인이 필요하다
