@@ -268,11 +268,26 @@ def _recent_call_failures(files: list[tuple[str, Path]]) -> list[str]:
     return out
 
 
+def _manager_version() -> str:
+    """이 Manager의 버전. 못 읽어도 요약 생성을 막지 않는다 — 버전 한 줄 때문에
+    지원 파일 자체가 안 만들어지면 도움을 요청할 방법을 잃는다."""
+    try:
+        from leetkit_manager import __version__
+
+        return __version__
+    except Exception:
+        return "?"
+
+
 def _summary_text(
     notes: list[str] | None = None, files: list[tuple[str, Path]] | None = None
 ) -> str:
+    # Manager 자신의 버전을 맨 위에 적는다. 이게 없으면 받아보는 쪽이 "이 사람은 어떤
+    # Manager를 쓰고 있나"를 물어봐야 하고, 그 왕복 한 번에 반나절이 간다 — 정작
+    # 그 버전에서 이미 고쳐진 문제인 경우가 흔하다. Lens 버전은 아래에 다 적으면서
+    # 정작 이 파일을 만든 프로그램의 버전만 빠져 있었다.
     lines = [
-        "LeetKit Manager 진단 요약",
+        f"LeetKit Manager 진단 요약 (Manager v{_manager_version()})",
         f"생성 시각: {datetime.now().isoformat(timespec='seconds')}",
         f"운영체제: {sys.platform}",
         "",
@@ -406,8 +421,15 @@ def reveal_in_file_manager(path: Path) -> bool:
     열리지도 않은 창을 찾는다. 못 열었으면 경로를 대신 알려줘야 한다."""
     try:
         if sys.platform == "win32":
+            # 문자열로 넘긴다. 리스트로 주면 파이썬이 `/select,<경로>` **전체**를 한
+            # 인자로 보고 통째로 따옴표를 씌우는데(`explorer "/select,C:\... 화면\a.zip"`),
+            # 탐색기는 그걸 파싱하지 못하고 조용히 기본 폴더를 연다. 경로에 공백이
+            # 없으면 우연히 동작해서 오래 안 걸렸다 — 한국어 윈도우 + OneDrive 조합의
+            # 바탕화면이 `...\OneDrive\바탕 화면` 이라 거기서 처음 드러났다.
+            # 사용자에게는 "폴더는 열렸는데 zip이 없다"로 보인다.
+            # 따옴표는 경로에만 둘러야 한다.
+            subprocess.run(f'explorer /select,"{path}"')
             # explorer는 성공해도 0이 아닌 값을 돌려주는 일이 있어 반환 코드를 안 본다.
-            subprocess.run(["explorer", f"/select,{path}"])
             return True
         if sys.platform == "darwin":
             return subprocess.run(["open", "-R", str(path)], capture_output=True).returncode == 0

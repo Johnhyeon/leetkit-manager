@@ -1588,11 +1588,187 @@ function closeSupportModal() {
 
 document.getElementById("support-btn").addEventListener("click", openSupportModal);
 document.getElementById("support-close").addEventListener("click", closeSupportModal);
+
+// 칸별 복사 — 메일 앱은 받는사람·제목·본문을 각각 다른 칸에 넣게 되어 있다.
+// 한 덩어리로만 주면 사용자가 직접 잘라 써야 한다.
+document.getElementById("support-backdrop").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-copy-from]");
+  if (!btn) return;
+  const text = (document.getElementById(btn.dataset.copyFrom) || {}).textContent || "";
+  if (!text.trim()) {
+    showToast("아직 만들어지지 않았습니다. 잠시 후 다시 눌러주세요.");
+    return;
+  }
+  const ok = await window.pywebview.api.copy_to_clipboard(text);
+  showToast(ok ? "복사되었습니다." : "클립보드 복사에 실패했습니다.");
+});
 document.getElementById("support-copy").addEventListener("click", async () => {
   if (!supportInfo) return;
   const text = `받는사람: ${supportInfo.to}\n제목: ${supportInfo.subject}\n\n${supportInfo.body}`;
   const ok = await window.pywebview.api.copy_to_clipboard(text);
   showToast(ok ? "메일 내용이 복사되었습니다." : "클립보드 복사에 실패했습니다.");
+});
+
+/* ---------- 문제 해결(문의 전에 해볼 것) ----------
+   접수된 문의는 대부분 같은 몇 가지에서 끝난다. 그런데 그 "순서"를 아는 사람은
+   우리뿐이라, 사용자는 되는대로 눌러보다 지쳐서 메일을 쓴다. 그래서 읽는 안내문이
+   아니라 **누르면 실제로 실행되는** 순서로 만든다.
+
+   각 단계는 자기가 무엇을 확인했는지 한 줄로 남긴다. 끝까지 갔는데도 안 되면 그
+   줄들이 그대로 문의 내용이 된다 — 사용자는 증상을 설명할 말을 못 찾는 경우가
+   많은데, 여기까지 왔다는 사실 자체가 우리에겐 정보다. */
+
+const TROUBLESHOOT_STEPS = [
+  {
+    key: "restart",
+    title: "Claude를 완전히 껐다 켜기",
+    desc:
+      "창을 X로 닫는 것만으로는 새 설정이 적용되지 않습니다. " +
+      "도구가 안 보이거나 방금 바꾼 게 반영이 안 될 때는 대부분 여기서 끝납니다.",
+    action: "지금 다시 시작",
+    async run(setResult) {
+      const running = await window.pywebview.api.claude_desktop_running();
+      if (!running) {
+        const r = await window.pywebview.api.launch_claude_desktop();
+        setResult(
+          r.ok ? "ok" : "fail",
+          r.ok ? "Claude Desktop을 실행했습니다." : r.error || "실행하지 못했습니다. 직접 열어주세요."
+        );
+        return;
+      }
+      const r = await window.pywebview.api.restart_claude_desktop();
+      setResult(
+        r.ok ? "ok" : "fail",
+        r.ok
+          ? "다시 시작했습니다. Claude에서 다시 한 번 물어봐주세요."
+          : r.error || "다시 시작하지 못했습니다. 트레이 아이콘에서 종료 후 직접 열어주세요."
+      );
+    },
+  },
+  {
+    key: "update",
+    title: "최신 버전인지 확인",
+    desc: "겪고 계신 문제가 이미 고쳐졌을 수 있습니다. 업데이트는 1~2분이면 끝납니다.",
+    action: "업데이트 확인",
+    async run(setResult) {
+      // 캐시가 아니라 지금 다시 본다 — 이 창을 연 이유가 "뭔가 이상하다"이므로,
+      // 몇 분 전 상태를 근거로 "최신입니다"라고 말하면 안 된다.
+      const data = await window.pywebview.api.diagnose(false);
+      render(data);
+      const stale = lensesWithUpdates();
+      if (!stale.length) {
+        setResult("ok", "설치된 Lens가 모두 최신 버전입니다.");
+        return;
+      }
+      const names = stale.map((l) => `${l.display_name} v${l.latest_version}`).join(", ");
+      setResult("warn", `업데이트가 있습니다 — ${names}`);
+      closeTroubleshootModal();
+      maybeShowUpdateNotice({ force: true });
+    },
+  },
+  {
+    key: "connect",
+    title: "데이터가 실제로 들어오는지 점검",
+    desc:
+      "설치·라이선스·인터넷 연결을 한 번에 확인합니다. " +
+      "실제로 시세를 한 번 불러보기 때문에 30초쯤 걸릴 수 있습니다.",
+    action: "지금 점검",
+    async run(setResult) {
+      const data = await window.pywebview.api.diagnose(true);
+      render(data);
+      const bad = (data.lenses || []).filter((l) => !l.not_installed && l.overall === "fail");
+      if (!bad.length) {
+        setResult("ok", "모두 정상입니다 — 데이터를 가져오는 데 문제가 없습니다.");
+        return;
+      }
+      // 무엇이 잘못됐는지(summary)와 무엇을 하면 되는지(action)를 같이 적는다.
+      // 진단 항목마다 둘 다 정의돼 있는데 예전엔 앞만 보여줬다 — 원인만 알려주고
+      // 할 일을 안 적으면 사용자는 결국 우리에게 물어야 하고, 이 창을 만든 의미가 없다.
+      const lines = [];
+      bad.forEach((l) => {
+        const failed = (l.checks || []).filter((c) => c.status === "fail");
+        if (!failed.length) {
+          lines.push(`${l.display_name}: ${l.problem_detail || "원인을 확인하지 못했습니다"}`);
+          return;
+        }
+        failed.forEach((c) => {
+          lines.push(`${l.display_name}: ${c.summary}`);
+          if (c.action) lines.push(`   → ${c.action}`);
+        });
+        if (l.repairable_repair_id) {
+          lines.push("   → 아래 카드의 [고치기] 버튼으로 바로 해결할 수 있습니다.");
+        }
+      });
+      setResult("fail", lines.join("\n"));
+    },
+  },
+];
+
+let troubleshootBusy = false;
+
+function troubleshootStepId(key) {
+  return `troubleshoot-step-${key}`;
+}
+
+function renderTroubleshootSteps() {
+  document.getElementById("troubleshoot-steps").innerHTML = TROUBLESHOOT_STEPS.map(
+    (s) => `
+      <li class="troubleshoot-step" id="${troubleshootStepId(s.key)}">
+        <div class="troubleshoot-step-title">${escapeHtml(s.title)}</div>
+        <div class="troubleshoot-step-desc">${escapeHtml(s.desc)}</div>
+        <div class="troubleshoot-step-row">
+          <button class="action-btn" data-troubleshoot="${escapeHtml(s.key)}">${escapeHtml(s.action)}</button>
+          <div class="troubleshoot-step-result" data-result-for="${escapeHtml(s.key)}"></div>
+        </div>
+      </li>`
+  ).join("");
+}
+
+function setTroubleshootResult(key, status, text) {
+  const el = document.querySelector(`[data-result-for="${key}"]`);
+  if (!el) return; // 창이 이미 닫힌 뒤(예: 업데이트 안내로 넘어간 경우)
+  el.textContent = text;
+  el.className = `troubleshoot-step-result ${status}`;
+}
+
+async function runTroubleshootStep(key, btn) {
+  const step = TROUBLESHOOT_STEPS.find((s) => s.key === key);
+  if (!step || troubleshootBusy) return;
+
+  troubleshootBusy = true;
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "확인 중…";
+  setTroubleshootResult(key, "running", "");
+  try {
+    await step.run((status, text) => setTroubleshootResult(key, status, text));
+  } catch (e) {
+    setTroubleshootResult(key, "fail", `확인하지 못했습니다. ${(e && e.message) || ""}`.trim());
+  } finally {
+    troubleshootBusy = false;
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function openTroubleshootModal() {
+  renderTroubleshootSteps();
+  document.getElementById("troubleshoot-backdrop").hidden = false;
+}
+
+function closeTroubleshootModal() {
+  document.getElementById("troubleshoot-backdrop").hidden = true;
+}
+
+document.getElementById("troubleshoot-btn").addEventListener("click", openTroubleshootModal);
+document.getElementById("troubleshoot-close").addEventListener("click", closeTroubleshootModal);
+document.getElementById("troubleshoot-support").addEventListener("click", () => {
+  closeTroubleshootModal();
+  openSupportModal();
+});
+document.getElementById("troubleshoot-steps").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-troubleshoot]");
+  if (btn) runTroubleshootStep(btn.dataset.troubleshoot, btn);
 });
 
 /* ---------- 단계별 가이드 투어 ----------
@@ -1682,11 +1858,21 @@ const TOUR_STEPS = [
     desc: "업데이트마다 무엇이 바뀌었는지 적어둔 페이지를 엽니다.",
   },
   {
+    // 투어 순서를 상단 버튼 배치와 같게 둔다 — 설명을 듣고 눈을 들었을 때 그 자리에
+    // 있어야 한다. "문제 해결 → 그래도 안 되면 지원 문의"라는 순서 자체가 안내다.
+    selector: "#troubleshoot-btn",
+    title: "문제 해결",
+    desc:
+      "무언가 안 될 때 문의보다 먼저 눌러보세요.\n읽는 설명이 아니라 눌러서 바로 실행되는 순서입니다.\n\n" +
+      "1. Claude를 완전히 껐다 켜기\n2. 최신 버전인지 확인\n3. 데이터가 실제로 들어오는지 점검\n\n" +
+      "문제가 있으면 원인과 함께\n무엇을 하면 되는지까지 알려드립니다.",
+  },
+  {
     selector: "#support-btn",
     title: "지원 문의",
     desc:
-      "문제가 안 풀리면 여기를 눌러보세요.\n로그를 모아 zip으로 만들고 그 폴더를 열어줍니다.\n\n" +
-      "뜨는 창의 받는사람, 제목, 내용을 복사해\n메일에 붙여넣고 zip을 첨부해서 보내시면 됩니다.",
+      "문제 해결로도 안 풀리면 여기를 눌러보세요.\n로그를 모아 zip으로 만들고 그 폴더를 열어줍니다.\n\n" +
+      "받는사람, 제목, 내용 옆의 [복사]를 눌러\n메일의 각 칸에 붙여넣고 zip을 첨부해 보내시면 됩니다.",
   },
   {
     selector: "#self-update-btn",
@@ -1703,7 +1889,7 @@ const TOUR_STEPS = [
           "지금은 최신이라 안 보입니다.\n\n"
         : "LeetKit Manager 자체의 새 버전이 있을 때만 나타납니다.\n\n") +
       "누르면 설치한 뒤 앱이 잠깐 닫혔다가\n새 버전으로 다시 열립니다. 그대로 기다리시면 됩니다.\n\n" +
-      "Lens 업데이트와는 별개입니다 — 그쪽은 각 카드에서 합니다.",
+      "앱을 켤 때 뜨는 업데이트 안내에도 같이 나오니\n이 버튼을 놓치셔도 괜찮습니다.",
   },
   {
     selector: "#guide-btn",
@@ -1864,6 +2050,9 @@ document.getElementById("guide-btn").addEventListener("click", startTour);
 // checkSelfUpdate가 채운다 — 패치노트에서 "어디까지가 이미 쓰고 있는 버전인지"를
 // 가르는 기준이라, 화면의 v표시(#manager-version)와 같은 값을 따로 들고 있는다.
 let managerVersion = null;
+// 자체 업데이트 정보. 상단 버튼만으로는 눈에 안 띄어서, 시작할 때 뜨는 업데이트
+// 안내에도 Manager를 같이 올린다(checkSelfUpdate가 채운다).
+let selfUpdateInfo = null;
 
 // 지금 이 사람 기준으로 각 제품이 어떤 상태인지. 목록만 늘어놓으면 남의 이야기가
 // 되고, "이건 이미 쓰고 계신 버전에 들어 있다 / 이건 업데이트하면 적용된다"를
@@ -2678,37 +2867,61 @@ function lensesWithUpdates() {
   );
 }
 
+function selfUpdateHasUpdate() {
+  return Boolean(selfUpdateInfo && selfUpdateInfo.update_available && selfUpdateInfo.latest);
+}
+
 // "나중에"를 고른 조합을 기억한다. 매번 다시 띄우면 잔소리가 되고, 아예 안 띄우면
 // 다음 새 버전을 놓친다 — 버전 조합이 바뀌었을 때만 다시 띄운다.
+// Manager 버전도 조합에 넣는다. 빼두면 Lens는 그대로인데 Manager만 새로 나온 날
+// "나중에"가 그대로 살아 있어 안내가 아예 안 뜬다.
 function updateNoticeSignature(lenses) {
-  return lenses
-    .map((l) => `${l.name}@${l.latest_version}`)
-    .sort()
-    .join(",");
+  const parts = lenses.map((l) => `${l.name}@${l.latest_version}`);
+  if (selfUpdateHasUpdate()) parts.push(`manager@${selfUpdateInfo.latest}`);
+  return parts.sort().join(",");
 }
 
 function closeUpdateModal() {
   document.getElementById("update-backdrop").hidden = true;
 }
 
-function maybeShowUpdateNotice() {
-  // 설치를 아직 안 끝낸 사람에게는 마법사가 먼저다 — 그 위에 겹쳐 띄우면 흐름이 끊긴다.
-  if (!localStorage.getItem(ONBOARDING_DONE_KEY)) return;
-  if (document.querySelector(".modal-backdrop:not([hidden])")) return;
+// force: 사용자가 "문제 해결"에서 직접 부른 경우. 자동으로 띄울 때의 자제 규칙
+// (마법사 중이면 참기, 다른 창이 떠 있으면 참기, "나중에" 누른 조합은 다시 안 띄우기)은
+// 전부 "묻지도 않았는데 끼어드는" 상황을 위한 것이다. 직접 누른 사람에게 그 규칙을
+// 적용하면 버튼이 아무 반응도 안 하는 것처럼 보인다.
+function maybeShowUpdateNotice({ force = false } = {}) {
+  if (!force) {
+    // 설치를 아직 안 끝낸 사람에게는 마법사가 먼저다 — 그 위에 겹쳐 띄우면 흐름이 끊긴다.
+    if (!localStorage.getItem(ONBOARDING_DONE_KEY)) return;
+    if (document.querySelector(".modal-backdrop:not([hidden])")) return;
+  }
 
   const lenses = lensesWithUpdates();
-  if (!lenses.length) return;
-  if (localStorage.getItem(UPDATE_NOTICE_KEY) === updateNoticeSignature(lenses)) return;
+  const managerUpdate = selfUpdateHasUpdate();
+  if (!lenses.length && !managerUpdate) return;
+  if (!force && localStorage.getItem(UPDATE_NOTICE_KEY) === updateNoticeSignature(lenses)) return;
 
-  document.getElementById("update-list").innerHTML = lenses
-    .map(
+  // Manager 자신을 맨 위에 둔다. 상단의 작은 [업데이트] 버튼으로만 알리던 시절엔
+  // 그게 있는 줄도 모르고 몇 버전을 건너뛰는 사람이 있었다 — Lens를 업데이트하러 이
+  // 창을 여는 사람에게 같이 보여주는 게 가장 자연스러운 자리다.
+  const rows = [];
+  if (managerUpdate) {
+    rows.push(`
+      <div class="update-row">
+        <span class="name">LeetKit Manager</span>
+        <span class="versions">v${escapeHtml(selfUpdateInfo.current || "?")} → <span class="to">v${escapeHtml(selfUpdateInfo.latest)}</span></span>
+      </div>`);
+  }
+  rows.push(
+    ...lenses.map(
       (l) => `
       <div class="update-row">
         <span class="name">${escapeHtml(l.display_name)}</span>
         <span class="versions">v${escapeHtml(l.installed_version || "?")} → <span class="to">v${escapeHtml(l.latest_version)}</span></span>
       </div>`
     )
-    .join("");
+  );
+  document.getElementById("update-list").innerHTML = rows.join("");
 
   // 처음 업데이트하는 사람에게만 한 번 — 누르면 무슨 일이 일어나는지, 얼마나
   // 걸리는지, Claude를 건드리는지. 모르는 채로 누르는 버튼이 제일 무섭고,
@@ -2739,7 +2952,16 @@ document.getElementById("update-later").addEventListener("click", async () => {
 // 누를 수 있어야 한다.
 document.getElementById("update-patchnotes").addEventListener("click", openPatchNotes);
 
+// Manager 자신은 **맨 마지막**에 업데이트한다. 먼저 하면 앱이 곧바로 자기를 바꿔치고
+// 다시 시작해버려서 Lens 업데이트가 시작도 못 한다 — 사용자 눈에는 "업데이트를 눌렀는데
+// Lens는 그대로"로 보인다.
 document.getElementById("update-now").addEventListener("click", async () => {
+  const needsManagerUpdate = selfUpdateHasUpdate();
+  await runLensUpdatesFromNotice();
+  if (needsManagerUpdate) await runSelfUpdate();
+});
+
+async function runLensUpdatesFromNotice() {
   const lenses = lensesWithUpdates();
   closeUpdateModal();
 
@@ -2794,7 +3016,7 @@ document.getElementById("update-now").addEventListener("click", async () => {
   });
   // 재시작 모달을 띄웠으면 그게 닫힐 때 이어서 후기를 묻는다(closeRestartModal).
   if (document.getElementById("restart-backdrop").hidden) await handOffToReviewPrompt();
-});
+}
 
 // 일괄 업데이트 전에 Claude Desktop을 닫을지 한 번만 묻는다. 닫았으면 true —
 // 호출자가 끝나고 다시 켜준다.
@@ -2937,6 +3159,7 @@ async function checkSelfUpdate() {
   // 지금 돌고 있는 버전을 항상 보여준다. 어디에도 안 보여서 "업데이트했는데 버튼이 안
   // 사라진다" 같은 상황에서 실제로 몇 버전이 도는지 확인할 방법이 없었다.
   managerVersion = info.current || null;
+  selfUpdateInfo = info;
   document.getElementById("manager-version").textContent = info.current ? `v${info.current}` : "";
 
   const btn = document.getElementById("self-update-btn");
@@ -2949,10 +3172,13 @@ async function checkSelfUpdate() {
   }
 }
 
-document.getElementById("self-update-btn").addEventListener("click", async (e) => {
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  btn.textContent = "설치 중…";
+// 상단 버튼과 시작 시 업데이트 안내가 같은 길을 쓴다 — 한쪽만 고치면 다른 쪽이
+// 조용히 옛 동작으로 남는다. btn은 상단 버튼에서 부를 때만 넘어온다.
+async function runSelfUpdate(btn = null) {
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "설치 중…";
+  }
   // Lens 설치와 똑같이 전면 오버레이를 띄운다. 예전엔 버튼 글자만 바뀌어서, 다운로드가
   // 오래 걸리는 동안 멈춘 건지 진행 중인지 알 수 없었다(맥에서 실제로 그랬다).
   showBusyOverlay("LeetKit Manager를 업데이트하는 중…");
@@ -2974,8 +3200,10 @@ document.getElementById("self-update-btn").addEventListener("click", async (e) =
     setTimeout(() => window.pywebview.api.quit(), 1600);
   } else {
     showToast(result.error || "업데이트에 실패했습니다.");
-    btn.disabled = false;
-    btn.textContent = "업데이트";
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "업데이트";
+    }
     // 실패했으면 화면에 남은 안내가 사실과 다를 수 있다 — 지금 상태로 다시 맞춘다.
     try {
       await checkSelfUpdate();
@@ -2983,7 +3211,9 @@ document.getElementById("self-update-btn").addEventListener("click", async (e) =
       /* 확인 실패는 조용히 — 버튼은 그대로 남아 다시 시도할 수 있다 */
     }
   }
-});
+}
+
+document.getElementById("self-update-btn").addEventListener("click", (e) => runSelfUpdate(e.currentTarget));
 
 // 어떤 백엔드 호출이 예외를 던져도 최소한 사용자에게 보이게 하는 안전망.
 // 개별 호출부에 try/catch가 빠져 있으면 "…중" 상태로 화면이 영원히 멈춘 채 아무 안내도

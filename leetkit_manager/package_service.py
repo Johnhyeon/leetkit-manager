@@ -868,6 +868,28 @@ def download_file(url: str, dest: Path, *, timeout: float = _EXE_DOWNLOAD_TIMEOU
         return False
 
 
+def _hide_file(path: Path) -> None:
+    """Windows 탐색기에서 안 보이게 숨김 속성을 준다.
+
+    자체 업데이트가 남기는 `<exe>.exe.old` 때문이다. 지우는 건 새 프로세스가 뜰 때
+    시도하는데, 그 순간 백신이 방금 이름이 바뀐 파일을 검사하고 있으면 삭제가 막힌다
+    — 그러면 다음 실행 때까지 사용자 폴더에 남는다. 실제로 "이 파일 뭔가요?"라는
+    문의가 반복됐다.
+
+    숨김은 지우기의 대체재가 아니라 보험이다. 삭제는 그대로 시도하고, 실패해 남더라도
+    눈에는 안 띄게 한다.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        FILE_ATTRIBUTE_HIDDEN = 0x02
+        ctypes.windll.kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
+    except Exception:
+        pass
+
+
 def replace_running_exe(new_exe_path: Path) -> ProcessResult:
     """지금 실행 중인 exe 자신을 new_exe_path의 내용으로 바꿔치고 재실행한다.
 
@@ -883,6 +905,8 @@ def replace_running_exe(new_exe_path: Path) -> ProcessResult:
         if backup.exists():
             backup.unlink()
         current_exe.rename(backup)
+        # 이 프로세스가 살아있는 한 저 파일은 못 지운다 — 그동안만이라도 안 보이게.
+        _hide_file(backup)
         shutil.copy2(new_exe_path, current_exe)
         creationflags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
         # --wait-for-exit: 새 프로세스가 지금 이 프로세스의 종료를 기다렸다가 뜬다.
@@ -939,13 +963,31 @@ def relaunch_after_exit() -> bool:
 
 def cleanup_old_exe_backup() -> None:
     """이전 자체 업데이트가 남긴 `<exe>.exe.old` 정리. 새로(교체된 뒤) 뜬 exe가 시작할
-    때 한 번 시도한다 — 그 시점엔 더 이상 아무 프로세스도 그 파일을 쥐고 있지 않아
-    삭제가 된다(교체 직후, 옛 프로세스가 아직 살아있는 동안은 실패해도 무시)."""
+    때 시도한다.
+
+    한 번만 시도하면 안 된다. 옛 프로세스가 막 끝난 직후라 파일이 잠깐 더 잠겨 있을 수
+    있고(특히 백신이 방금 이름이 바뀐 파일을 검사 중일 때), 그 한 번이 실패하면 다음
+    실행 때까지 사용자 폴더에 정체불명의 파일이 남는다 — "이거 뭔가요?" 문의의 정체가
+    이것이었다. 잠깐씩 쉬며 몇 번 더 두드린다.
+
+    그래도 안 지워지면 숨김 속성이라도 걸어 눈에서 치운다. 못 지우는 것보다 나쁜 건
+    못 지운 걸 사용자가 보는 것이다.
+    """
     if not is_frozen_exe():
         return
+    import time
+
     current_exe = Path(sys.executable)
     backup = current_exe.with_name(current_exe.stem + ".exe.old")
-    try:
-        backup.unlink(missing_ok=True)
-    except Exception:
-        pass
+    if not backup.exists():
+        return
+
+    for attempt in range(5):
+        try:
+            backup.unlink(missing_ok=True)
+            return
+        except Exception:
+            # 0.2초씩 늘려가며 총 3초쯤 기다린다. 앱 시작을 눈에 띄게 늦추지 않으면서
+            # 백신 검사 한 번이 끝나기엔 충분한 시간이다.
+            time.sleep(0.2 * (attempt + 1))
+    _hide_file(backup)

@@ -65,6 +65,21 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
+  /* 창은 text_select=True로 연다(안 그러면 아무 글자도 드래그가 안 된다). 대신 여기서
+     전체를 다시 잠그고, 사용자가 실제로 옮겨 적어야 하는 곳만 아래에서 풀어준다 —
+     버튼 이름이나 카드 제목까지 드래그로 잡히면 앱이 아니라 웹페이지처럼 보인다. */
+  user-select: none;
+}
+
+/* 옮겨 적어야 하는 값들 — 메일 주소·제목·본문, 진단 결과, 패치노트.
+   여기서만 선택이 된다. */
+.support-value,
+.detail-body,
+.patchnotes-panel,
+.troubleshoot-step-result,
+.modal-msg {
+  user-select: text;
+  cursor: text;
 }
 
 /* ---------- 상단 바 ---------- */
@@ -793,6 +808,97 @@ body {
   gap: 8px;
 }
 
+/* ---------- 문제 해결 모달 ----------
+   읽히는 것보다 눌리는 게 목적이라, 설명보다 버튼이 먼저 눈에 들어오게 둔다.
+   결과 줄은 버튼 옆에 붙여서 "눌렀더니 뭐가 됐는지"를 시선 이동 없이 읽게 한다. */
+
+.troubleshoot-modal {
+  width: 560px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.troubleshoot-lead {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.troubleshoot-steps {
+  list-style: none;
+  counter-reset: troubleshoot;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.troubleshoot-step {
+  counter-increment: troubleshoot;
+  position: relative;
+  padding: 14px 14px 14px 46px;
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+}
+
+/* 번호를 CSS로 그린다 — 단계를 추가·삭제해도 숫자가 저절로 맞는다. */
+.troubleshoot-step::before {
+  content: counter(troubleshoot);
+  position: absolute;
+  left: 14px;
+  top: 13px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--neutral-dim);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.troubleshoot-step-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--text);
+}
+
+.troubleshoot-step-desc {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.troubleshoot-step-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.troubleshoot-step-row .action-btn {
+  flex: 0 0 auto;
+}
+
+.troubleshoot-step-result {
+  flex: 1 1 auto;
+  align-self: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  /* 실패 사유가 Lens마다 한 줄씩 붙으므로 줄바꿈을 살린다. */
+  white-space: pre-wrap;
+}
+
+.troubleshoot-step-result.ok { color: var(--ok); }
+.troubleshoot-step-result.warn { color: var(--warn); }
+.troubleshoot-step-result.fail { color: var(--fail); }
+
 /* ---------- 지원 문의 모달 ---------- */
 
 .support-modal {
@@ -803,6 +909,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+.support-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .support-value {

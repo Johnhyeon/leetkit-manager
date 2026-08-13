@@ -274,6 +274,24 @@ class TestRevealReportsWhatHappened:
              patch("subprocess.run", side_effect=OSError("no open(1)")):
             assert support_bundle.reveal_in_file_manager(tmp_path / "a.zip") is False
 
+    def test_windows_quotes_only_the_path(self):
+        """탐색기는 `/select,` 와 경로를 한 인자로 묶어 통째로 따옴표를 씌우면 파싱하지
+        못하고, 조용히 기본 폴더를 연다 — 사용자에겐 "폴더는 열렸는데 zip이 없다"로
+        보인다. 경로에 공백이 없으면 우연히 동작해서 오래 안 걸렸다(한국어 윈도우 +
+        OneDrive 바탕화면이 `...\\OneDrive\\바탕 화면`이라 거기서 드러났다).
+
+        리스트로 넘기면 파이썬이 인자마다 따옴표를 씌우므로, 문자열로 넘겨야 한다."""
+        path = Path(r"C:\Users\u\OneDrive\바탕 화면\leetkit-support-1.zip")
+        with patch.object(support_bundle.sys, "platform", "win32"), \
+             patch("subprocess.run") as run:
+            assert support_bundle.reveal_in_file_manager(path) is True
+
+        cmd = run.call_args[0][0]
+        assert isinstance(cmd, str), "리스트로 넘기면 /select,경로 전체가 따옴표에 묶인다"
+        assert cmd.startswith("explorer /select,\""), cmd
+        assert cmd.endswith("\""), cmd
+        assert str(path) in cmd
+
 
 class TestSecretsStayOut:
     """번들은 고객이 메일로 밖에 보내는 물건이다 — 여기 목록이 곧 유출 방지선이다."""
@@ -305,3 +323,24 @@ class TestSecretsStayOut:
         assert "summary.txt" in names
         assert "telegramlens/daemon_status.json" in names
         assert not any("license" in n for n in names)
+
+
+class TestSummaryNamesTheManagerVersion:
+    """Lens 버전은 다 적으면서 정작 이 파일을 만든 프로그램의 버전만 빠져 있었다.
+    받아보는 쪽이 "어떤 Manager를 쓰시나요"를 되물어야 하고, 그 왕복 한 번에 반나절이
+    간다 — 그 버전에서 이미 고쳐진 문제인 경우가 흔하다."""
+
+    def test_first_line_carries_the_version(self):
+        from leetkit_manager import __version__
+
+        # autouse 픽스처가 _summary_text 를 모의로 바꿔두므로 진짜 함수를 직접 부른다.
+        with patch.object(support_bundle, "orchestrator") as orch:
+            orch.run_full_diagnosis.return_value = []
+            text = _real_summary_text([], [])
+
+        assert __version__ in text.splitlines()[0]
+
+    def test_unreadable_version_falls_back_instead_of_raising(self):
+        """버전 한 줄 때문에 지원 파일 자체가 안 만들어지면 도움을 요청할 방법을 잃는다."""
+        with patch.dict("sys.modules", {"leetkit_manager": None}):
+            assert support_bundle._manager_version() == "?"

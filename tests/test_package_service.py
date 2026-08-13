@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -601,6 +602,65 @@ class TestFrozenExeSelfUpdate:
              patch.object(package_service.sys, "executable", str(current_exe)):
             package_service.cleanup_old_exe_backup()
         assert not backup.exists()
+
+    def test_cleanup_retries_when_the_file_is_briefly_locked(self, tmp_path):
+        """옛 프로세스가 막 끝난 직후엔 파일이 잠깐 더 잠겨 있을 수 있다(백신이 방금
+        이름 바뀐 파일을 검사 중일 때가 대표적). 한 번 시도하고 포기하면 다음 실행
+        때까지 사용자 폴더에 남아 "이 파일 뭔가요?" 문의가 된다."""
+        current_exe = tmp_path / "LeetKitManager.exe"
+        backup = tmp_path / "LeetKitManager.exe.old"
+        backup.write_bytes(b"x")
+
+        real_unlink = Path.unlink
+        calls = {"n": 0}
+
+        def flaky_unlink(self, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] < 3:  # 처음 두 번은 잠겨 있다
+                raise PermissionError("locked")
+            return real_unlink(self, *args, **kwargs)
+
+        with patch.object(package_service, "is_frozen_exe", return_value=True), \
+             patch.object(package_service.sys, "executable", str(current_exe)), \
+             patch.object(package_service, "_hide_file") as hide, \
+             patch.object(Path, "unlink", flaky_unlink), \
+             patch("time.sleep"):  # 테스트가 실제로 기다릴 이유는 없다
+            package_service.cleanup_old_exe_backup()
+
+        assert calls["n"] >= 3, "한 번 실패하고 포기하면 안 된다"
+        assert not backup.exists()
+        hide.assert_not_called()  # 지웠으면 숨길 필요가 없다
+
+    def test_cleanup_hides_the_file_when_it_can_never_be_deleted(self, tmp_path):
+        """못 지우는 것보다 나쁜 건 못 지운 걸 사용자가 보는 것이다."""
+        current_exe = tmp_path / "LeetKitManager.exe"
+        backup = tmp_path / "LeetKitManager.exe.old"
+        backup.write_bytes(b"x")
+
+        with patch.object(package_service, "is_frozen_exe", return_value=True), \
+             patch.object(package_service.sys, "executable", str(current_exe)), \
+             patch.object(package_service, "_hide_file") as hide, \
+             patch.object(Path, "unlink", side_effect=PermissionError("locked forever")), \
+             patch("time.sleep"):
+            package_service.cleanup_old_exe_backup()
+
+        hide.assert_called_once()
+
+    def test_backup_is_hidden_the_moment_it_is_created(self, tmp_path):
+        """교체 직후에는 이 프로세스가 살아 있어 절대 못 지운다 — 그 구간에도
+        탐색기에 안 보여야 한다."""
+        current_exe = tmp_path / "LeetKitManager.exe"
+        current_exe.write_bytes(b"OLD")
+        new_exe = tmp_path / "downloaded.exe"
+        new_exe.write_bytes(b"NEW")
+
+        with patch.object(package_service.sys, "executable", str(current_exe)), \
+             patch.object(package_service.subprocess, "Popen"), \
+             patch.object(package_service, "_hide_file") as hide:
+            package_service.replace_running_exe(new_exe)
+
+        hide.assert_called_once()
+        assert Path(hide.call_args[0][0]).name == "LeetKitManager.exe.old"
 
 
 class TestVersionComparison:
