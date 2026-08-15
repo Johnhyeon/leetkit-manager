@@ -147,3 +147,92 @@ class TestTelegram:
         finally:
             holder.rollback()
             holder.close()
+
+
+class TestOnlyCountsFromActivation:
+    """로그는 지워지지 않고 계속 쌓인다. 무료로 써보던 시절 기록까지 같이 세면
+    14일 체험이 끝난 화면에 "사용하신 날 80일"이 뜬다 — 본인이 바로 아는 거짓말이라
+    같은 화면의 나머지 숫자까지 의심받는다."""
+
+    def _activated(self, day: str):
+        """license.key를 그날 넣었다고 치는 패치."""
+        import time
+        from datetime import datetime
+
+        ts = time.mktime(datetime.fromisoformat(day + "T09:00:00").timetuple())
+        return patch("leetkit_manager.review_prompt.license_activated_at", lambda: ts)
+
+    def test_records_before_activation_are_excluded(self, home):
+        logs = home / "Downloads" / "kstock" / "logs"
+        _write_metrics(logs, "20260801", 500)  # 체험 전 (무료 시절)
+        _write_metrics(logs, "20260810", 12)   # 체험 중
+        with self._activated("2026-08-05"):
+            rows = _labels(trial_usage.summary())
+        assert rows["Claude에게 물어본 횟수"] == "12회"
+        assert rows["사용하신 날"] == "1일"
+
+    def test_activation_day_itself_counts(self, home):
+        """그날 키를 넣고 바로 써본 사람의 기록이 빠지면 안 된다."""
+        logs = home / "Downloads" / "kstock" / "logs"
+        _write_metrics(logs, "20260805", 7)
+        with self._activated("2026-08-05"):
+            assert _labels(trial_usage.summary())["Claude에게 물어본 횟수"] == "7회"
+
+    def test_unknown_activation_counts_everything(self, home):
+        """활성화 시각을 모르면 창을 지어내지 않는다 — 예전 동작 그대로."""
+        logs = home / "Downloads" / "kstock" / "logs"
+        _write_metrics(logs, "20260801", 5)
+        with patch("leetkit_manager.review_prompt.license_activated_at", lambda: None):
+            assert _labels(trial_usage.summary())["Claude에게 물어본 횟수"] == "5회"
+
+    def test_top_tool_follows_the_window_too(self, home):
+        """체험 전에 많이 쓴 도구가 '가장 많이 쓰신 기능'으로 뽑히면 안 된다."""
+        logs = home / "Downloads" / "kstock" / "logs"
+        _write_metrics(logs, "20260801", 100, tool="get_price")
+        _write_metrics(logs, "20260810", 3, tool="get_financial")
+        with self._activated("2026-08-05"):
+            assert _labels(trial_usage.summary())["가장 많이 쓰신 기능"] == "재무 조회"
+
+
+class TestLogsMovedOutOfDownloads:
+    """StockLens 로그는 2026-08 에 ~/Downloads/kstock/logs 에서 ~/.stocklens/logs 로
+    옮겼다. 그 전에 설치한 사람 것은 옛 자리에 그대로 있으므로 둘 다 읽어야 한다 —
+    한쪽만 보면 오래 쓴 사람 화면에 "0회"가 떠서 안 쓴 사람으로 오해하게 만든다."""
+
+    def _old(self, home: Path) -> Path:
+        return home / "Downloads" / "kstock" / "logs"
+
+    def _new(self, home: Path) -> Path:
+        return home / ".stocklens" / "logs"
+
+    def test_old_location_alone_still_counts(self, home, monkeypatch):
+        monkeypatch.setenv("STOCKLENS_HOME", str(home / ".stocklens"))
+        _write_metrics(self._old(home), "20260801", 7)
+        with patch("leetkit_manager.review_prompt.license_activated_at", lambda: None):
+            assert _labels(trial_usage.summary())["Claude에게 물어본 횟수"] == "7회"
+
+    def test_new_location_alone_counts(self, home, monkeypatch):
+        monkeypatch.setenv("STOCKLENS_HOME", str(home / ".stocklens"))
+        _write_metrics(self._new(home), "20260801", 4)
+        with patch("leetkit_manager.review_prompt.license_activated_at", lambda: None):
+            assert _labels(trial_usage.summary())["Claude에게 물어본 횟수"] == "4회"
+
+    def test_both_locations_add_up(self, home, monkeypatch):
+        """옮긴 뒤에도 옛 기록이 사라지면 안 된다 — 합쳐서 보여준다."""
+        monkeypatch.setenv("STOCKLENS_HOME", str(home / ".stocklens"))
+        _write_metrics(self._old(home), "20260801", 7)
+        _write_metrics(self._new(home), "20260810", 4)
+        with patch("leetkit_manager.review_prompt.license_activated_at", lambda: None):
+            rows = _labels(trial_usage.summary())
+        assert rows["Claude에게 물어본 횟수"] == "11회"
+        assert rows["사용하신 날"] == "2일"
+
+    def test_same_day_in_both_places_is_not_double_counted(self, home, monkeypatch):
+        """옮기던 날 하루가 양쪽에 걸칠 수 있다. 두 번 세면 사용량이 부풀려진다."""
+        monkeypatch.setenv("STOCKLENS_HOME", str(home / ".stocklens"))
+        _write_metrics(self._old(home), "20260805", 9)
+        _write_metrics(self._new(home), "20260805", 3)
+        with patch("leetkit_manager.review_prompt.license_activated_at", lambda: None):
+            rows = _labels(trial_usage.summary())
+        assert rows["Claude에게 물어본 횟수"] == "3회"  # 새 위치가 이긴다
+        assert rows["사용하신 날"] == "1일"

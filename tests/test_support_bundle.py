@@ -27,7 +27,9 @@ def _empty_sources(tmp_path, monkeypatch):
     """이 PC에 실제로 깔린 Lens 로그가 결과에 섞이지 않게 전부 빈 곳으로 돌린다."""
     for env in ("DARTLENS_HOME", "TELEGRAMLENS_HOME"):
         monkeypatch.setenv(env, str(tmp_path / env))
-    monkeypatch.setattr(support_bundle, "_stocklens_logs_dir", lambda: tmp_path / "nope")
+    # StockLens 로그는 새 위치(~/.stocklens/logs)와 옛 위치(Downloads/kstock/logs)
+    # 둘 다 본다 — 이 PC의 진짜 로그가 섞이지 않게 양쪽 다 빈 곳으로 돌린다.
+    monkeypatch.setattr(support_bundle, "_stocklens_logs_dirs", lambda: [tmp_path / "nope"])
     monkeypatch.setattr(support_bundle, "_claude_desktop_logs_dir", lambda: tmp_path / "nope2")
     # _desktop_dir 은 레지스트리에서 진짜 바탕화면을 읽는다 — 안 막으면 테스트가
     # 개발자 바탕화면에 zip을 뿌린다. 개별 테스트는 필요하면 다시 덮어쓴다.

@@ -131,9 +131,16 @@ def _claude_desktop_logs_dir() -> Path:
     return standard
 
 
-def _stocklens_logs_dir() -> Path:
+def _stocklens_logs_dirs() -> list[Path]:
+    """StockLens 로그가 있을 수 있는 자리들 — 새 위치 먼저.
+
+    2026-08 이전에는 엑셀 저장 폴더(~/Downloads/kstock/logs)에 쌓았다. 그때 설치한
+    사람의 기록은 아직 거기 있고, 그 뒤 기록은 ~/.stocklens/logs 에 쌓인다. 지원
+    번들은 둘 다 걷어야 한다 — 한쪽만 보면 "로그가 없다"는 잘못된 결론이 나온다.
+    """
+    home = Path(os.environ.get("STOCKLENS_HOME") or str(Path.home() / ".stocklens"))
     base = Path(os.environ.get("USERPROFILE") or str(Path.home()))
-    return base / "Downloads" / "kstock" / "logs"
+    return [home / "logs", base / "Downloads" / "kstock" / "logs"]
 
 
 def _dartlens_home() -> Path:
@@ -179,10 +186,25 @@ def _safe_files(notes: list[str] | None = None) -> list[tuple[str, Path]]:
     notes = [] if notes is None else notes
     found: list[tuple[str, Path]] = []
 
-    stocklens_logs = _stocklens_logs_dir()
-    if _probe("StockLens 로그", stocklens_logs, notes):
-        for f in sorted(stocklens_logs.glob("metrics_*.jsonl"))[-_RECENT_LOG_FILES:]:
-            found.append((f"stocklens/{f.name}", f))
+    # 두 자리를 합쳐서 본다. 같은 이름이면 새 위치가 이긴다.
+    # 폴더가 없는 것 자체는 정상이라(한쪽만 있는 게 보통) 그때는 메모를 남기지 않는다 —
+    # 권한 때문에 못 읽은 경우만 _probe 가 적는다.
+    stocklens_files: dict[str, Path] = {}
+    stocklens_dirs = _stocklens_logs_dirs()
+    for folder in stocklens_dirs:
+        if not folder.is_dir():
+            continue
+        if not _probe("StockLens 로그", folder, notes):
+            continue
+        for f in folder.glob("metrics_*.jsonl"):
+            stocklens_files.setdefault(f.name, f)
+    if stocklens_files:
+        for name in sorted(stocklens_files)[-_RECENT_LOG_FILES:]:
+            found.append((f"stocklens/{name}", stocklens_files[name]))
+    else:
+        notes.append(
+            "- StockLens 로그: 어느 위치에도 없음 (" + " · ".join(str(d) for d in stocklens_dirs) + ")"
+        )
 
     dartlens_logs = _dartlens_home() / "logs"
     if _probe("DartLens 로그", dartlens_logs, notes):
@@ -195,6 +217,13 @@ def _safe_files(notes: list[str] | None = None) -> list[tuple[str, Path]]:
             f = tl_home / name
             if f.exists():
                 found.append((f"telegramlens/{name}", f))
+
+    # 도구 호출 기록. TelegramLens 는 세 Lens 중 마지막으로 이 로그가 생겼다 —
+    # 예전엔 데몬 로그만 있어서, 도구가 실패했는지 아예 안 불렸는지 구분이 안 됐다.
+    tl_logs = tl_home / "logs"
+    if _probe("TelegramLens 로그", tl_logs, notes):
+        for f in sorted(tl_logs.glob("metrics_*.jsonl"))[-_RECENT_LOG_FILES:]:
+            found.append((f"telegramlens/{f.name}", f))
 
     claude_logs = _claude_desktop_logs_dir()
     if _probe("Claude Desktop 로그", claude_logs, notes):

@@ -11,6 +11,13 @@
 
 읽는 파일은 전부 각 Lens가 이미 남기고 있는 것들이다 — 이걸 위해 새로 수집하는 건
 없다. 숫자는 이 컴퓨터 밖으로 나가지 않는다(화면에만 쓴다).
+
+**라이선스를 넣은 날부터만 센다.** 로그 파일은 지우지 않고 계속 쌓이므로, 그냥 다
+세면 무료로 써보던 시절 기록까지 들어간다. 그러면 14일 체험이 끝난 화면에 "사용하신
+날 80일"이 뜬다 — 본인이 바로 아는 거짓말이고, 여기서 신뢰를 잃으면 같은 화면의
+나머지 숫자도 같이 의심받는다. 우리가 파는 게 "믿을 수 있는 데이터"라 더 그렇다.
+활성화 시각을 모르면(라이선스 파일을 못 읽는 등) 자르지 않고 전부 센다 — 창을
+지어내느니 예전 동작이 낫다.
 """
 
 from __future__ import annotations
@@ -19,6 +26,7 @@ import json
 import os
 import sqlite3
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 # 도구 이름을 그대로 보여주면(get_multi_chart_stats) 무슨 말인지 모른다. 자주 쓰이는
@@ -47,12 +55,8 @@ def _metrics_dir(env_var: str, default: Path) -> Path:
     return Path(override) if override else default
 
 
-def _read_metrics(folder: Path) -> list[dict]:
-    """metrics_*.jsonl 전체를 레코드 목록으로. 못 읽으면 빈 목록."""
-    try:
-        files = sorted(folder.glob("metrics_*.jsonl"))
-    except OSError:
-        return []  # macOS 권한 등 — 못 읽는 것과 안 쓴 것을 구분할 수 없으니 조용히 뺀다
+def _read_metrics_files(files: "list[Path]") -> list[dict]:
+    """주어진 jsonl 파일들을 레코드 목록으로. 못 읽는 파일은 건너뛴다."""
     records: list[dict] = []
     for f in files:
         try:
@@ -70,9 +74,31 @@ def _read_metrics(folder: Path) -> list[dict]:
     return records
 
 
+def _read_metrics(*folders: Path) -> list[dict]:
+    """여러 폴더의 metrics_*.jsonl 을 합쳐 읽는다. 못 읽으면 그 폴더만 빠진다.
+
+    같은 파일명이 두 폴더에 있으면 앞 폴더 것만 쓴다 — 로그 위치를 옮기던 날 하루가
+    양쪽에 걸칠 수 있는데, 둘 다 세면 그날 사용량이 두 배로 보인다.
+    """
+    picked: dict[str, Path] = {}
+    for folder in folders:
+        try:
+            for f in folder.glob("metrics_*.jsonl"):
+                picked.setdefault(f.name, f)
+        except OSError:
+            continue  # macOS 권한 등 — 못 읽는 것과 안 쓴 것을 구분할 수 없으니 조용히 뺀다
+    return _read_metrics_files([picked[name] for name in sorted(picked)])
+
+
 def _stocklens_metrics() -> list[dict]:
+    """새 위치와 옛 위치를 합쳐 읽는다.
+
+    2026-08 이전 설치자는 로그가 ~/Downloads/kstock/logs 에 있다. 한쪽만 보면 오래
+    쓴 사람의 화면에 "0회"가 떠서, 안 쓴 사람으로 오해하게 만든다.
+    """
+    home = _metrics_dir("STOCKLENS_HOME", Path.home() / ".stocklens")
     base = Path(os.environ.get("USERPROFILE") or str(Path.home()))
-    return _read_metrics(base / "Downloads" / "kstock" / "logs")
+    return _read_metrics(home / "logs", base / "Downloads" / "kstock" / "logs")
 
 
 def _dartlens_metrics() -> list[dict]:
@@ -108,6 +134,34 @@ def _telegram_counts() -> dict:
     return out
 
 
+def _activated_on() -> str | None:
+    """라이선스를 처음 넣은 날(YYYY-MM-DD). 모르면 None.
+
+    후기 요청이 쓰는 것과 같은 기준(license.key 파일의 수정 시각)이다. 체험 키를
+    붙여넣은 순간이라 체험 시작일과 사실상 같다."""
+    try:
+        from leetkit_manager.review_prompt import license_activated_at
+
+        ts = license_activated_at()
+    except Exception:
+        return None  # 후기 모듈이 없거나 읽기 실패 — 자르지 않는다
+    if not ts:
+        return None
+    try:
+        return datetime.fromtimestamp(ts).date().isoformat()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _since(records: list[dict], day: str | None) -> list[dict]:
+    """day(YYYY-MM-DD) 이후 기록만. day가 없으면 그대로 돌려준다.
+
+    metrics의 timestamp는 로컬시각 ISO('2026-08-16T10:40:53')라 앞 10자가 날짜다."""
+    if not day:
+        return records
+    return [r for r in records if (r.get("timestamp") or "")[:10] >= day]
+
+
 def _days_used(records: list[dict]) -> int:
     """며칠에 걸쳐 썼는지. '몇 번'보다 '며칠'이 습관이 됐다는 걸 더 잘 보여준다."""
     days = {r.get("timestamp", "")[:10] for r in records if r.get("timestamp")}
@@ -133,8 +187,9 @@ def summary() -> list[dict]:
     """
     rows: list[dict] = []
 
-    stock = _stocklens_metrics()
-    dart = _dartlens_metrics()
+    start = _activated_on()
+    stock = _since(_stocklens_metrics(), start)
+    dart = _since(_dartlens_metrics(), start)
     calls = len(stock) + len(dart)
     if calls:
         rows.append({"key": "calls", "label": "Claude에게 물어본 횟수", "value": f"{calls:,}회"})
