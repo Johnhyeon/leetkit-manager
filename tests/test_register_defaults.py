@@ -32,3 +32,22 @@ def test_host_app_targets_are_mapped_for_restart_prompts():
     """codex 타겟은 ChatGPT 앱을 가리킨다 — 이 표가 없으면 등록·업데이트 후 재시작
     안내가 ChatGPT 사용자에게 가지 않는다."""
     assert 'const TARGET_HOST_APP = { "claude-desktop": "claude-desktop", codex: "chatgpt" };' in JS
+
+
+def test_codex_check_has_a_customer_facing_label():
+    """진단 항목 식별자는 고객 언어로 바꿔서 보여준다. codex 가 빠져 있어서
+    ChatGPT 에 등록한 DartLens·TelegramLens 사용자는 카드에서 `MCP_CONFIG_CODEX`
+    라는 원본 식별자를 그대로 봤다."""
+    assert 'MCP_CONFIG_CODEX: "ChatGPT (Codex) 등록"' in JS
+    # 조치 흐름 연결은 원래 있었다 — 라벨만 빠져 있었다.
+    assert "MCP_CONFIG_CODEX: \"register\"" in JS
+
+
+def test_fresh_install_from_card_leads_into_registration():
+    """마법사는 설치 다음에 등록을 물어보는데, 마법사를 끝낸 사람이 카드에서 설치하면
+    "설치 완료" 토스트만 뜨고 끝났다 — 설치는 됐는데 도구가 안 보이는 자리."""
+    assert "openRegisterModal(lensName);" in JS
+    # 새 설치 + 등록된 곳 없음 + 마법사 밖 일 때만 이어준다(업데이트에는 안 뜬다).
+    assert "!wasInstalled &&" in JS
+    assert "!onboardingActive &&" in JS
+    assert "!(((lens && lens.targets) || []).length)" in JS

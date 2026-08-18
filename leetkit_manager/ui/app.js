@@ -316,6 +316,7 @@ const CHECK_ID_LABEL = {
   CACHE_WRITABLE: "캐시 폴더",
   MCP_CONFIG_DESKTOP: "Claude Desktop 등록",
   MCP_CONFIG_CODE: "Claude Code 등록",
+  MCP_CONFIG_CODEX: "ChatGPT (Codex) 등록",
   MCP_CONFIG_VALID: "MCP 등록 상태",
   LICENSE_ACTIVE: "라이선스",
   DART_API_KEY: "DART API 키",
@@ -664,6 +665,19 @@ async function runAction(action, lensName, extra, opts = {}) {
               : `설치/업데이트 실패 — ${result.error || "원인을 알 수 없습니다"}`
           );
         }
+      } else if (
+        // 새로 깐 Lens가 아무 데도 등록돼 있지 않으면 등록 화면까지 이어준다.
+        // 마법사는 설치 다음에 등록을 물어보는데, **마법사를 이미 끝낸 사람이 카드에서
+        // 설치하면** "설치 완료" 토스트만 뜨고 끝났다. 카드에 [MCP 등록] 버튼이 있지만
+        // 방금 설치한 사람이 그걸 눌러야 한다는 걸 알 방법이 없다 — 설치는 됐는데
+        // 도구가 안 보이는, 문의로 직결되는 자리다.
+        !wasInstalled &&
+        !onboardingActive &&
+        !opts.skipRestartPrompt &&
+        !(((lens && lens.targets) || []).length)
+      ) {
+        showToast(`${displayName} 설치 완료 — 이제 사용할 AI 앱에 연결해주세요.`);
+        openRegisterModal(lensName);
       } else if (!opts.skipRestartPrompt) {
         // 성공했는데 아무 말도 안 하고 있었다 — 카드가 "최신"으로 바뀌는 게 전부라,
         // 켜져 있는 Claude가 아직 옛 버전을 돌리고 있다는 걸 알 방법이 없었다.
