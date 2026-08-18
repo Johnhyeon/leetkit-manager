@@ -518,6 +518,47 @@ class TestChatgptDesktop:
         mock_launch.assert_not_called()  # 못 껐으면 켜지도 않는다(중복 실행 방지)
 
 
+class TestChatgptQuitJudgment:
+    """종료 판정은 메인 프로세스만 본다 — 실기기에서 이 판정 때문에 기능이 죽었다."""
+
+    def _fake(self, pid, cmdline):
+        p = type("P", (), {})()
+        p.pid = pid
+        p.info = {"name": "chatgpt.exe", "exe": TestChatgptDesktop._MSIX}
+        p.cmdline = lambda: cmdline
+        p.terminate = lambda: None
+        p.kill = lambda: None
+        return p
+
+    def test_helper_processes_are_recognized(self):
+        assert package_service._is_helper_process(
+            self._fake(2, ["ChatGPT.exe", "--type=renderer", "--lang=ko"])
+        ) is True
+        assert package_service._is_helper_process(self._fake(1, ["ChatGPT.exe"])) is False
+
+    def test_quit_succeeds_when_only_helpers_linger(self):
+        """실기기 사고: 창은 사라졌는데 보조 프로세스 4개가 남아 종료가 "실패"로 잡혔고,
+        그 때문에 재실행을 건너뛰어 사용자 눈에는 아무 일도 일어나지 않았다."""
+        main = self._fake(1, ["ChatGPT.exe"])
+        helper = self._fake(2, ["ChatGPT.exe", "--type=gpu-process"])
+        seen = {"n": 0}
+
+        def processes():
+            seen["n"] += 1
+            return [main, helper] if seen["n"] == 1 else [helper]
+
+        with patch.object(package_service, "chatgpt_desktop_processes", side_effect=processes), \
+             patch("psutil.wait_procs", return_value=([], [])):
+            assert package_service.quit_chatgpt_desktop(timeout=0) is True
+
+    def test_quit_fails_while_a_main_process_survives(self):
+        main = self._fake(1, ["ChatGPT.exe"])
+        with patch.object(package_service, "chatgpt_desktop_processes", return_value=[main]), \
+             patch("psutil.wait_procs", return_value=([], [])), \
+             patch.object(package_service.time, "sleep"):
+            assert package_service.quit_chatgpt_desktop(timeout=0) is False
+
+
 class TestHostApps:
     """Claude Desktop · ChatGPT 묶음 — UI가 앱별로 갈라 말하지 않게 하는 층."""
 

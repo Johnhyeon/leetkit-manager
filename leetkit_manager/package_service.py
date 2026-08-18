@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -909,6 +910,25 @@ def is_chatgpt_desktop_running() -> bool:
     return bool(chatgpt_desktop_processes())
 
 
+def _is_helper_process(proc) -> bool:
+    """Electron 계열 앱의 보조 프로세스(렌더러·GPU·네트워크·crashpad)인지 —
+    이들 명령줄에는 `--type=...`이 붙는다.
+
+    실기기에서 확인한 사고: ChatGPT 앱을 껐더니 창은 사라졌는데 보조 프로세스 몇 개가
+    잠깐 남았다(10개 중 4개). 그걸 "아직 안 껐다"로 세는 바람에 종료가 실패한 것으로
+    보고 재실행을 건너뛰어, 사용자 눈에는 **아무 일도 일어나지 않았다.** 종료 판정은
+    메인 프로세스만 본다(보조는 곧 알아서 사라지고 설정 파일을 쥐지도 않는다)."""
+    try:
+        return any(str(arg).startswith("--type=") for arg in (proc.cmdline() or [])[1:])
+    except Exception:
+        # 명령줄을 못 읽으면 메인으로 보수적으로 본다 — 살아 있으면 종료 실패로 잡힌다.
+        return False
+
+
+def _chatgpt_main_processes() -> list:
+    return [p for p in chatgpt_desktop_processes() if not _is_helper_process(p)]
+
+
 def quit_chatgpt_desktop(*, timeout: float = 10.0) -> bool:
     """실행 중인 ChatGPT 데스크탑 앱을 종료한다. 종료됐으면(또는 애초에 안 떠 있었으면) True.
 
@@ -920,19 +940,28 @@ def quit_chatgpt_desktop(*, timeout: float = 10.0) -> bool:
 
     import psutil
 
-    for proc in procs:
+    # 메인 → 보조 순서로 끈다. 메인이 먼저 죽으면 보조는 대개 알아서 따라 죽는다.
+    ordered = [p for p in procs if not _is_helper_process(p)]
+    ordered += [p for p in procs if _is_helper_process(p)]
+    for proc in ordered:
         try:
             proc.terminate()
         except Exception:
             pass
-    _gone, alive = psutil.wait_procs(procs, timeout=timeout)
+    _gone, alive = psutil.wait_procs(ordered, timeout=timeout)
     for proc in alive:
         try:
             proc.kill()  # 재시작이 목적이라 여기서 멈추면 안 된다
         except Exception:
             pass
     psutil.wait_procs(alive, timeout=3)
-    return not chatgpt_desktop_processes()
+
+    # 남은 보조 프로세스가 사라질 시간을 조금 준다(최대 3초). 메인이 없으면 껐다고 본다.
+    for _ in range(6):
+        if not _chatgpt_main_processes():
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def _find_chatgpt_desktop_exe() -> str | None:
