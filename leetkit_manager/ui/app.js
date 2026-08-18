@@ -1041,11 +1041,17 @@ async function refreshRegisterTargets(lensName, { keepSelection = null } = {}) {
   const lens = lensDataCache[lensName];
   const currentTargets = (lens && lens.targets) || [];
 
+  // codex 는 기본 체크에서 빼왔다 — `~/.codex` 만 있는 사람(개발 도구를 깔아둔 경우)에게
+  // 안 쓰는 곳까지 등록해버리기 때문이다. 그런데 **Claude 가 하나도 없는 사람**에게는
+  // 그게 유일하게 쓸 수 있는 항목인데 체크가 꺼져 있어서, "다음"만 누르면 아무 데도
+  // 등록되지 않은 채 마법사가 끝났다(ChatGPT 만 쓰는 고객의 첫 5분이 여기서 무너진다).
+  const claudeAvailable = targets.some((t) => t.id !== "codex" && t.installed);
   container.innerHTML = targets
     .map((t) => {
       const checked = keepSelection
         ? keepSelection.includes(t.id)
-        : t.installed && (t.id !== "codex" || currentTargets.includes(t.id));
+        : t.installed &&
+          (t.id !== "codex" || currentTargets.includes(t.id) || !claudeAvailable);
       // 아직 없는 앱은 등록해봐야 읽어갈 주체가 없다 — 막기만 하지 말고 받는 곳을
       // 바로 열 수 있게 해준다(없는 게 잘못이 아니라 다음 할 일을 알려주는 것).
       const getItHtml = t.installed
