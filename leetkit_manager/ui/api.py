@@ -376,30 +376,6 @@ class Api:
         수십 초 동안 아무 변화가 없으면 사용자는 멈춘 줄 알기 때문."""
         return package_service.current_install_progress()
 
-    def claude_desktop_running(self) -> bool:
-        """MCP 등록·설치를 끝낸 뒤 "Claude Desktop을 다시 켜야 한다"고 안내할지 판단용.
-        자세한 이유는 package_service.is_claude_desktop_running() 참고."""
-        return package_service.is_claude_desktop_running()
-
-    def quit_claude_desktop(self) -> dict:
-        """설치·삭제가 "파일 사용 중"으로 막혔을 때 Claude Desktop만 먼저 닫는다
-        (경로로 판별하므로 Claude Code CLI 세션은 건드리지 않는다)."""
-        if package_service.quit_claude_desktop():
-            return {"ok": True, "error": None}
-        return {"ok": False, "error": "Claude Desktop을 종료하지 못했습니다. 직접 종료한 뒤 다시 시도해주세요."}
-
-    def launch_claude_desktop(self) -> dict:
-        """위에서 닫은 Claude Desktop을 도로 켠다."""
-        return {"ok": package_service.launch_claude_desktop(), "error": None}
-
-    def restart_claude_desktop(self) -> dict:
-        """Claude Desktop을 껐다 켠다 — MCP 등록을 반영하는 마지막 단계.
-
-        "트레이 아이콘 우클릭 → 종료 → 다시 실행"은 40-50대 사용자에게 실제로 막히는
-        구간이라(창을 닫아도 트레이에 남는 걸 모르는 경우가 대부분) 버튼 하나로 대신한다.
-        경로로 Claude Desktop만 골라 종료하므로 Claude Code CLI 작업은 영향받지 않는다."""
-        return package_service.restart_claude_desktop()
-
     # ── 호스트 앱(Claude Desktop · ChatGPT) 묶음 ──────────────────────────
     # 둘 다 "켤 때 MCP 설정을 읽고, 켜져 있는 동안 Lens 프로세스를 쥐는" 앱이다.
     # 화면이 앱별로 갈라 말하지 않도록 여기서 묶어서 넘긴다.
