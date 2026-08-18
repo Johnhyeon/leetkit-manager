@@ -1,7 +1,7 @@
 /* LeetKit Manager 대시보드 로직. window.pywebview.api.* 가 유일한 백엔드 접점이다 —
    여기서 subprocess나 uv를 직접 다루지 않는다(그건 Python orchestrator의 몫). */
 
-const TARGET_LABEL = { "claude-desktop": "Claude Desktop", "claude-code": "Claude Code", "codex": "Codex CLI" };
+const TARGET_LABEL = { "claude-desktop": "Claude Desktop", "claude-code": "Claude Code", "codex": "ChatGPT (Codex)" };
 
 // 카드는 항상 고정 높이를 유지한다(문제를 펼쳐도 안 늘어남) — 상세 데이터는 모달에서만
 // 보여주므로, 마지막으로 받은 각 Lens 데이터를 여기 캐싱해서 모달을 다시 fetch 없이 연다.
@@ -1152,10 +1152,10 @@ document.getElementById("register-confirm").addEventListener("click", async () =
       }
     }
 
-    // Claude Code CLI와 Codex는 시작할 때 설정을 읽으므로 재시작할 대상이 따로 없다 —
+    // Claude Code CLI는 시작할 때 설정을 읽으므로 재시작할 대상이 따로 없다 —
     // 다음에 새로 여는 대화부터 반영된다. "껐다 켜라"고 하면 뭘 끄라는 건지 알 수 없다.
     const sessionTargets = checked
-      .filter((t) => t === "claude-code" || t === "codex")
+      .filter((t) => t === "claude-code")
       .map((t) => TARGET_LABEL[t] || t);
     const notes = [];
     if (claudeRunning) notes.push("Claude Desktop을 껐다 켜야 도구가 나타납니다.");
@@ -1164,6 +1164,12 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     }
     if (!onboardingActive && sessionTargets.length) {
       notes.push(`${sessionTargets.join(", ")}는 새로 시작하는 대화부터 반영됩니다.`);
+    }
+    // codex 타겟은 CLI 하나가 아니다 — ChatGPT 데스크탑 앱이 Codex CLI와 같은
+    // ~/.codex/config.toml 을 읽는다. 앱은 시작할 때 그 파일을 읽으므로 CLI처럼
+    // "새 대화"만으로는 안 되고 앱을 껐다 켜야 한다. 한 문장으로 둘 다 덮는다.
+    if (!onboardingActive && checked.includes("codex")) {
+      notes.push("ChatGPT 앱을 쓰고 계시면 앱을 껐다 켠 뒤 새 대화부터 도구가 나타납니다.");
     }
     // 카드에서 직접 등록한 경우엔 마법사 완료 화면을 안 보므로 여기서 같이 알려준다 —
     // 처음 도구를 쓸 때 뜨는 허용 창에서 겁먹고 멈추지 않게.
