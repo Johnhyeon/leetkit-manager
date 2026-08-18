@@ -26,7 +26,7 @@ DART_API_SIGNUP_URL = "https://opendart.fss.or.kr"
 # 없는 사람에게는 "등록"보다 "먼저 받기"를 안내해야 한다.
 CLAUDE_DESKTOP_DOWNLOAD_URL = "https://claude.ai/download"
 CLAUDE_CODE_DOWNLOAD_URL = "https://claude.ai/code"
-CODEX_DOWNLOAD_URL = "https://developers.openai.com/codex/cli/"
+CODEX_DOWNLOAD_URL = "https://chatgpt.com/download"
 
 # 라이선스 키를 넣으려다 "아직 없다"는 걸 깨닫는 자리에서 살 곳을 알려준다. CLI로
 # 활성화하면 이미 이 주소를 안내하는데(각 Lens licensing.py의 PURCHASE_URL) Manager
@@ -226,7 +226,7 @@ class Api:
                 "install_url": CLAUDE_CODE_DOWNLOAD_URL,
             },
             {
-                "id": "codex", "label": "Codex CLI",
+                "id": "codex", "label": "ChatGPT (Codex)",
                 "installed": package_service.is_codex_installed(),
                 "install_url": CODEX_DOWNLOAD_URL,
             },
