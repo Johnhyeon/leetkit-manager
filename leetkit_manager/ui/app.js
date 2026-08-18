@@ -1554,22 +1554,59 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
 // 사람에겐 "받기"가, 있는 사람에겐 "다시 시작"(등록 반영에 꼭 필요한 단계)이 맞다.
 // 앱이 둘(Claude Desktop · ChatGPT)로 늘었으므로 이름도 가진 것에 맞춰 바뀐다.
 let installedHostApps = [];
-let claudeDesktopInstallUrl = null; // 백엔드가 주는 값만 쓴다(JS에 URL을 또 적어두지 않게)
 
 // 버튼 한 줄에 두 앱 이름을 다 넣으면 헤더에서 잘린다 — 하나면 그 앱 이름, 둘이면 묶어서.
+// 아무것도 없으면 "받기"인데, 받을 수 있는 앱이 둘이므로 어느 하나를 앞세우지 않는다.
 function hostRestartButtonLabel(apps) {
-  if (!apps.length) return "Claude Desktop 받기";
+  if (!apps.length) return "AI 앱 받기";
   if (apps.length === 1) return `${apps[0].id === "chatgpt" ? "ChatGPT" : "Claude"} 다시 시작`;
   return "AI 앱 다시 시작";
 }
 
+// 받는 곳을 한 자리에 모아 보여준다 — URL은 백엔드가 준 것만 쓰고(open_url 화이트리스트),
+// 이미 있는 앱은 링크 대신 "이미 있습니다"로 표시해 헛클릭을 막는다.
+async function openGetAppModal() {
+  let apps = [];
+  try {
+    apps = (await window.pywebview.api.host_app_downloads()) || [];
+  } catch {
+    apps = [];
+  }
+  if (!apps.length) {
+    showToast("받는 곳을 열지 못했습니다. 잠시 뒤 다시 시도해주세요.");
+    return;
+  }
+  const list = document.getElementById("getapp-list");
+  list.innerHTML = apps
+    .map(
+      (a) => `
+        <div class="register-target-row${a.installed ? " disabled" : ""}">
+          <span>${escapeHtml(a.label)}${a.installed ? " — 이미 있습니다" : ""}</span>
+          ${
+            a.installed
+              ? ""
+              : `<button type="button" class="target-install-link" data-install-url="${escapeAttr(a.url)}">받으러 가기</button>`
+          }
+        </div>`
+    )
+    .join("");
+  list.querySelectorAll(".target-install-link").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      window.pywebview.api.open_url(btn.dataset.installUrl);
+      showToast("설치가 끝나면 \"진단 재실행\"을 눌러주세요.");
+    });
+  });
+  document.getElementById("getapp-backdrop").hidden = false;
+}
+
+document.getElementById("getapp-close").addEventListener("click", () => {
+  document.getElementById("getapp-backdrop").hidden = true;
+});
+
 async function refreshRestartHostButton() {
   const btn = document.getElementById("restart-claude-btn");
   try {
-    const targets = await window.pywebview.api.available_targets("stocklens");
-    const desktop = targets.find((t) => t.id === "claude-desktop");
     installedHostApps = (await window.pywebview.api.installed_host_apps()) || [];
-    claudeDesktopInstallUrl = desktop ? desktop.install_url : null;
     btn.textContent = hostRestartButtonLabel(installedHostApps);
     btn.hidden = false;
   } catch {
@@ -1579,8 +1616,7 @@ async function refreshRestartHostButton() {
 
 document.getElementById("restart-claude-btn").addEventListener("click", async (e) => {
   if (!installedHostApps.length) {
-    if (claudeDesktopInstallUrl) window.pywebview.api.open_url(claudeDesktopInstallUrl);
-    showToast("설치가 끝나면 '진단 재실행'을 눌러주세요.");
+    await openGetAppModal();
     return;
   }
   // 다른 앱을 끄는 동작이라 반드시 확인을 받는다 — 대화 중이었을 수 있다.
@@ -1691,7 +1727,10 @@ const TROUBLESHOOT_STEPS = [
         // 아무것도 안 떠 있으면 재시작할 대상이 없다 — 설치된 앱을 대신 켜준다.
         const installed = await window.pywebview.api.installed_host_apps();
         if (!installed.length) {
-          setResult("fail", "Claude Desktop이나 ChatGPT 앱이 필요합니다. 먼저 받아주세요.");
+          setResult(
+            "fail",
+            "Claude Desktop이나 ChatGPT 앱이 필요합니다. 위 \"AI 앱 받기\" 버튼에서 받는 곳을 열 수 있습니다."
+          );
           return;
         }
         const r = await window.pywebview.api.launch_host_apps(installed.map((a) => a.id));
@@ -1908,11 +1947,12 @@ const TOUR_STEPS = [
     // 이 버튼은 한 자리에서 두 가지로 바뀐다 — 쓸 앱이 없으면 "받기".
     // 설명이 "다시 시작" 하나로 고정돼 있으면, 정작 아직 안 깐 사람에게 엉뚱한
     // 말을 하게 된다(Lens는 그 앱 위에서만 도니 그 사람에겐 이게 더 중요하다).
-    title: (el) => (el.textContent.includes("받기") ? "Claude Desktop 받기" : el.textContent),
+    title: (el) => el.textContent,
     desc: (el) =>
       el.textContent.includes("받기")
-        ? "Lens는 Claude Desktop이나 ChatGPT 앱 안에서 동작합니다.\n아직 없으시면 여기를 눌러 받으세요.\n\n" +
-          "설치가 끝나면 \"진단 재실행\"을 눌러주세요.\n그러면 이 버튼이 \"다시 시작\"으로 바뀝니다."
+        ? "Lens는 Claude Desktop이나 ChatGPT 앱 안에서 동작합니다.\n둘 중 하나만 있으면 됩니다.\n\n" +
+          "여기를 누르면 두 곳의 받는 링크를 나란히 보여드립니다.\n설치가 끝나면 \"진단 재실행\"을 눌러주세요.\n" +
+          "그러면 이 버튼이 \"다시 시작\"으로 바뀝니다."
         : "Claude Desktop·ChatGPT는 켜질 때 설정을 읽고 Lens를 띄웁니다.\n" +
           "그래서 켜져 있는 동안에 바꾼 것은 그대로 반영되지 않습니다.\n\n" +
           "MCP 등록을 바꿨을 때, Lens를 업데이트·삭제했을 때\n이 버튼을 눌러주세요.\n" +

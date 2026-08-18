@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 from leetkit_manager import orchestrator, review_prompt, shortcut
 from leetkit_manager.lens_contract import STOCKLENS
 from leetkit_manager.process_runner import ProcessResult
+from leetkit_manager import package_service
+from leetkit_manager.ui import api as api_module
 from leetkit_manager.ui.api import Api, _diagnosis_to_dict, _first_meaningful_line
 
 
@@ -373,3 +375,25 @@ class TestRegisterUnchecksToUnregister:
         mock_rm.assert_not_called()
         mock_setup.assert_called_once_with(STOCKLENS, ["claude-desktop", "claude-code"])
         assert result["removed"] == []
+
+
+class TestHostAppDownloads:
+    """Lens가 도는 GUI 앱은 Claude Desktop과 ChatGPT 둘이다. 한쪽만 받는 곳을 주면
+    다른 쪽을 쓰는 사람에게는 선택지가 하나뿐인 것처럼 보인다 — 실제로 상단 버튼이
+    Claude 받는 곳만 열고 있었다."""
+
+    def test_every_host_app_has_a_whitelisted_download_url(self):
+        rows = Api().host_app_downloads()
+        assert {r["id"] for r in rows} == set(package_service._HOST_APPS)
+        for row in rows:
+            assert row["label"]
+            # open_url은 화이트리스트에 없는 주소를 열지 않는다 — 빠지면 버튼이 먹통이 된다.
+            assert row["url"] in api_module._ALLOWED_EXTERNAL_URLS
+
+    def test_codex_target_points_at_the_chatgpt_app(self):
+        """개발자용 Codex 페이지로 보내면 고객(40-50대) 대부분이 여기서 막힌다.
+        통합 이후 ChatGPT 앱 하나에 둘이 같이 들어 있으므로 그쪽으로 보낸다."""
+        codex = next(t for t in Api().available_targets("stocklens") if t["id"] == "codex")
+        assert codex["install_url"] == api_module.CHATGPT_DOWNLOAD_URL
+        assert "chatgpt.com" in codex["install_url"]
+        assert "ChatGPT" in codex["label"]

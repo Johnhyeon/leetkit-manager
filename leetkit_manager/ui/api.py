@@ -26,7 +26,9 @@ DART_API_SIGNUP_URL = "https://opendart.fss.or.kr"
 # 없는 사람에게는 "등록"보다 "먼저 받기"를 안내해야 한다.
 CLAUDE_DESKTOP_DOWNLOAD_URL = "https://claude.ai/download"
 CLAUDE_CODE_DOWNLOAD_URL = "https://claude.ai/code"
-CODEX_DOWNLOAD_URL = "https://chatgpt.com/download"
+# codex 타겟의 "받는 곳"은 ChatGPT 앱이다 — 통합 이후 이 앱 하나에 ChatGPT와 Codex가
+# 같이 들어 있고, 개발자용 도구를 따로 깔라고 보내면 대부분의 고객은 여기서 막힌다.
+CHATGPT_DOWNLOAD_URL = "https://chatgpt.com/download"
 
 # 라이선스 키를 넣으려다 "아직 없다"는 걸 깨닫는 자리에서 살 곳을 알려준다. CLI로
 # 활성화하면 이미 이 주소를 안내하는데(각 Lens licensing.py의 PURCHASE_URL) Manager
@@ -34,7 +36,15 @@ CODEX_DOWNLOAD_URL = "https://chatgpt.com/download"
 PURCHASE_URL = "https://litt.ly/leetkey_lab/sale/hzGHnRY"
 
 _ALLOWED_EXTERNAL_URLS = frozenset(
-    {CLAUDE_DESKTOP_DOWNLOAD_URL, CLAUDE_CODE_DOWNLOAD_URL, CODEX_DOWNLOAD_URL, PURCHASE_URL}
+    {CLAUDE_DESKTOP_DOWNLOAD_URL, CLAUDE_CODE_DOWNLOAD_URL, CHATGPT_DOWNLOAD_URL, PURCHASE_URL}
+)
+
+# Lens가 실제로 도는 GUI 앱(호스트 앱)의 받는 곳. 등록 타겟 목록(available_targets)과
+# 달리 CLI는 빼고 "쓸 앱이 하나도 없는 사람"에게 나란히 보여줄 용도다. Claude 쪽만
+# 링크를 주던 자리들이 있어서, 그 사람에게는 선택지가 하나로 보였다.
+HOST_APP_DOWNLOADS = (
+    ("claude-desktop", "Claude Desktop", CLAUDE_DESKTOP_DOWNLOAD_URL),
+    ("chatgpt", "ChatGPT", CHATGPT_DOWNLOAD_URL),
 )
 
 
@@ -234,7 +244,7 @@ class Api:
             {
                 "id": "codex", "label": "ChatGPT (Codex)",
                 "installed": package_service.is_codex_installed(),
-                "install_url": CODEX_DOWNLOAD_URL,
+                "install_url": CHATGPT_DOWNLOAD_URL,
             },
         ]
 
@@ -393,6 +403,15 @@ class Api:
     # ── 호스트 앱(Claude Desktop · ChatGPT) 묶음 ──────────────────────────
     # 둘 다 "켤 때 MCP 설정을 읽고, 켜져 있는 동안 Lens 프로세스를 쥐는" 앱이다.
     # 화면이 앱별로 갈라 말하지 않도록 여기서 묶어서 넘긴다.
+
+    def host_app_downloads(self) -> list[dict]:
+        """Lens를 쓸 수 있는 앱과 받는 곳 — [{"id", "label", "url", "installed"}].
+        JS에 URL을 또 적어두지 않게 백엔드가 주는 값만 쓴다(open_url 화이트리스트와 같은 표)."""
+        installed = {a["id"] for a in package_service.installed_host_apps()}
+        return [
+            {"id": host_id, "label": label, "url": url, "installed": host_id in installed}
+            for host_id, label, url in HOST_APP_DOWNLOADS
+        ]
 
     def running_host_apps(self) -> list[dict]:
         """지금 떠 있는 호스트 앱 — [{"id", "label"}]. 재시작을 권할지, 어느 앱 이름을

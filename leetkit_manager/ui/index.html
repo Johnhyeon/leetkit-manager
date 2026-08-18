@@ -233,6 +233,20 @@
   </div>
 </div>
 
+<!-- 쓸 앱이 하나도 없을 때. Lens는 Claude Desktop이나 ChatGPT 앱 안에서 도는데,
+     예전엔 상단 버튼이 Claude 받는 곳만 열어서 선택지가 하나로 보였다. 두 곳을
+     나란히 놓고 고르게 한다(하나만 있으면 된다는 사실도 같이 말해준다). -->
+<div class="modal-backdrop" id="getapp-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-title">Lens를 쓸 앱 받기</div>
+    <div class="modal-msg">Lens는 아래 앱 안에서 동작합니다. 둘 중 하나만 있으면 됩니다.</div>
+    <div id="getapp-list"></div>
+    <div class="modal-actions">
+      <button class="action-btn" id="getapp-close">닫기</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="review-backdrop" hidden>
   <div class="modal review-modal">
     <div class="modal-title" id="review-title"></div>
