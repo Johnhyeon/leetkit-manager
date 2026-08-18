@@ -184,6 +184,22 @@ class Api:
         lens = get_lens(lens_name)
         return _diagnosis_to_dict(orchestrator.diagnose_lens(lens, online=online))
 
+    def _default_targets(self, lens_name: str) -> list[str]:
+        """targets 를 안 준 호출의 기본값 — **이 컴퓨터에 실제로 있는 것** 기준.
+
+        예전에는 무조건 ["claude-desktop", "claude-code"] 였다. 그러면 Claude 가 하나도
+        없고 ChatGPT 만 쓰는 사람에게 없는 앱의 설정 파일을 만들고 끝난다.
+
+        판단을 Lens 의 `--target auto` 에 맡기지 않고 여기서 하는 이유: Manager 가 더
+        많이 안다. Lens 는 `~/.codex` 폴더 유무 정도만 볼 수 있는데, Manager 는 ChatGPT
+        데스크탑 앱을 OS 설치 경로·실행 중인 프로세스로 직접 찾는다.
+
+        codex 는 Claude 가 하나도 없을 때만 켠다 — 화면의 기본 체크 규칙과 같은 판단이다
+        (`~/.codex` 만 있는 개발 도구 사용자까지 안 쓰는 곳에 등록되면 안 된다)."""
+        installed = [t["id"] for t in self.available_targets(lens_name) if t["installed"]]
+        claude_only = [t for t in installed if t != "codex"]
+        return claude_only or installed
+
     def register(self, lens_name: str, targets: list[str] | None = None) -> dict:
         """MCP 등록 대상을 `targets`에 맞춘다 — 체크된 곳에 등록하고, 체크가 풀린 곳은 해제한다.
 
@@ -191,11 +207,18 @@ class Api:
         "추가만" 됐다. 체크를 풀고 등록을 눌러도 그 설정이 그대로 남아 사용자 눈에는
         해제가 먹통으로 보였다.
 
-        targets 생략 시 기존과 동일하게 Claude Desktop/Code 둘 다 등록만 한다(해제 없음).
+        targets 생략 시 이 컴퓨터에 실제로 있는 대상에 등록만 한다(해제 없음).
         """
         lens = get_lens(lens_name)
         if targets is None:
-            result = orchestrator.setup_lens(lens, ["claude-desktop", "claude-code"])
+            fallback = self._default_targets(lens_name)
+            if not fallback:
+                return {
+                    "ok": False,
+                    "error": "연결할 앱을 찾지 못했습니다. Claude Desktop이나 ChatGPT 앱을 먼저 받아주세요.",
+                    "removed": [],
+                }
+            result = orchestrator.setup_lens(lens, fallback)
             return {"ok": result.ok, "error": result.error, "removed": []}
 
         desired = list(dict.fromkeys(targets))

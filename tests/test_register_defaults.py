@@ -51,3 +51,12 @@ def test_fresh_install_from_card_leads_into_registration():
     assert "!wasInstalled &&" in JS
     assert "!onboardingActive &&" in JS
     assert "!(((lens && lens.targets) || []).length)" in JS
+
+
+def test_update_refreshes_the_registered_command_path():
+    """설정 파일에는 등록 당시의 실행 파일 경로가 박힌다. 그게 옛 위치를 가리키면
+    새 버전을 받아도 호스트 앱은 계속 옛 것을 띄운다 — 업데이트 뒤 같은 대상으로 다시
+    등록해서 경로만 갱신한다(대상을 늘리거나 줄이지 않는다)."""
+    assert "const registered = (lens && lens.targets) || [];" in JS
+    assert "if (wasInstalled && registered.length) {" in JS
+    assert "api.register(lensName, registered)" in JS

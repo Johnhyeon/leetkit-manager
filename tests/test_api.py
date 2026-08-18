@@ -365,16 +365,45 @@ class TestRegisterUnchecksToUnregister:
         assert "옛 버전" in result["error"]
         assert result["removed"] == []
 
-    def test_omitted_targets_keeps_the_old_behaviour(self):
-        """기존 호출부(targets 생략)는 등록만 하고 아무것도 해제하지 않는다."""
-        with patch.object(orchestrator, "diagnose_lens") as mock_diag, \
+    @staticmethod
+    def _targets(**installed):
+        return [{"id": k, "label": k, "installed": v, "install_url": ""} for k, v in installed.items()]
+
+    def test_omitted_targets_registers_only_what_this_computer_has(self):
+        """targets 생략 시 등록만 하고 아무것도 해제하지 않는다(기존 계약). 다만 대상은
+        **이 컴퓨터에 있는 것**에서 뽑는다 — 예전엔 무조건 Claude 둘이었다."""
+        api = Api()
+        rows = self._targets(**{"claude-desktop": True, "claude-code": True, "codex": True})
+        with patch.object(api, "available_targets", return_value=rows), \
+             patch.object(orchestrator, "diagnose_lens") as mock_diag, \
              patch.object(orchestrator, "unregister_lens") as mock_rm, \
              patch.object(orchestrator, "setup_lens", return_value=MagicMock(ok=True, error=None)) as mock_setup:
-            result = Api().register(STOCKLENS.name)
+            result = api.register(STOCKLENS.name)
         mock_diag.assert_not_called()
         mock_rm.assert_not_called()
+        # codex 는 Claude 가 있으면 켜지 않는다 — 안 쓰는 곳에 등록되면 안 된다.
         mock_setup.assert_called_once_with(STOCKLENS, ["claude-desktop", "claude-code"])
         assert result["removed"] == []
+
+    def test_omitted_targets_falls_back_to_chatgpt_when_no_claude(self):
+        """ChatGPT 만 쓰는 컴퓨터. 예전엔 없는 Claude 설정 파일을 만들고 끝났다."""
+        api = Api()
+        rows = self._targets(**{"claude-desktop": False, "claude-code": False, "codex": True})
+        with patch.object(api, "available_targets", return_value=rows), \
+             patch.object(orchestrator, "setup_lens", return_value=MagicMock(ok=True, error=None)) as mock_setup:
+            api.register(STOCKLENS.name)
+        mock_setup.assert_called_once_with(STOCKLENS, ["codex"])
+
+    def test_omitted_targets_says_so_when_there_is_nothing_to_register_to(self):
+        """앱이 하나도 없으면 "등록 완료"라고 말하면 안 된다 — 읽어갈 주체가 없다."""
+        api = Api()
+        rows = self._targets(**{"claude-desktop": False, "claude-code": False, "codex": False})
+        with patch.object(api, "available_targets", return_value=rows), \
+             patch.object(orchestrator, "setup_lens") as mock_setup:
+            result = api.register(STOCKLENS.name)
+        mock_setup.assert_not_called()
+        assert result["ok"] is False
+        assert "ChatGPT" in result["error"]
 
 
 class TestHostAppDownloads:

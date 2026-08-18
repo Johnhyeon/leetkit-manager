@@ -679,6 +679,21 @@ async function runAction(action, lensName, extra, opts = {}) {
         showToast(`${displayName} 설치 완료 — 이제 사용할 AI 앱에 연결해주세요.`);
         openRegisterModal(lensName);
       } else if (!opts.skipRestartPrompt) {
+        // 업데이트로 실행 파일이 바뀌었을 수 있다. 설정 파일에는 **등록 당시의 경로**가
+        // 박혀 있어서, 그게 옛 위치를 가리키면 새 버전을 받아도 호스트 앱은 계속 옛 것을
+        // 띄운다("업데이트했는데 그대로다"의 조용한 원인 — 실기기에서 실제로 그 상태였다).
+        // 이미 등록돼 있는 곳에 한해 같은 대상으로 다시 등록해 경로만 갱신한다.
+        // 실패해도 조용히 넘어간다 — 이전 상태가 그대로 남을 뿐이고, 업데이트 자체는 됐다.
+        const registered = (lens && lens.targets) || [];
+        if (wasInstalled && registered.length) {
+          try {
+            await window.pywebview.api.register(lensName, registered);
+            lens = await window.pywebview.api.diagnose_one(lensName, false);
+            replaceCard(lensName, lens);
+          } catch {
+            /* 경로 갱신 실패는 업데이트 결과를 뒤집지 않는다 */
+          }
+        }
         // 성공했는데 아무 말도 안 하고 있었다 — 카드가 "최신"으로 바뀌는 게 전부라,
         // 켜져 있는 Claude가 아직 옛 버전을 돌리고 있다는 걸 알 방법이 없었다.
         // 윈도우는 파일 잠금 때문에 대개 blocking_apps로 걸려 껐다 켜는 흐름을
