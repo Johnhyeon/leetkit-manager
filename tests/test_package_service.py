@@ -457,8 +457,114 @@ class TestIsCodexInstalled:
 
     def test_false_when_neither_present(self, tmp_path):
         with patch("shutil.which", return_value=None), \
-             patch.object(package_service.Path, "home", return_value=tmp_path):
+             patch.object(package_service.Path, "home", return_value=tmp_path), \
+             patch.object(package_service, "is_chatgpt_desktop_installed", return_value=False):
             assert package_service.is_codex_installed() is False
+
+    def test_true_when_only_chatgpt_app_present(self, tmp_path):
+        """CLI를 한 번도 깐 적 없고 ChatGPT 앱만 쓰는 사람도 이 타겟의 대상이다 —
+        같은 `~/.codex/config.toml`을 ChatGPT 앱이 읽는다. `~/.codex` 유무만 보던
+        동안은 그 사람에게 등록 체크박스가 "미설치"로 떠서 고를 수조차 없었다."""
+        with patch("shutil.which", return_value=None), \
+             patch.object(package_service.Path, "home", return_value=tmp_path), \
+             patch.object(package_service, "is_chatgpt_desktop_installed", return_value=True):
+            assert package_service.is_codex_installed() is True
+
+
+class TestChatgptDesktop:
+    """ChatGPT 데스크탑 앱 판별·재시작. 실기기(Windows 11)에서 확인한 경로를 쓴다 —
+    패키지 이름은 OpenAI.Codex 인데 실행 파일은 ChatGPT.exe 다(통합 앱)."""
+
+    _MSIX = r"C:\Program Files\WindowsApps\OpenAI.Codex_26.9.9.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"
+    _CLASSIC = (
+        r"C:\Program Files\WindowsApps\OpenAI.ChatGPT-Desktop_1.2.3.0_x64__2p2nqsd0c76g0"
+        r"\app\ChatGPT.exe"
+    )
+    _MAC = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
+
+    @pytest.mark.parametrize("path", [_MSIX, _CLASSIC, _MAC])
+    def test_known_install_paths_are_detected(self, path):
+        assert package_service._is_chatgpt_desktop_exe(path, pid=None) is True
+
+    def test_unrelated_exe_is_not_the_app(self):
+        assert package_service._is_chatgpt_desktop_exe(r"C:\tools\codex.exe", pid=None) is False
+        assert package_service._is_chatgpt_desktop_exe(None, pid=None) is False
+
+    def test_aumid_uses_app_id_not_package_name(self):
+        """app id는 패키지마다 다르다(App / ChatGPT) — Claude처럼 패키지 이름에서
+        유추하면 통합 앱을 못 띄운다. 실기기 Get-StartApps 값과 맞춰 확인했다."""
+        assert package_service._msix_aumid(self._MSIX) == "OpenAI.Codex_2p2nqsd0c76g0!App"
+        assert (
+            package_service._msix_aumid(self._CLASSIC)
+            == "OpenAI.ChatGPT-Desktop_2p2nqsd0c76g0!ChatGPT"
+        )
+
+    def test_restart_reports_error_when_relaunch_fails(self):
+        with patch.object(package_service, "chatgpt_desktop_processes", return_value=[]), \
+             patch.object(package_service, "launch_chatgpt_desktop", return_value=False):
+            result = package_service.restart_chatgpt_desktop()
+        assert result["ok"] is False
+        assert "다시 실행" in result["error"]
+
+    def test_restart_does_not_launch_when_quit_failed(self):
+        fake = type("P", (), {})()
+        fake.info = {"name": "chatgpt.exe", "exe": self._MSIX}
+        with patch.object(package_service, "chatgpt_desktop_processes", return_value=[fake]), \
+             patch.object(package_service, "quit_chatgpt_desktop", return_value=False), \
+             patch.object(package_service, "launch_chatgpt_desktop") as mock_launch:
+            result = package_service.restart_chatgpt_desktop()
+        assert result["ok"] is False
+        assert "종료" in result["error"]
+        mock_launch.assert_not_called()  # 못 껐으면 켜지도 않는다(중복 실행 방지)
+
+
+class TestHostApps:
+    """Claude Desktop · ChatGPT 묶음 — UI가 앱별로 갈라 말하지 않게 하는 층."""
+
+    def test_table_holds_function_names_not_objects(self):
+        """함수 객체를 담아두면 나중에 함수를 갈아끼운 쪽에서 이 표만 옛 함수를
+        계속 부른다 — 조용히 어긋나므로 이름으로 담는 규칙을 못으로 박아둔다."""
+        for spec in package_service._HOST_APPS.values():
+            assert all(isinstance(x, str) for x in spec)
+
+    def test_running_lists_only_running_apps(self):
+        with patch.object(package_service, "is_claude_desktop_running", return_value=True), \
+             patch.object(package_service, "is_chatgpt_desktop_running", return_value=False):
+            assert package_service.running_host_apps() == [
+                {"id": "claude-desktop", "label": "Claude Desktop"}
+            ]
+
+    def test_restart_skips_apps_that_are_not_running(self):
+        """열지도 않은 앱을 우리가 띄우면 안 된다 — 명시적으로 지목해도 마찬가지다."""
+        with patch.object(package_service, "is_claude_desktop_running", return_value=False), \
+             patch.object(package_service, "is_chatgpt_desktop_running", return_value=False), \
+             patch.object(package_service, "quit_chatgpt_desktop") as mock_quit, \
+             patch.object(package_service, "launch_chatgpt_desktop") as mock_launch:
+            result = package_service.restart_host_apps(["chatgpt"])
+        assert result == {"ok": True, "restarted": [], "error": None}
+        mock_quit.assert_not_called()
+        mock_launch.assert_not_called()
+
+    def test_restart_names_the_app_that_failed(self):
+        """"다시 시작하지 못했습니다"만 뜨면 어느 앱을 직접 껐다 켜야 하는지 알 수 없다."""
+        with patch.object(package_service, "is_claude_desktop_running", return_value=True), \
+             patch.object(package_service, "is_chatgpt_desktop_running", return_value=True), \
+             patch.object(package_service, "quit_claude_desktop", return_value=True), \
+             patch.object(package_service, "launch_claude_desktop", return_value=True), \
+             patch.object(package_service, "quit_chatgpt_desktop", return_value=True), \
+             patch.object(package_service, "launch_chatgpt_desktop", return_value=False):
+            result = package_service.restart_host_apps()
+        assert result["ok"] is False
+        assert result["restarted"] == ["Claude Desktop"]
+        assert "ChatGPT" in result["error"]
+
+    def test_quit_reports_failure_by_name(self):
+        with patch.object(package_service, "is_claude_desktop_running", return_value=True), \
+             patch.object(package_service, "is_chatgpt_desktop_running", return_value=False), \
+             patch.object(package_service, "quit_claude_desktop", return_value=False):
+            result = package_service.quit_host_apps()
+        assert result["ok"] is False
+        assert "Claude Desktop" in result["error"]
 
 
 class TestFrozenExeSelfUpdate:

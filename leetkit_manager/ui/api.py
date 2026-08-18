@@ -77,13 +77,19 @@ def _diagnosis_to_dict(d: LensDiagnosis) -> dict:
     }
 
 
-def _is_claude_blocking(result) -> bool:
-    """설치·삭제가 "파일 사용 중"으로 실패했고 실제로 Claude Desktop이 떠 있는지.
-    이 조합일 때만 UI가 "Claude를 닫고 다시 시도" 버튼을 띄운다 — Claude가 꺼져 있는데
-    그 안내를 하면 엉뚱한 곳을 헤매게 된다."""
+def _blocking_host_apps(result) -> list[dict]:
+    """설치·삭제가 "파일 사용 중"으로 실패했을 때, 지금 떠 있는 호스트 앱 목록.
+    이게 비어 있지 않을 때만 UI가 "닫고 다시 시도" 버튼을 띄운다 — 앱이 꺼져 있는데
+    그 안내를 하면 엉뚱한 곳을 헤매게 된다.
+
+    Claude Desktop만 보던 자리였다. ChatGPT 데스크탑 앱도 codex 타겟으로 등록되면
+    같은 Lens 파일을 쥐기 때문에, 그쪽이 원인일 때 "Claude를 닫으세요"라고 하면
+    시킨 대로 해도 아무 변화가 없다(실제로 막히는 구간이라 앱 이름을 정확히 말해야 한다)."""
     if result is None or result.ok:
-        return False
-    return package_service.looks_like_file_in_use(result) and package_service.is_claude_desktop_running()
+        return []
+    if not package_service.looks_like_file_in_use(result):
+        return []
+    return package_service.running_host_apps()
 
 
 def _first_meaningful_line(text: str | None) -> str | None:
@@ -322,7 +328,7 @@ class Api:
             "ok": result.ok,
             "rollback_command": result.rollback_command,
             "version": latest,
-            "claude_blocking": _is_claude_blocking(result.install),
+            "blocking_apps": _blocking_host_apps(result.install),
             # 실패 이유를 같이 돌려준다. 예전엔 ok=False만 보내서 화면에 "실패했습니다"
             # 밖에 못 띄웠고, 사용자도 우리도 원인을 알 방법이 없었다(실제로 맥에서
             # 업데이트가 계속 실패했는데 아무 단서가 없었다).
@@ -340,18 +346,18 @@ class Api:
         라이선스 키까지 지운다(쓰던 컴퓨터를 정리하는 경우)."""
         lens = get_lens(lens_name)
         result = orchestrator.uninstall_lens(lens, remove_license=bool(remove_license))
-        blocking = _is_claude_blocking(result.uninstall)
+        blocking = _blocking_host_apps(result.uninstall)
         error = None
         if not result.ok:
             error = (
-                "Claude Desktop이 이 파일을 사용 중이라 지울 수 없습니다."
+                f"{' · '.join(a['label'] for a in blocking)}이(가) 이 파일을 사용 중이라 지울 수 없습니다."
                 if blocking
                 else (redaction.redact(result.uninstall.stderr) or "삭제에 실패했습니다.")
             )
         return {
             "ok": result.ok,
             "error": error,
-            "claude_blocking": blocking,
+            "blocking_apps": blocking,
             "license_removed": result.license_removed,
         }
 
@@ -383,6 +389,36 @@ class Api:
         구간이라(창을 닫아도 트레이에 남는 걸 모르는 경우가 대부분) 버튼 하나로 대신한다.
         경로로 Claude Desktop만 골라 종료하므로 Claude Code CLI 작업은 영향받지 않는다."""
         return package_service.restart_claude_desktop()
+
+    # ── 호스트 앱(Claude Desktop · ChatGPT) 묶음 ──────────────────────────
+    # 둘 다 "켤 때 MCP 설정을 읽고, 켜져 있는 동안 Lens 프로세스를 쥐는" 앱이다.
+    # 화면이 앱별로 갈라 말하지 않도록 여기서 묶어서 넘긴다.
+
+    def running_host_apps(self) -> list[dict]:
+        """지금 떠 있는 호스트 앱 — [{"id", "label"}]. 재시작을 권할지, 어느 앱 이름을
+        말할지 UI가 이걸로 정한다."""
+        return package_service.running_host_apps()
+
+    def installed_host_apps(self) -> list[dict]:
+        """이 컴퓨터에 있는 호스트 앱 — [{"id", "label", "running"}]."""
+        return package_service.installed_host_apps()
+
+    def quit_host_apps(self, ids: "list[str] | None" = None) -> dict:
+        """설치·삭제가 "파일 사용 중"으로 막혔을 때 호스트 앱을 먼저 닫는다.
+        경로로 판별하므로 Claude Code CLI·Codex CLI 세션은 건드리지 않는다."""
+        return package_service.quit_host_apps(ids)
+
+    def launch_host_apps(self, ids: "list[str] | None" = None) -> dict:
+        """위에서 닫은 호스트 앱을 도로 켠다(닫은 목록을 그대로 넘겨준다)."""
+        return package_service.launch_host_apps(ids)
+
+    def restart_host_apps(self, ids: "list[str] | None" = None) -> dict:
+        """켜져 있는 호스트 앱을 껐다 켠다 — 등록·업데이트를 반영하는 마지막 단계.
+
+        "트레이 아이콘 우클릭 → 종료 → 다시 실행"은 40-50대 사용자에게 실제로 막히는
+        구간이라(창을 닫아도 트레이에 남는 걸 모르는 경우가 대부분) 버튼 하나로 대신한다.
+        꺼져 있는 앱은 대상에서 빠진다 — 열지도 않은 앱을 우리가 띄우지 않는다."""
+        return package_service.restart_host_apps(ids)
 
     def lens_names(self) -> list[str]:
         return [lens.name for lens in LENSES]

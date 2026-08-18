@@ -68,9 +68,12 @@ class TestSteps:
     @pytest.mark.parametrize(
         "method",
         [
-            "claude_desktop_running",
-            "launch_claude_desktop",
-            "restart_claude_desktop",
+            # 호스트 앱이 Claude Desktop 하나가 아니게 되면서(ChatGPT 앱이 같은
+            # ~/.codex/config.toml 을 읽는다) 묶음 API로 바뀐 자리다.
+            "running_host_apps",
+            "installed_host_apps",
+            "launch_host_apps",
+            "restart_host_apps",
             "diagnose",
         ],
     )

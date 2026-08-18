@@ -3,6 +3,11 @@
 
 const TARGET_LABEL = { "claude-desktop": "Claude Desktop", "claude-code": "Claude Code", "codex": "ChatGPT (Codex)" };
 
+// MCP 등록 타겟 → 껐다 켜야 반영되는 GUI 앱. CLI 타겟(claude-code)은 여기 없다 —
+// 새 대화를 열면 알아서 새로 뜨므로 재시작할 대상이 없다. codex 타겟이 ChatGPT로
+// 이어지는 게 핵심이다(같은 ~/.codex/config.toml 을 ChatGPT 앱이 읽는다).
+const TARGET_HOST_APP = { "claude-desktop": "claude-desktop", codex: "chatgpt" };
+
 // 카드는 항상 고정 높이를 유지한다(문제를 펼쳐도 안 늘어남) — 상세 데이터는 모달에서만
 // 보여주므로, 마지막으로 받은 각 Lens 데이터를 여기 캐싱해서 모달을 다시 fetch 없이 연다.
 const lensDataCache = {};
@@ -494,23 +499,41 @@ function setModalInteractive(backdropId, enabled) {
 // Claude Desktop이 Lens를 MCP 서버로 띄워두면 그 프로세스가 uv 도구 폴더의 파일을
 // 잡아서 설치·삭제가 "액세스 거부"로 실패한다(실사용에서 확인). 사용자에게 "Claude를
 // 닫고 다시 해보세요"라고 떠넘기는 대신, 닫고 → 재시도 → 다시 켜기까지 대신 해준다.
-async function offerCloseClaudeAndRetry(lensName, action) {
+// 호스트 앱 = "켤 때 MCP 설정을 읽고, 켜져 있는 동안 Lens 프로세스를 쥐는" GUI 앱
+// (Claude Desktop · ChatGPT). 둘은 같은 이유로 껐다 켜야 하고 같은 이유로 파일을
+// 잠근다 — 그래서 화면에서도 한 갈래로 다루고, 앱 이름은 백엔드가 "실제로 켜져 있는
+// 것"만 알려준 걸 쓴다. 안 쓰는 앱 이름을 대면 시킨 대로 해도 아무 변화가 없다.
+async function runningHostApps() {
+  try {
+    return (await window.pywebview.api.running_host_apps()) || [];
+  } catch {
+    return []; // 확인 실패 — 확실하지 않은 걸 시키지 않는다
+  }
+}
+
+function hostAppNames(apps) {
+  return (apps || []).map((a) => a.label).join(" · ");
+}
+
+async function offerCloseHostAppsAndRetry(lensName, action, apps) {
   const displayName = (lensDataCache[lensName] || {}).display_name || lensName;
   const label = action === "uninstall" ? "삭제" : "설치";
+  const names = hostAppNames(apps) || "AI 앱";
+  const ids = (apps || []).map((a) => a.id);
   const ok = confirm(
-    `Claude Desktop이 ${displayName} 파일을 사용 중이라 ${label}할 수 없습니다.\n\n` +
-      `Claude Desktop을 잠시 껐다가 ${label}를 진행하고, 끝나면 다시 켤까요?`
+    `${names}이(가) ${displayName} 파일을 사용 중이라 ${label}할 수 없습니다.\n\n` +
+      `${names}을(를) 잠시 껐다가 ${label}를 진행하고, 끝나면 다시 켤까요?`
   );
   if (!ok) {
-    showToast(`Claude Desktop을 완전히 종료한 뒤 다시 ${label}해주세요.`);
+    showToast(`${names}을(를) 완전히 종료한 뒤 다시 ${label}해주세요.`);
     return;
   }
 
-  showBusyOverlay("Claude Desktop을 종료하는 중…");
+  showBusyOverlay(`${names}을(를) 종료하는 중…`);
   try {
-    const quit = await window.pywebview.api.quit_claude_desktop();
+    const quit = await window.pywebview.api.quit_host_apps(ids);
     if (!quit.ok) {
-      showToast(quit.error || "Claude Desktop을 종료하지 못했습니다.");
+      showToast(quit.error || `${names}을(를) 종료하지 못했습니다.`);
       return;
     }
     updateBusyOverlay(`${displayName}를 ${label}하는 중…`);
@@ -521,11 +544,11 @@ async function offerCloseClaudeAndRetry(lensName, action) {
     const lens = await window.pywebview.api.diagnose_one(lensName, false);
     replaceCard(lensName, lens);
 
-    updateBusyOverlay("Claude Desktop을 다시 켜는 중…");
-    await window.pywebview.api.launch_claude_desktop();
+    updateBusyOverlay(`${names}을(를) 다시 켜는 중…`);
+    await window.pywebview.api.launch_host_apps(ids);
     showToast(
       retry.ok
-        ? `${label} 완료 — Claude Desktop도 다시 켰습니다.`
+        ? `${label} 완료 — ${names}도 다시 켰습니다.`
         : retry.error || `${label}에 실패했습니다.`
     );
   } catch {
@@ -609,7 +632,10 @@ async function runAction(action, lensName, extra, opts = {}) {
       // 새로 까는 경우엔 아직 등록 전이라 재시작을 권할 자리가 아니고(MCP 등록 모달이
       // 따로 안내한다), 이미 쓰던 걸 올리는 경우에만 껐다 켜라고 해야 한다.
       const before = lensDataCache[lensName] || {};
-      const wasOnClaudeDesktop = (before.targets || []).includes("claude-desktop");
+      // codex 타겟도 센다 — 그쪽에 등록해둔 사람은 ChatGPT 앱을 껐다 켜야 새 버전이
+      // 뜬다. 실제로 켜져 있는지는 noteLensFilesChanged가 다시 확인하므로, CLI만 쓰는
+      // 사람에게는 재시작 안내가 가지 않는다.
+      const wasOnHostApp = ["claude-desktop", "codex"].some((t) => (before.targets || []).includes(t));
       const wasInstalled = !before.not_installed;
       showBusyOverlay(`${displayName}를 설치하는 중…`);
       const stopPolling = startInstallProgressPolling((text) => updateBusyOverlay(`${displayName} · ${text}`));
@@ -623,11 +649,12 @@ async function runAction(action, lensName, extra, opts = {}) {
       }
       replaceCard(lensName, lens);
       if (!result.ok) {
-        if (result.claude_blocking && !opts.skipClaudePrompt) {
-          await offerCloseClaudeAndRetry(lensName, "install");
-        } else if (result.claude_blocking) {
+        const blockingApps = result.blocking_apps || [];
+        if (blockingApps.length && !opts.skipClaudePrompt) {
+          await offerCloseHostAppsAndRetry(lensName, "install", blockingApps);
+        } else if (blockingApps.length) {
           // 일괄 처리 중 — 이미 한 번 물어봤으므로 다시 안 묻고 사실만 남긴다.
-          showToast(`${displayName}: Claude Desktop이 파일을 쓰고 있어 건너뛰었습니다.`);
+          showToast(`${displayName}: ${hostAppNames(blockingApps)}이(가) 파일을 쓰고 있어 건너뛰었습니다.`);
         } else {
           showToast(
             result.rollback_command
@@ -640,22 +667,24 @@ async function runAction(action, lensName, extra, opts = {}) {
       } else if (!opts.skipRestartPrompt) {
         // 성공했는데 아무 말도 안 하고 있었다 — 카드가 "최신"으로 바뀌는 게 전부라,
         // 켜져 있는 Claude가 아직 옛 버전을 돌리고 있다는 걸 알 방법이 없었다.
-        // 윈도우는 파일 잠금 때문에 대개 claude_blocking으로 걸려 껐다 켜는 흐름을
+        // 윈도우는 파일 잠금 때문에 대개 blocking_apps로 걸려 껐다 켜는 흐름을
         // 타지만, 맥은 잠금이 없어 켜진 채로 "성공"하고 조용히 옛 버전이 남는다.
         await noteLensFilesChanged({
-          registeredOnClaudeDesktop: wasOnClaudeDesktop && wasInstalled,
+          registeredOnHostApp: wasOnHostApp && wasInstalled,
           headline: wasInstalled
             ? `${displayName} 업데이트 완료${lens && lens.installed_version ? ` (v${lens.installed_version})` : ""}.`
             : `${displayName} 설치 완료.`,
           afterRestart: "아직 이전 버전을 쓰고 있습니다.",
-          whenClosed: "다음에 Claude Desktop을 열면 새 버전이 적용됩니다.",
+          whenClosedResult: "새 버전이 적용됩니다.",
         });
       }
     } else if (action === "uninstall") {
       const displayName = (lensDataCache[lensName] || {}).display_name || lensName;
       // 삭제해도 MCP 설정은 남는다(패키지만 지운다) — 켜져 있는 Claude에는 도구가
       // 그대로 보이고, 누르면 그때서야 실패한다. 지우기 전에 물려 있었는지 봐둔다.
-      const wasOnClaudeDesktop = ((lensDataCache[lensName] || {}).targets || []).includes("claude-desktop");
+      const wasOnHostApp = ["claude-desktop", "codex"].some((t) =>
+        ((lensDataCache[lensName] || {}).targets || []).includes(t)
+      );
       showBusyOverlay(`${displayName}를 삭제하는 중…`);
       let result, lens;
       try {
@@ -667,15 +696,15 @@ async function runAction(action, lensName, extra, opts = {}) {
       replaceCard(lensName, lens);
       if (result.ok) {
         await noteLensFilesChanged({
-          registeredOnClaudeDesktop: wasOnClaudeDesktop,
+          registeredOnHostApp: wasOnHostApp,
           headline: result.license_removed
             ? `${displayName}를 삭제했습니다 — 라이선스도 이 컴퓨터에서 지웠습니다.`
             : `${displayName}를 삭제했습니다 — 다시 설치할 수 있습니다.`,
           afterRestart: "삭제된 도구를 아직 들고 있습니다.",
-          whenClosed: "다음에 Claude Desktop을 열면 정리됩니다.",
+          whenClosedResult: "정리됩니다.",
         });
-      } else if (result.claude_blocking) {
-        await offerCloseClaudeAndRetry(lensName, "uninstall");
+      } else if ((result.blocking_apps || []).length) {
+        await offerCloseHostAppsAndRetry(lensName, "uninstall", result.blocking_apps);
       } else {
         showToast(result.error || "삭제에 실패했습니다.");
       }
@@ -1143,33 +1172,38 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     // 예전엔 "Claude Desktop이 켜져 있나"만 보고 안내했다 — Codex만 골라 등록해도
     // Claude를 껐다 켜라고 해서, 시킨 대로 해도 아무 변화가 없었다. 방금 등록한
     // 대상에 대해서만 말한다.
-    let claudeRunning = false;
-    if (!onboardingActive && checked.includes("claude-desktop")) {
-      try {
-        claudeRunning = await window.pywebview.api.claude_desktop_running();
-      } catch {
-        /* 확인 실패 시 조용히 생략 */
-      }
+    // 방금 고른 타겟 중 "껐다 켜야 하는 앱"이 무엇인지 → 그 앱이 지금 켜져 있는지.
+    // claude-desktop 타겟은 Claude Desktop, codex 타겟은 ChatGPT 앱이 그 대상이다
+    // (codex 타겟은 CLI 전용이 아니다 — ChatGPT 앱이 같은 config.toml을 읽는다).
+    const relevantHostIds = checked.map((t) => TARGET_HOST_APP[t]).filter(Boolean);
+    let runningHosts = [];
+    if (!onboardingActive && relevantHostIds.length) {
+      runningHosts = (await runningHostApps()).filter((a) => relevantHostIds.includes(a.id));
     }
 
-    // Claude Code CLI는 시작할 때 설정을 읽으므로 재시작할 대상이 따로 없다 —
+    // Claude Code CLI·Codex CLI는 시작할 때 설정을 읽으므로 재시작할 대상이 따로 없다 —
     // 다음에 새로 여는 대화부터 반영된다. "껐다 켜라"고 하면 뭘 끄라는 건지 알 수 없다.
     const sessionTargets = checked
       .filter((t) => t === "claude-code")
       .map((t) => TARGET_LABEL[t] || t);
     const notes = [];
-    if (claudeRunning) notes.push("Claude Desktop을 껐다 켜야 도구가 나타납니다.");
-    else if (!onboardingActive && checked.includes("claude-desktop")) {
+    if (runningHosts.length) {
+      notes.push(`${hostAppNames(runningHosts)}을(를) 껐다 켜야 도구가 나타납니다.`);
+    }
+    if (
+      !onboardingActive &&
+      checked.includes("claude-desktop") &&
+      !runningHosts.some((a) => a.id === "claude-desktop")
+    ) {
       notes.push("Claude Desktop을 열면 도구가 나타납니다.");
     }
     if (!onboardingActive && sessionTargets.length) {
       notes.push(`${sessionTargets.join(", ")}는 새로 시작하는 대화부터 반영됩니다.`);
     }
-    // codex 타겟은 CLI 하나가 아니다 — ChatGPT 데스크탑 앱이 Codex CLI와 같은
-    // ~/.codex/config.toml 을 읽는다. 앱은 시작할 때 그 파일을 읽으므로 CLI처럼
-    // "새 대화"만으로는 안 되고 앱을 껐다 켜야 한다. 한 문장으로 둘 다 덮는다.
-    if (!onboardingActive && checked.includes("codex")) {
-      notes.push("ChatGPT 앱을 쓰고 계시면 앱을 껐다 켠 뒤 새 대화부터 도구가 나타납니다.");
+    // codex를 골랐는데 ChatGPT 앱이 안 떠 있는 경우 — CLI만 쓰는 사람일 수도 있어서
+    // 한쪽으로 단정하지 않고 둘 다 말한다.
+    if (!onboardingActive && checked.includes("codex") && !runningHosts.some((a) => a.id === "chatgpt")) {
+      notes.push("ChatGPT 앱은 열 때, Codex CLI는 새 대화부터 반영됩니다.");
     }
     // 카드에서 직접 등록한 경우엔 마법사 완료 화면을 안 보므로 여기서 같이 알려준다 —
     // 처음 도구를 쓸 때 뜨는 허용 창에서 겁먹고 멈추지 않게.
@@ -1197,15 +1231,16 @@ document.getElementById("register-confirm").addEventListener("click", async () =
       : "등록 완료.";
     msgEl.textContent = notes.length ? `${headline.replace(/\.$/, "")} — ${notes.join(" ")}` : headline;
     msgEl.className = "modal-msg ok";
-    const needsRestartNote = claudeRunning;
-    if (needsRestartNote) {
+    if (runningHosts.length) {
       // 마법사 밖에서 등록한 경우엔 여기가 유일한 안내 지점이라, 안내만 하지 말고
-      // 바로 실행할 수단까지 같이 준다.
+      // 바로 실행할 수단까지 같이 준다. 방금 등록한 앱만 껐다 켠다 — 다른 앱까지
+      // 건드리면 사용자가 손대지 않은 앱이 갑자기 닫힌다.
+      const restartIds = runningHosts.map((a) => a.id);
       const restartBtn = document.createElement("button");
       restartBtn.className = "action-btn primary";
-      restartBtn.textContent = "Claude 다시 시작";
+      restartBtn.textContent = `${hostAppNames(runningHosts)} 다시 시작`;
       restartBtn.addEventListener("click", async () => {
-        await restartClaudeDesktop(restartBtn);
+        await restartHostApps(restartBtn, restartIds);
         closeRegisterModal(true);
       });
       msgEl.appendChild(document.createElement("br"));
@@ -1515,19 +1550,27 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
   }
 });
 
-// 이 버튼 한 자리가 Claude Desktop 상황에 맞게 바뀐다 — Lens는 이 앱 위에서만 동작하니,
-// 없는 사람에겐 "받기"가, 있는 사람에겐 "다시 시작"(등록 반영에 꼭 필요한 단계)이 맞다.
-let claudeDesktopInstalled = null;
+// 이 버튼 한 자리가 상황에 맞게 바뀐다 — Lens는 호스트 앱 위에서만 동작하니, 없는
+// 사람에겐 "받기"가, 있는 사람에겐 "다시 시작"(등록 반영에 꼭 필요한 단계)이 맞다.
+// 앱이 둘(Claude Desktop · ChatGPT)로 늘었으므로 이름도 가진 것에 맞춰 바뀐다.
+let installedHostApps = [];
 let claudeDesktopInstallUrl = null; // 백엔드가 주는 값만 쓴다(JS에 URL을 또 적어두지 않게)
 
-async function refreshRestartClaudeButton() {
+// 버튼 한 줄에 두 앱 이름을 다 넣으면 헤더에서 잘린다 — 하나면 그 앱 이름, 둘이면 묶어서.
+function hostRestartButtonLabel(apps) {
+  if (!apps.length) return "Claude Desktop 받기";
+  if (apps.length === 1) return `${apps[0].id === "chatgpt" ? "ChatGPT" : "Claude"} 다시 시작`;
+  return "AI 앱 다시 시작";
+}
+
+async function refreshRestartHostButton() {
   const btn = document.getElementById("restart-claude-btn");
   try {
     const targets = await window.pywebview.api.available_targets("stocklens");
     const desktop = targets.find((t) => t.id === "claude-desktop");
-    claudeDesktopInstalled = !!(desktop && desktop.installed);
+    installedHostApps = (await window.pywebview.api.installed_host_apps()) || [];
     claudeDesktopInstallUrl = desktop ? desktop.install_url : null;
-    btn.textContent = claudeDesktopInstalled ? "Claude 다시 시작" : "Claude Desktop 받기";
+    btn.textContent = hostRestartButtonLabel(installedHostApps);
     btn.hidden = false;
   } catch {
     btn.hidden = true; // 확인 자체가 안 되면 엉뚱한 안내를 하느니 감춘다
@@ -1535,16 +1578,26 @@ async function refreshRestartClaudeButton() {
 }
 
 document.getElementById("restart-claude-btn").addEventListener("click", async (e) => {
-  if (!claudeDesktopInstalled) {
+  if (!installedHostApps.length) {
     if (claudeDesktopInstallUrl) window.pywebview.api.open_url(claudeDesktopInstallUrl);
     showToast("설치가 끝나면 '진단 재실행'을 눌러주세요.");
     return;
   }
   // 다른 앱을 끄는 동작이라 반드시 확인을 받는다 — 대화 중이었을 수 있다.
-  if (!confirm("Claude Desktop을 껐다 다시 켤까요?\n\n등록한 도구를 Claude가 새로 읽어들이려면 이 과정이 필요합니다.")) {
+  // 켜져 있는 앱만 대상이므로 이름도 그것만 말한다(안 켠 앱을 우리가 띄우지 않는다).
+  const running = await runningHostApps();
+  if (!running.length) {
+    const r = await window.pywebview.api.launch_host_apps(installedHostApps.map((a) => a.id));
+    showToast(
+      r.ok ? `${(r.launched || []).join(" · ")}을(를) 실행했습니다.` : r.error || "실행하지 못했습니다."
+    );
     return;
   }
-  await restartClaudeDesktop(e.currentTarget);
+  const names = hostAppNames(running);
+  if (!confirm(`${names}을(를) 껐다 다시 켤까요?\n\n등록한 도구를 새로 읽어들이려면 이 과정이 필요합니다.`)) {
+    return;
+  }
+  await restartHostApps(e.currentTarget, running.map((a) => a.id));
 });
 
 /* ---------- 지원 문의 ---------- */
@@ -1627,26 +1680,34 @@ document.getElementById("support-copy").addEventListener("click", async () => {
 const TROUBLESHOOT_STEPS = [
   {
     key: "restart",
-    title: "Claude를 완전히 껐다 켜기",
+    title: "쓰는 앱(Claude · ChatGPT)을 완전히 껐다 켜기",
     desc:
       "창을 X로 닫는 것만으로는 새 설정이 적용되지 않습니다. " +
       "도구가 안 보이거나 방금 바꾼 게 반영이 안 될 때는 대부분 여기서 끝납니다.",
     action: "지금 다시 시작",
     async run(setResult) {
-      const running = await window.pywebview.api.claude_desktop_running();
-      if (!running) {
-        const r = await window.pywebview.api.launch_claude_desktop();
+      const running = await runningHostApps();
+      if (!running.length) {
+        // 아무것도 안 떠 있으면 재시작할 대상이 없다 — 설치된 앱을 대신 켜준다.
+        const installed = await window.pywebview.api.installed_host_apps();
+        if (!installed.length) {
+          setResult("fail", "Claude Desktop이나 ChatGPT 앱이 필요합니다. 먼저 받아주세요.");
+          return;
+        }
+        const r = await window.pywebview.api.launch_host_apps(installed.map((a) => a.id));
         setResult(
           r.ok ? "ok" : "fail",
-          r.ok ? "Claude Desktop을 실행했습니다." : r.error || "실행하지 못했습니다. 직접 열어주세요."
+          r.ok
+            ? `${(r.launched || []).join(" · ")}을(를) 실행했습니다.`
+            : r.error || "실행하지 못했습니다. 직접 열어주세요."
         );
         return;
       }
-      const r = await window.pywebview.api.restart_claude_desktop();
+      const r = await window.pywebview.api.restart_host_apps(running.map((a) => a.id));
       setResult(
         r.ok ? "ok" : "fail",
         r.ok
-          ? "다시 시작했습니다. Claude에서 다시 한 번 물어봐주세요."
+          ? `${(r.restarted || []).join(" · ")}을(를) 다시 시작했습니다. 그 앱에서 다시 한 번 물어봐주세요.`
           : r.error || "다시 시작하지 못했습니다. 트레이 아이콘에서 종료 후 직접 열어주세요."
       );
     },
@@ -1844,17 +1905,18 @@ const TOUR_STEPS = [
   },
   {
     selector: "#restart-claude-btn",
-    // 이 버튼은 한 자리에서 두 가지로 바뀐다 — Claude Desktop이 없으면 "받기".
+    // 이 버튼은 한 자리에서 두 가지로 바뀐다 — 쓸 앱이 없으면 "받기".
     // 설명이 "다시 시작" 하나로 고정돼 있으면, 정작 아직 안 깐 사람에게 엉뚱한
-    // 말을 하게 된다(Lens는 Claude 위에서만 도니 그 사람에겐 이게 더 중요하다).
-    title: (el) => (el.textContent.includes("받기") ? "Claude Desktop 받기" : "Claude 다시 시작"),
+    // 말을 하게 된다(Lens는 그 앱 위에서만 도니 그 사람에겐 이게 더 중요하다).
+    title: (el) => (el.textContent.includes("받기") ? "Claude Desktop 받기" : el.textContent),
     desc: (el) =>
       el.textContent.includes("받기")
-        ? "Lens는 Claude Desktop 안에서 동작합니다.\n아직 없으시면 여기를 눌러 받으세요.\n\n" +
-          "설치가 끝나면 \"진단 재실행\"을 눌러주세요.\n그러면 이 버튼이 \"Claude 다시 시작\"으로 바뀝니다."
-        : "Claude Desktop은 켜질 때 설정을 읽고 Lens를 띄웁니다.\n" +
+        ? "Lens는 Claude Desktop이나 ChatGPT 앱 안에서 동작합니다.\n아직 없으시면 여기를 눌러 받으세요.\n\n" +
+          "설치가 끝나면 \"진단 재실행\"을 눌러주세요.\n그러면 이 버튼이 \"다시 시작\"으로 바뀝니다."
+        : "Claude Desktop·ChatGPT는 켜질 때 설정을 읽고 Lens를 띄웁니다.\n" +
           "그래서 켜져 있는 동안에 바꾼 것은 그대로 반영되지 않습니다.\n\n" +
-          "MCP 등록을 바꿨을 때, Lens를 업데이트·삭제했을 때\n이 버튼을 눌러주세요.\n\n" +
+          "MCP 등록을 바꿨을 때, Lens를 업데이트·삭제했을 때\n이 버튼을 눌러주세요.\n" +
+          "그때 켜져 있는 앱만 껐다 켭니다.\n\n" +
           "\"등록은 됐다는데 도구가 안 보인다\",\n\"업데이트했는데 그대로다\" —\n대부분 여기를 누르면 해결됩니다.",
     requiresVisible: true,
   },
@@ -1870,7 +1932,7 @@ const TOUR_STEPS = [
     title: "문제 해결",
     desc:
       "무언가 안 될 때 문의보다 먼저 눌러보세요.\n읽는 설명이 아니라 눌러서 바로 실행되는 순서입니다.\n\n" +
-      "1. Claude를 완전히 껐다 켜기\n2. 최신 버전인지 확인\n3. 데이터가 실제로 들어오는지 점검\n\n" +
+      "1. 쓰는 앱(Claude · ChatGPT)을 완전히 껐다 켜기\n2. 최신 버전인지 확인\n3. 데이터가 실제로 들어오는지 점검\n\n" +
       "문제가 있으면 원인과 함께\n무엇을 하면 되는지까지 알려드립니다.",
   },
   {
@@ -2571,16 +2633,17 @@ const RESTART_EXPLAINED_KEY = "leetkit-manager-restart-explained";
 // 토스트로 하지 않는 이유: 안 하면 새 버전이 적용되지 않는 **필수** 단계인데,
 // 토스트는 몇 초 뒤 사라지고 누를 것도 없다. 실제로 이 한 걸음을 건너뛴 채
 // "업데이트했는데 그대로다"라고 느끼기 딱 좋은 자리다.
-async function offerClaudeRestart(bodyText) {
-  let running = false;
-  try {
-    running = await window.pywebview.api.claude_desktop_running();
-  } catch {
-    return false; // 확인 실패 — 확실하지 않은 걸 시키지 않는다
-  }
-  if (!running) return false;
+let restartModalTargetIds = null; // 모달의 "지금 다시 시작"이 껐다 켤 앱 — 띄울 때 정해진다
 
-  document.getElementById("restart-body").textContent = bodyText;
+async function offerHostRestart({ headline, afterRestart }) {
+  const running = await runningHostApps();
+  if (!running.length) return false;
+
+  const names = hostAppNames(running);
+  restartModalTargetIds = running.map((a) => a.id);
+  document.getElementById("restart-title").textContent = `${names}을(를) 다시 시작해주세요`;
+  document.getElementById("restart-body").textContent =
+    `${headline}\n\n지금 켜져 있는 ${names}은(는) ${afterRestart}\n껐다 켜야 반영됩니다.`;
 
   const whyEl = document.getElementById("restart-why");
   const alreadyExplained = localStorage.getItem(RESTART_EXPLAINED_KEY);
@@ -2589,7 +2652,7 @@ async function offerClaudeRestart(bodyText) {
   } else {
     whyEl.textContent =
       "처음이시니 한 번만 설명드릴게요.\n\n" +
-      "Claude Desktop은 켜질 때 Lens 프로그램을 같이 띄웁니다. " +
+      `${names}은(는) 켜질 때 Lens 프로그램을 같이 띄웁니다. ` +
       "그래서 새 파일을 받아도, 이미 떠 있는 쪽은 받기 전 버전 그대로 돌아갑니다.\n\n" +
       "껐다 켜면 새로 받은 파일로 다시 뜹니다. 대화 내용은 지워지지 않습니다.";
     whyEl.hidden = false;
@@ -2609,40 +2672,49 @@ function closeRestartModal() {
 
 document.getElementById("restart-later").addEventListener("click", () => {
   closeRestartModal();
-  showToast("Claude Desktop을 껐다 켜면 적용됩니다 — 위 \"Claude 다시 시작\" 버튼으로도 됩니다.");
+  showToast("앱을 껐다 켜면 적용됩니다 — 위 \"다시 시작\" 버튼으로도 됩니다.");
 });
 
 document.getElementById("restart-now").addEventListener("click", async (e) => {
-  await restartClaudeDesktop(e.currentTarget);
+  await restartHostApps(e.currentTarget, restartModalTargetIds);
   closeRestartModal();
 });
 
 // Lens를 업데이트·삭제한 뒤 부른다. Claude Desktop에 등록돼 있지 않으면 지금 다시
 // 읽어갈 쪽이 없으므로 아무 말도 하지 않는다(신규 설치 직후가 그렇다 — 그쪽은
 // MCP 등록 모달이 따로 안내한다).
-async function noteLensFilesChanged({ registeredOnClaudeDesktop, headline, afterRestart, whenClosed }) {
-  if (!registeredOnClaudeDesktop) {
+async function noteLensFilesChanged({ registeredOnHostApp, headline, afterRestart, whenClosedResult }) {
+  if (!registeredOnHostApp) {
     showToast(headline);
     return;
   }
-  const shown = await offerClaudeRestart(
-    `${headline}\n\n지금 켜져 있는 Claude Desktop은 ${afterRestart}\n껐다 켜야 반영됩니다.`
-  );
+  const shown = await offerHostRestart({ headline, afterRestart });
   // 안 켜져 있으면 시킬 일이 없다 — 다음에 열면 알아서 적용된다는 사실만 알려준다.
-  if (!shown) showToast(`${headline} ${whenClosed}`);
+  // 어느 앱을 말할지는 이 컴퓨터에 있는 앱에서 가져온다("앱"이라고만 하면 막연하다).
+  if (!shown) {
+    const installed = installedHostApps.length
+      ? hostAppNames(installedHostApps)
+      : "Claude Desktop";
+    showToast(`${headline} 다음에 ${installed}을(를) 열면 ${whenClosedResult}`);
+  }
 }
 
 // MCP 등록을 반영하는 마지막 한 걸음. 트레이에 남는 특성상 "완전히 종료"가 실제로
 // 막히는 구간이라, 설명 대신 버튼으로 대신해준다.
-async function restartClaudeDesktop(btn) {
+async function restartHostApps(btn, ids) {
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = "다시 시작하는 중…";
   try {
-    const result = await window.pywebview.api.restart_claude_desktop();
+    const result = await window.pywebview.api.restart_host_apps(ids || null);
     if (result.ok) {
       onboardingHideBanner(); // 마법사에서 눌렀다면 배너를 닫는다(밖에서 눌렀으면 무해)
-      showToast("Claude Desktop을 다시 시작했습니다 — 이제 도구가 보일 거예요.");
+      const names = (result.restarted || []).join(" · ");
+      showToast(
+        names
+          ? `${names}을(를) 다시 시작했습니다 — 이제 도구가 보일 거예요.`
+          : "다시 시작할 앱이 켜져 있지 않았습니다."
+      );
     } else {
       showToast(result.error || "다시 시작하지 못했습니다. 직접 껐다 켜주세요.");
     }
@@ -2665,18 +2737,14 @@ async function finishOnboarding() {
   // MCP 등록은 설정 파일을 고치는 것뿐이고 Claude Desktop은 그 파일을 "켤 때" 읽는다 —
   // 이미 떠 있으면 도구가 안 보인다. 여기서 안내하지 않으면 고객은 "설치가 안 됐다"고
   // 판단한다. 실제로 떠 있을 때만 말해서 불필요하게 겁주지 않는다.
-  let claudeRunning = false;
-  try {
-    claudeRunning = await window.pywebview.api.claude_desktop_running();
-  } catch {
-    /* 확인 실패 시엔 조용히 넘어간다 — 잘못된 안내보다 없는 게 낫다 */
-  }
+  const runningHosts = await runningHostApps();
+  const runningHostLabel = hostAppNames(runningHosts);
 
   // TelegramLens는 설정을 마쳐도 아직 모은 데이터가 없다 — 수집은 Claude Desktop을
   // 열어야 시작된다. 이 사실을 미리 깔아두지 않으면, 방금 다 설치한 사람이 "왜 아무
   // 내용이 없지?"라고 느낀다. 다 끝난 화면에서 한 줄로 미리 알려준다.
   const telegramNote = lensDataCache["telegramlens"]
-    ? " Claude Desktop을 열면 텔레그램 채널 메시지 수집이 시작됩니다."
+    ? " 앱을 열면 텔레그램 채널 메시지 수집이 시작됩니다."
     : "";
 
   // 처음 도구를 쓸 때 Claude가 "허용하시겠습니까?"를 묻는다. 미리 말해두지 않으면
@@ -2685,24 +2753,28 @@ async function finishOnboarding() {
   const permissionNote =
     " 처음 도구를 쓸 때 Claude가 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.";
 
-  if (claudeRunning) {
+  if (runningHosts.length) {
     onboardingSetBanner(
-      "설정이 끝났습니다! 마지막으로 Claude Desktop을 껐다 켜야 도구가 나타납니다." + telegramNote + permissionNote,
+      `설정이 끝났습니다! 마지막으로 ${runningHostLabel}을(를) 껐다 켜야 도구가 나타납니다.` + telegramNote + permissionNote,
       `<button class="action-btn" id="onboarding-done-btn">나중에 직접 할게요</button>
        <button class="action-btn primary" id="onboarding-restart-claude-btn">지금 다시 시작</button>`
     );
     document.getElementById("onboarding-done-btn").addEventListener("click", () => {
       onboardingHideBanner();
-      showToast("Claude Desktop을 껐다 켜면 도구가 나타납니다.");
+      showToast(`${runningHostLabel}을(를) 껐다 켜면 도구가 나타납니다.`);
     });
     document.getElementById("onboarding-restart-claude-btn").addEventListener("click", () =>
-      restartClaudeDesktop(document.getElementById("onboarding-restart-claude-btn"))
+      restartHostApps(
+        document.getElementById("onboarding-restart-claude-btn"),
+        runningHosts.map((a) => a.id)
+      )
     );
     return;
   }
 
+  const openWhat = installedHostApps.length ? hostAppNames(installedHostApps) : "Claude Desktop";
   onboardingSetBanner(
-    "모든 설정이 끝났습니다! Claude Desktop을 열어주세요." + telegramNote + permissionNote,
+    `모든 설정이 끝났습니다! ${openWhat}을(를) 열어주세요.` + telegramNote + permissionNote,
     `<button class="action-btn primary" id="onboarding-done-btn">알겠습니다</button>`
   );
   document.getElementById("onboarding-done-btn").addEventListener("click", () => {
@@ -2939,7 +3011,7 @@ function maybeShowUpdateNotice({ force = false } = {}) {
     noteEl.textContent =
       "처음이시죠? \"지금 업데이트\"를 누르면 새 파일을 받아 바꿔 끼웁니다. " +
       "Lens 하나에 1~2분쯤 걸립니다.\n\n" +
-      "Claude Desktop이 켜져 있으면 잠시 껐다 켜도 될지 먼저 여쭤봅니다. " +
+      "쓰시는 앱(Claude Desktop · ChatGPT)이 켜져 있으면 잠시 껐다 켜도 될지 먼저 여쭤봅니다. " +
       "대화 내용은 지워지지 않습니다.";
     noteEl.hidden = false;
     localStorage.setItem(UPDATE_EXPLAINED_KEY, "1");
@@ -2974,11 +3046,13 @@ async function runLensUpdatesFromNotice() {
   // Claude Desktop이 켜져 있으면 Lens 파일을 쥐고 있어 교체가 막힌다. 예전엔 Lens마다
   // 실패한 뒤에 "껐다 켤까요?"가 따로 떠서, 3개면 3번 물어봤다 — 시작 전에 한 번만
   // 묻고, 끝나면 다시 켜준다.
-  const closedClaude = await closeClaudeForBulkUpdate(lenses.length);
+  const closedHostIds = await closeHostAppsForBulkUpdate(lenses.length);
 
   // 껐다 켜라는 안내가 Lens마다 따로 뜨면 3개일 때 3번이다 — 낱개 안내는 끄고
   // 아래에서 다 끝난 뒤 한 번만 말한다(물어보는 것도 한 번, 안내도 한 번).
-  const onClaudeDesktop = lenses.filter((l) => (l.targets || []).includes("claude-desktop"));
+  const onHostApp = lenses.filter((l) =>
+    ["claude-desktop", "codex"].some((t) => (l.targets || []).includes(t))
+  );
 
   // 한 번에 하나씩 — uv tool install이 같은 디렉터리를 건드리므로 동시에 돌리면
   // 서로의 파일을 쥔 채 실패한다. runAction이 진행률 오버레이까지 맡는다.
@@ -2987,10 +3061,10 @@ async function runLensUpdatesFromNotice() {
   }
   recomputeSummaryFromCache();
 
-  if (closedClaude) {
-    showBusyOverlay("Claude Desktop을 다시 켜는 중…");
+  if (closedHostIds) {
+    showBusyOverlay("앱을 다시 켜는 중…");
     try {
-      await window.pywebview.api.launch_claude_desktop();
+      await window.pywebview.api.launch_host_apps(closedHostIds);
     } catch {
       /* 못 켜도 업데이트 자체는 끝났다 — 아래 안내에서 직접 켜라고 말한다 */
     }
@@ -3003,56 +3077,53 @@ async function runLensUpdatesFromNotice() {
     await handOffToReviewPrompt();
     return;
   }
-  if (closedClaude) {
+  if (closedHostIds) {
     // 우리가 껐다 켰으니 새 버전으로 이미 다시 떴다 — 더 시킬 게 없다.
-    showToast("업데이트를 마치고 Claude Desktop을 다시 켰습니다.");
+    showToast("업데이트를 마치고 앱을 다시 켰습니다.");
     await handOffToReviewPrompt();
     return;
   }
 
-  // 여기까지 왔다는 건 Claude가 꺼져 있었거나("잠시 껐다 켤까요?"를 안 물어봤다),
-  // 물어봤는데 사용자가 거절했다는 뜻이다. 거절한 경우 Claude는 여전히 옛 버전을
+  // 여기까지 왔다는 건 앱이 꺼져 있었거나("잠시 껐다 켤까요?"를 안 물어봤다),
+  // 물어봤는데 사용자가 거절했다는 뜻이다. 거절한 경우 그 앱은 여전히 옛 버전을
   // 돌리고 있는데, 예전엔 그냥 "업데이트를 마쳤습니다"로 끝나서 끝난 줄 알았다.
-  const done = onClaudeDesktop.map((l) => l.display_name).join(", ");
+  const done = onHostApp.map((l) => l.display_name).join(", ");
   await noteLensFilesChanged({
-    registeredOnClaudeDesktop: onClaudeDesktop.length > 0,
+    registeredOnHostApp: onHostApp.length > 0,
     headline: done ? `${done} 업데이트 완료.` : "업데이트를 마쳤습니다.",
     afterRestart: "아직 이전 버전을 쓰고 있습니다.",
-    whenClosed: "다음에 Claude Desktop을 열면 새 버전이 적용됩니다.",
+    whenClosedResult: "새 버전이 적용됩니다.",
   });
   // 재시작 모달을 띄웠으면 그게 닫힐 때 이어서 후기를 묻는다(closeRestartModal).
   if (document.getElementById("restart-backdrop").hidden) await handOffToReviewPrompt();
 }
 
-// 일괄 업데이트 전에 Claude Desktop을 닫을지 한 번만 묻는다. 닫았으면 true —
-// 호출자가 끝나고 다시 켜준다.
-async function closeClaudeForBulkUpdate(count) {
-  let running = false;
-  try {
-    running = await window.pywebview.api.claude_desktop_running();
-  } catch {
-    return false; // 확인 실패 — 괜히 묻지 말고 그냥 진행한다
-  }
-  if (!running) return false;
+// 일괄 업데이트 전에 호스트 앱을 닫을지 한 번만 묻는다. 닫았으면 닫은 앱 id 배열 —
+// 호출자가 끝나고 그 목록으로 다시 켜준다(안 켜져 있던 앱까지 띄우지 않게).
+async function closeHostAppsForBulkUpdate(count) {
+  const running = await runningHostApps();
+  if (!running.length) return null;
 
+  const names = hostAppNames(running);
+  const ids = running.map((a) => a.id);
   const ok = confirm(
-    `Claude Desktop이 켜져 있으면 Lens 파일을 쓰고 있어 업데이트가 막힐 수 있습니다.\n\n` +
+    `${names}이(가) 켜져 있으면 Lens 파일을 쓰고 있어 업데이트가 막힐 수 있습니다.\n\n` +
       `잠시 껐다가 ${count}개를 업데이트하고, 끝나면 다시 켤까요?`
   );
-  if (!ok) return false;
+  if (!ok) return null;
 
-  showBusyOverlay("Claude Desktop을 종료하는 중…");
+  showBusyOverlay(`${names}을(를) 종료하는 중…`);
   try {
-    const quit = await window.pywebview.api.quit_claude_desktop();
+    const quit = await window.pywebview.api.quit_host_apps(ids);
     if (!quit.ok) {
       hideBusyOverlay();
-      showToast(quit.error || "Claude Desktop을 종료하지 못했습니다 — 그대로 진행합니다.");
-      return false;
+      showToast(quit.error || `${names}을(를) 종료하지 못했습니다 — 그대로 진행합니다.`);
+      return null;
     }
-    return true;
+    return ids;
   } catch {
     hideBusyOverlay();
-    return false;
+    return null;
   }
 }
 
@@ -3245,7 +3316,7 @@ window.addEventListener("pywebviewready", async () => {
     /* 업데이트 확인 실패는 조용히 넘어간다 — 버튼이 안 뜰 뿐 사용에 지장 없음 */
   }
   try {
-    await refreshRestartClaudeButton();
+    await refreshRestartHostButton();
   } catch {
     /* 못 띄워도 나머지 기능엔 지장 없다 */
   }

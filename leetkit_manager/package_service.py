@@ -762,13 +762,437 @@ def is_claude_code_installed() -> bool:
     return (Path.home() / ".claude.json").exists() or (Path.home() / ".claude").exists()
 
 
+# ── ChatGPT 데스크탑 앱 ──────────────────────────────────────────────────────
+# 2026-07-09 통합 이후 ChatGPT 데스크탑 앱은 Codex CLI와 같은 `~/.codex/config.toml`을
+# 읽는다 — codex 타겟에 등록하면 ChatGPT 앱에서도 Lens 도구가 그대로 뜬다. 그리고 앱은
+# 그 파일을 "켤 때" 읽고, 켜져 있는 동안 Lens 프로세스를 자기가 쥔다. 즉 Claude Desktop과
+# 똑같은 두 문제가 생긴다:
+#   1) 등록·업데이트해도 이미 떠 있는 쪽은 예전 상태로 계속 돈다 → 껐다 켜야 반영된다
+#   2) Lens 파일을 쥐고 있어서 uv 설치·삭제가 "파일 사용 중"으로 막힌다
+# 그래서 Claude에 있는 (종료 · 실행 · 재시작) 세트를 같은 모양으로 갖춘다.
+#
+# 실기기(Windows 11)에서 확인한 사실 — 헷갈리는 지점이 있다:
+#   실행 파일  C:\\Program Files\\WindowsApps\\OpenAI.Codex_<버전>_x64__<퍼블리셔>\\app\\ChatGPT.exe
+#   프로세스   ChatGPT.exe 가 여러 개(창·렌더러) — 전부 같은 exe 경로다
+#   AUMID     OpenAI.Codex_<퍼블리셔>!App                 (통합 앱)
+#             OpenAI.ChatGPT-Desktop_<퍼블리셔>!ChatGPT   (통합 전 "ChatGPT Classic")
+# 패키지 이름은 OpenAI.Codex 인데 실행 파일은 ChatGPT.exe 다. 통합으로 Codex 패키지가
+# ChatGPT 앱을 품은 것이라 둘 다 같은 앱을 가리킨다.
+#
+# Codex **CLI**는 이 앱이 아니다. 이름이 달라서(codex.exe vs ChatGPT.exe) 섞일 일은
+# 없지만, Claude 쪽에서 이름만 보고 판별했다가 CLI 세션을 죽인 전례가 있으므로
+# 여기서도 경로로 판별한다.
+_CHATGPT_DESKTOP_PATH_MARKERS = (
+    "/windowsapps/openai.codex",            # Windows MSIX — 통합 앱(ChatGPT + Codex)
+    "/windowsapps/openai.chatgpt-desktop",  # Windows MSIX — 통합 전 구 앱
+    "/chatgpt.app/",                        # macOS — /Applications/ChatGPT.app/...
+)
+
+
+def _msix_app_id(pkg_dir: Path) -> str | None:
+    """MSIX 패키지 폴더의 AppxManifest.xml에서 `<Application Id="...">`를 읽는다.
+    실기기에서 WindowsApps 안의 이 파일은 읽을 수 있음을 확인했다(폴더 목록 조회가
+    막혀 있어도 파일 경로를 알면 열린다). 못 읽으면 None."""
+    try:
+        import xml.etree.ElementTree as ET
+
+        root = ET.parse(str(pkg_dir / "AppxManifest.xml")).getroot()
+        for el in root.iter():
+            if el.tag.rpartition("}")[2] == "Application" and el.get("Id"):
+                return el.get("Id")
+    except Exception:
+        return None
+    return None
+
+
+# AppxManifest를 못 읽을 때의 대비책 — 실기기에서 확인한 값.
+_MSIX_APP_ID_FALLBACK = {"openai.codex": "App", "openai.chatgpt-desktop": "ChatGPT"}
+
+
+def _msix_aumid(exe_path: str) -> str | None:
+    """MSIX 실행 파일 경로 → AppUserModelID.
+    `...\\WindowsApps\\OpenAI.Codex_26.810.7004.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe`
+    → `OpenAI.Codex_2p2nqsd0c76g0!App`. app id는 패키지마다 다르므로(App / ChatGPT)
+    Claude처럼 패키지 이름에서 유추하면 안 된다 — 매니페스트를 읽고, 안 되면 표를 쓴다."""
+    for parent in Path(exe_path).parents:
+        folder = parent.name
+        if "__" not in folder:
+            continue
+        head, _, publisher = folder.rpartition("__")
+        name = head.split("_")[0]
+        if not (name and publisher):
+            continue
+        app_id = _msix_app_id(parent) or _MSIX_APP_ID_FALLBACK.get(name.lower())
+        if not app_id:
+            return None
+        return f"{name}_{publisher}!{app_id}"
+    return None
+
+
+def _is_chatgpt_desktop_exe(exe_path: str | None, *, pid: int | None = None) -> bool:
+    """실행 파일 경로가 ChatGPT 데스크탑 앱인지. 아는 설치 위치 조각으로 판별하고,
+    앞으로 위치가 바뀌면 보이는 창을 가진 GUI인지로 판단한다(Claude와 같은 순서)."""
+    if not exe_path:
+        return False
+    p = _normalize_exe_path(exe_path)
+    if any(marker in p for marker in _CHATGPT_DESKTOP_PATH_MARKERS):
+        return True
+    return _process_has_visible_window(pid) if pid is not None else False
+
+
+# 종료한 뒤에는 프로세스에서 경로를 읽을 수 없다 — Claude와 같은 이유로 켜져 있을 때
+# 본 경로를 파일에도 남긴다(MSIX는 꺼진 상태에서 설치 위치를 찾기 어렵다).
+_last_known_chatgpt_exe: str | None = None
+
+
+def _chatgpt_exe_memo_path() -> Path:
+    d = Path.home() / ".leetkit-manager"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "chatgpt_desktop_path"
+
+
+def _remember_chatgpt_exe(exe: str) -> None:
+    global _last_known_chatgpt_exe
+    if exe == _last_known_chatgpt_exe:
+        return
+    _last_known_chatgpt_exe = exe
+    try:
+        _chatgpt_exe_memo_path().write_text(exe, encoding="utf-8")
+    except Exception:
+        pass  # 기억 못 해도 켜져 있는 동안은 메모리 값으로 충분하다
+
+
+def _recall_chatgpt_exe() -> str | None:
+    global _last_known_chatgpt_exe
+    if _last_known_chatgpt_exe:
+        return _last_known_chatgpt_exe
+    try:
+        exe = _chatgpt_exe_memo_path().read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+    if exe and Path(exe).exists():
+        _last_known_chatgpt_exe = exe
+        return exe
+    return None
+
+
+def chatgpt_desktop_processes() -> list:
+    """실행 중인 ChatGPT 데스크탑 앱 프로세스 목록(psutil.Process).
+    창·렌더러가 여러 개라 결과도 보통 여러 개다 — 전부 같은 앱이다."""
+    try:
+        import psutil
+    except Exception:
+        return []
+
+    found = []
+    try:
+        for proc in psutil.process_iter(["name", "exe"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                # macOS 실행 파일 이름은 확장자 없는 "ChatGPT"다.
+                if name not in ("chatgpt.exe", "chatgpt"):
+                    continue
+                if _is_chatgpt_desktop_exe(proc.info.get("exe"), pid=proc.pid):
+                    found.append(proc)
+                    if proc.info.get("exe"):
+                        _remember_chatgpt_exe(proc.info["exe"])
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return found
+
+
+def is_chatgpt_desktop_running() -> bool:
+    """ChatGPT 데스크탑 앱이 지금 떠 있는지. 판단이 안 서면 False —
+    불필요한 재시작 안내로 겁주지 않는다(is_claude_desktop_running과 같은 원칙)."""
+    return bool(chatgpt_desktop_processes())
+
+
+def quit_chatgpt_desktop(*, timeout: float = 10.0) -> bool:
+    """실행 중인 ChatGPT 데스크탑 앱을 종료한다. 종료됐으면(또는 애초에 안 떠 있었으면) True.
+
+    ChatGPT 앱 안에서 Codex 작업이 돌고 있으면 그것도 함께 끊긴다 — Claude Desktop과
+    같은 성질이라, 호출하는 쪽에서 반드시 사용자 확인을 먼저 받는다."""
+    procs = chatgpt_desktop_processes()
+    if not procs:
+        return True
+
+    import psutil
+
+    for proc in procs:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    _gone, alive = psutil.wait_procs(procs, timeout=timeout)
+    for proc in alive:
+        try:
+            proc.kill()  # 재시작이 목적이라 여기서 멈추면 안 된다
+        except Exception:
+            pass
+    psutil.wait_procs(alive, timeout=3)
+    return not chatgpt_desktop_processes()
+
+
+def _find_chatgpt_desktop_exe() -> str | None:
+    """실행 중이 아닐 때 설치 경로를 찾는다. Windows는 MSIX라 WindowsApps 목록 조회가
+    권한으로 막힐 수 있어(그래서 켜져 있을 때 기억해둔 경로에 의존한다) 여기서는
+    접근 가능한 경우만 훑는다."""
+    if sys.platform == "darwin":
+        app = Path("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT")
+        return str(app) if app.exists() else None
+    if sys.platform != "win32":
+        return None
+    base = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "WindowsApps"
+    try:
+        for pattern in ("OpenAI.Codex_*", "OpenAI.ChatGPT-Desktop_*"):
+            for pkg in sorted(base.glob(pattern), reverse=True):
+                exe = pkg / "app" / "ChatGPT.exe"
+                if exe.exists():
+                    return str(exe)
+    except Exception:
+        return None
+    return None
+
+
+def launch_chatgpt_desktop(exe_hint: str | None = None) -> bool:
+    """ChatGPT 데스크탑 앱을 실행한다. macOS는 `open -a`, Windows MSIX는 AUMID."""
+    if sys.platform == "darwin":
+        # .app 번들은 내부 실행 파일을 직접 띄우면 안 된다(런치 서비스를 거쳐야
+        # Dock·활성화가 정상 동작한다).
+        try:
+            return subprocess.run(
+                ["open", "-a", "ChatGPT"], capture_output=True, timeout=15, env=child_env()
+            ).returncode == 0
+        except Exception:
+            return False
+
+    exe = exe_hint
+    if not exe:
+        for proc in chatgpt_desktop_processes():
+            exe = proc.info.get("exe")
+            break
+    # 종료한 직후엔 프로세스가 없으므로 켜져 있을 때 기억해둔 경로를 쓴다.
+    if not exe:
+        exe = _recall_chatgpt_exe()
+    if not exe:
+        exe = _find_chatgpt_desktop_exe()
+    if not exe:
+        return False
+
+    # MSIX 앱은 exe를 직접 실행하면 활성화 컨텍스트가 없어 실패할 수 있다 —
+    # `explorer shell:AppsFolder\<AUMID>`가 정석이다.
+    aumid = _msix_aumid(exe)
+    creationflags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
+    if aumid:
+        try:
+            subprocess.Popen(
+                ["explorer.exe", f"shell:AppsFolder\\{aumid}"],
+                creationflags=creationflags, close_fds=True, env=child_env(),
+            )
+            return True
+        except Exception:
+            pass
+    try:
+        subprocess.Popen([exe], creationflags=creationflags, close_fds=True, env=child_env())
+        return True
+    except Exception:
+        return False
+
+
+def restart_chatgpt_desktop() -> dict:
+    """codex 타겟 등록·업데이트를 반영하려면 ChatGPT 앱을 껐다 켜야 한다 — 두 단계를 한 번에.
+    반환: {"ok": bool, "error": str|None}"""
+    procs = chatgpt_desktop_processes()
+    exe_hint = None
+    for proc in procs:
+        exe_hint = proc.info.get("exe")
+        break
+
+    if procs and not quit_chatgpt_desktop():
+        return {"ok": False, "error": "ChatGPT를 종료하지 못했습니다. 직접 종료한 뒤 다시 시도해주세요."}
+
+    if not launch_chatgpt_desktop(exe_hint):
+        return {"ok": False, "error": "ChatGPT를 다시 실행하지 못했습니다. 직접 실행해주세요."}
+    return {"ok": True, "error": None}
+
+
+def is_chatgpt_desktop_installed() -> bool:
+    """ChatGPT 데스크탑 앱이 이 컴퓨터에 있는지(실행 중이 아니어도).
+    실행 중 / 실행 파일 발견 / 기억해둔 경로 / 시작 메뉴·패키지 폴더 중 하나면 충분하다."""
+    if is_chatgpt_desktop_running():
+        return True
+    if _find_chatgpt_desktop_exe():
+        return True
+    if _recall_chatgpt_exe():
+        return True
+    if sys.platform == "win32":
+        # MSIX는 꺼져 있으면 WindowsApps를 못 읽는 경우가 있어 시작 메뉴로도 확인한다.
+        for root in filter(None, (os.environ.get("APPDATA"), os.environ.get("ProgramData"))):
+            if list(Path(root, "Microsoft", "Windows", "Start Menu", "Programs").glob("ChatGPT*")):
+                return True
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            try:
+                packages = Path(local) / "Packages"
+                for pattern in ("OpenAI.Codex_*", "OpenAI.ChatGPT-Desktop_*"):
+                    if list(packages.glob(pattern)):
+                        return True
+            except Exception:
+                pass
+    else:
+        if Path("/Applications/ChatGPT.app").exists():
+            return True
+    return False
+
+
+# ── MCP 호스트 앱(껐다 켜야 반영되는 GUI 앱) 묶음 ─────────────────────────────
+# Claude Desktop과 ChatGPT는 성질이 같다 — 켤 때 설정을 읽고, 켜져 있는 동안 Lens
+# 프로세스를 쥔다. UI가 "어느 앱이냐"를 자리마다 갈라 쓰지 않도록 여기서 묶어 다룬다.
+# Claude Code CLI·Codex CLI는 여기 없다(새 대화를 열면 알아서 새로 뜬다).
+# 함수를 객체로 담지 않고 **이름으로** 담는다 — 객체를 담아두면 나중에 함수를 갈아끼운
+# 쪽(테스트·진단)에서 이 표만 옛 함수를 계속 부른다. 조용히 어긋나는 종류의 버그다.
+_HOST_APPS: dict[str, tuple] = {
+    # id: (표시 이름, 실행 중 판별, 종료, 실행, 설치 여부)
+    "claude-desktop": (
+        "Claude Desktop",
+        "is_claude_desktop_running",
+        "quit_claude_desktop",
+        "launch_claude_desktop",
+        "is_claude_desktop_installed",
+    ),
+    "chatgpt": (
+        "ChatGPT",
+        "is_chatgpt_desktop_running",
+        "quit_chatgpt_desktop",
+        "launch_chatgpt_desktop",
+        "is_chatgpt_desktop_installed",
+    ),
+}
+
+_HOST_RUNNING, _HOST_QUIT, _HOST_LAUNCH, _HOST_INSTALLED = 1, 2, 3, 4
+
+
+def _host_fn(host_id: str, slot: int):
+    """호스트 앱의 동작 함수를 부를 때 찾아온다(위 표는 이름만 들고 있다)."""
+    return globals()[_HOST_APPS[host_id][slot]]
+
+
+def host_app_label(host_id: str) -> str:
+    spec = _HOST_APPS.get(host_id)
+    return spec[0] if spec else host_id
+
+
+def running_host_apps() -> list[dict]:
+    """지금 떠 있는 호스트 앱 목록 — [{"id", "label"}]. UI가 이걸로 안내 문구를 만든다."""
+    out = []
+    for host_id, spec in _HOST_APPS.items():
+        try:
+            if _host_fn(host_id, _HOST_RUNNING)():
+                out.append({"id": host_id, "label": spec[0]})
+        except Exception:
+            continue  # 판단 못 하는 앱은 건너뛴다(잘못된 안내보다 없는 게 낫다)
+    return out
+
+
+def installed_host_apps() -> list[dict]:
+    """이 컴퓨터에 있는 호스트 앱 목록 — [{"id", "label", "running"}]."""
+    out = []
+    for host_id, spec in _HOST_APPS.items():
+        try:
+            if _host_fn(host_id, _HOST_INSTALLED)():
+                out.append(
+                    {
+                        "id": host_id,
+                        "label": spec[0],
+                        "running": _host_fn(host_id, _HOST_RUNNING)(),
+                    }
+                )
+        except Exception:
+            continue
+    return out
+
+
+def _host_ids(ids: "list[str] | None") -> list[str]:
+    if ids is None:
+        return [h["id"] for h in running_host_apps()]
+    return [i for i in ids if i in _HOST_APPS]
+
+
+def quit_host_apps(ids: "list[str] | None" = None) -> dict:
+    """호스트 앱을 종료한다(기본값: 지금 켜져 있는 것 전부).
+    반환: {"ok", "quit": [label], "failed": [label], "error": str|None}"""
+    done, failed = [], []
+    for host_id in _host_ids(ids):
+        label = _HOST_APPS[host_id][0]
+        try:
+            (done if _host_fn(host_id, _HOST_QUIT)() else failed).append(label)
+        except Exception:
+            failed.append(label)
+    error = None
+    if failed:
+        error = f"{', '.join(failed)}을(를) 종료하지 못했습니다. 직접 종료한 뒤 다시 시도해주세요."
+    return {"ok": not failed, "quit": done, "failed": failed, "error": error}
+
+
+def launch_host_apps(ids: "list[str] | None" = None) -> dict:
+    """호스트 앱을 실행한다. ids를 안 주면 설치된 것 전부(보통은 방금 종료한 목록을 준다).
+    반환: {"ok", "launched": [label], "failed": [label], "error": str|None}"""
+    if ids is None:
+        ids = [h["id"] for h in installed_host_apps()]
+    done, failed = [], []
+    for host_id in _host_ids(ids):
+        label = _HOST_APPS[host_id][0]
+        try:
+            (done if _host_fn(host_id, _HOST_LAUNCH)() else failed).append(label)
+        except Exception:
+            failed.append(label)
+    error = None
+    if failed:
+        error = f"{', '.join(failed)}을(를) 다시 실행하지 못했습니다. 직접 실행해주세요."
+    return {"ok": not failed, "launched": done, "failed": failed, "error": error}
+
+
+def restart_host_apps(ids: "list[str] | None" = None) -> dict:
+    """호스트 앱을 껐다 켠다 — 등록·업데이트를 반영하는 마지막 단계.
+    반환: {"ok", "restarted": [label], "error": str|None}
+
+    **켜져 있는 것만** 대상으로 한다. 안 켜져 있는 앱까지 우리가 띄우면, 사용자가 열지도
+    않은 앱이 갑자기 뜬다(ids를 명시해도 이 규칙은 같다)."""
+    targets = [i for i in _host_ids(ids) if _host_fn(i, _HOST_RUNNING)()]
+    if not targets:
+        return {"ok": True, "restarted": [], "error": None}
+
+    restarted, failed = [], []
+    for host_id in targets:
+        label = _HOST_APPS[host_id][0]
+        try:
+            if not _host_fn(host_id, _HOST_QUIT)():
+                failed.append(label)
+                continue
+            (restarted if _host_fn(host_id, _HOST_LAUNCH)() else failed).append(label)
+        except Exception:
+            failed.append(label)
+    error = None
+    if failed:
+        error = f"{', '.join(failed)}을(를) 다시 시작하지 못했습니다. 직접 껐다 켜주세요."
+    return {"ok": not failed, "restarted": restarted, "error": error}
+
+
 def is_codex_installed() -> bool:
-    """Codex CLI가 이 컴퓨터에 있는지 — 설치도 안 된 걸 MCP 등록 대상 체크박스로 보여주면
-    혼란만 주므로, UI가 이걸로 걸러서 보여줄지 말지 정한다. PATH 탐색과
-    `~/.codex` 존재 여부(설정 폴더는 있는데 PATH에 없는 경우도 커버) 둘 다 확인."""
+    """codex 타겟(= Codex CLI **와** ChatGPT 데스크탑 앱)을 쓸 수 있는 컴퓨터인지.
+
+    설치도 안 된 걸 MCP 등록 대상 체크박스로 보여주면 혼란만 주므로 UI가 이걸로
+    걸러낸다. 그런데 이 타겟은 CLI 전용이 아니다 — ChatGPT 앱이 같은
+    `~/.codex/config.toml`을 읽으므로, **CLI를 한 번도 깐 적 없고 ChatGPT 앱만 쓰는
+    사람**도 대상이다. `~/.codex` 유무만 보던 동안은 그 사람에게 체크박스가 "미설치"로
+    떠서, 정작 쓸 수 있는 경로를 고를 수 없었다."""
     if shutil.which("codex"):
         return True
-    return (Path.home() / ".codex").exists()
+    if (Path.home() / ".codex").exists():
+        return True
+    return is_chatgpt_desktop_installed()
 
 
 def list_installed_tools() -> dict[str, str]:
