@@ -1591,6 +1591,12 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
   } catch {
     /* 업데이트 확인 실패는 조용히 — 진단 결과는 이미 갱신됐다 */
   }
+  // 업데이트가 여러 개면 카드에서 하나씩 누르는 게 번거롭다 — 한 번에 처리하는 창이
+  // 이미 있는데 이 경로에서는 안 띄우고 있었다. 하나뿐일 때는 안 띄운다: 카드 버튼
+  // 한 번이면 끝나는 일에 창을 겹치는 게 더 번거롭다.
+  if (lensesWithUpdates().length >= UPDATE_NOTICE_MIN_LENSES) {
+    maybeShowUpdateNotice({ afterUserAction: true });
+  }
 });
 
 // 이 버튼 한 자리가 상황에 맞게 바뀐다 — Lens는 호스트 앱 위에서만 동작하니, 없는
@@ -3039,6 +3045,9 @@ function selfUpdateHasUpdate() {
 // 다음 새 버전을 놓친다 — 버전 조합이 바뀌었을 때만 다시 띄운다.
 // Manager 버전도 조합에 넣는다. 빼두면 Lens는 그대로인데 Manager만 새로 나온 날
 // "나중에"가 그대로 살아 있어 안내가 아예 안 뜬다.
+// 몇 개부터 창으로 안내할지. 하나면 카드 버튼 한 번이 더 빠르다.
+const UPDATE_NOTICE_MIN_LENSES = 2;
+
 function updateNoticeSignature(lenses) {
   const parts = lenses.map((l) => `${l.name}@${l.latest_version}`);
   if (selfUpdateHasUpdate()) parts.push(`manager@${selfUpdateInfo.latest}`);
@@ -3053,12 +3062,16 @@ function closeUpdateModal() {
 // (마법사 중이면 참기, 다른 창이 떠 있으면 참기, "나중에" 누른 조합은 다시 안 띄우기)은
 // 전부 "묻지도 않았는데 끼어드는" 상황을 위한 것이다. 직접 누른 사람에게 그 규칙을
 // 적용하면 버튼이 아무 반응도 안 하는 것처럼 보인다.
-function maybeShowUpdateNotice({ force = false } = {}) {
-  if (!force) {
+function maybeShowUpdateNotice({ force = false, afterUserAction = false } = {}) {
+  // afterUserAction: 사용자가 [진단 재실행]을 눌러서 온 경우. "묻지도 않았는데 끼어드는"
+  // 자제 규칙 중 **마법사/다른 창** 만 풀고, **"나중에" 를 누른 조합은 그대로 존중**한다.
+  // force 처럼 전부 풀면 나중에를 눌러도 진단할 때마다 같은 창이 다시 뜬다.
+  if (!force && !afterUserAction) {
     // 설치를 아직 안 끝낸 사람에게는 마법사가 먼저다 — 그 위에 겹쳐 띄우면 흐름이 끊긴다.
     if (!localStorage.getItem(ONBOARDING_DONE_KEY)) return;
     if (document.querySelector(".modal-backdrop:not([hidden])")) return;
   }
+  if (afterUserAction && document.querySelector(".modal-backdrop:not([hidden])")) return;
 
   const lenses = lensesWithUpdates();
   const managerUpdate = selfUpdateHasUpdate();

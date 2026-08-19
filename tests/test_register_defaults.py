@@ -74,3 +74,17 @@ def test_app_names_are_written_as_product_names():
     "ChatGPT 데스크탑 앱" 으로 영문+한글이 섞여 있었다. OpenAI 는 "ChatGPT Desktop"
     이라는 제품명을 쓰지 않는다 — 앱 이름이 그냥 ChatGPT 다."""
     assert "ChatGPT 데스크탑" not in JS
+
+
+def test_refresh_offers_bulk_update_when_several_are_stale():
+    """카드에서 하나씩 세 번 누르는 게 번거롭다 — 일괄 처리 창이 이미 있는데
+    [진단 재실행] 경로에서는 안 띄우고 있었다. 하나뿐일 때는 안 띄운다(카드 버튼
+    한 번이면 끝나는 일에 창을 겹치는 게 더 번거롭다)."""
+    assert "const UPDATE_NOTICE_MIN_LENSES = 2;" in JS
+    assert "lensesWithUpdates().length >= UPDATE_NOTICE_MIN_LENSES" in JS
+    assert "maybeShowUpdateNotice({ afterUserAction: true })" in JS
+
+
+def test_later_choice_is_still_respected_on_refresh():
+    """force 로 자제 규칙을 전부 풀면 "나중에"를 눌러도 진단할 때마다 다시 뜬다."""
+    assert "if (!force && !afterUserAction) {" in JS
