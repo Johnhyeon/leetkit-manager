@@ -92,7 +92,7 @@ def _blocking_host_apps(result) -> list[dict]:
     이게 비어 있지 않을 때만 UI가 "닫고 다시 시도" 버튼을 띄운다 — 앱이 꺼져 있는데
     그 안내를 하면 엉뚱한 곳을 헤매게 된다.
 
-    Claude Desktop만 보던 자리였다. ChatGPT 데스크탑 앱도 codex 타겟으로 등록되면
+    Claude Desktop만 보던 자리였다. ChatGPT 앱도 codex 타겟으로 등록되면
     같은 Lens 파일을 쥐기 때문에, 그쪽이 원인일 때 "Claude를 닫으세요"라고 하면
     시킨 대로 해도 아무 변화가 없다(실제로 막히는 구간이라 앱 이름을 정확히 말해야 한다)."""
     if result is None or result.ok:

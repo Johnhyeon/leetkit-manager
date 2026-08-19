@@ -476,7 +476,7 @@ class TestIsCodexInstalled:
 
 
 class TestChatgptDesktop:
-    """ChatGPT 데스크탑 앱 판별·재시작. 실기기(Windows 11)에서 확인한 경로를 쓴다 —
+    """ChatGPT 앱 판별·재시작. 실기기(Windows 11)에서 확인한 경로를 쓴다 —
     패키지 이름은 OpenAI.Codex 인데 실행 파일은 ChatGPT.exe 다(통합 앱)."""
 
     _MSIX = r"C:\Program Files\WindowsApps\OpenAI.Codex_26.9.9.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"

@@ -60,3 +60,17 @@ def test_update_refreshes_the_registered_command_path():
     assert "const registered = (lens && lens.targets) || [];" in JS
     assert "if (wasInstalled && registered.length) {" in JS
     assert "api.register(lensName, registered)" in JS
+
+
+def test_guide_tour_says_where_lenses_run():
+    """[가이드] 버튼은 버튼을 하나씩 짚는 구성이라, 정작 Lens 가 어느 앱 위에서 도는지
+    말하는 자리가 없었다 — Claude 하나뿐일 때는 필요 없었지만 이제 둘이다."""
+    assert "Lens는 Claude Desktop · Claude Code · ChatGPT" in JS
+    assert "어디에 연결해도 똑같이 동작합니다" in JS
+
+
+def test_app_names_are_written_as_product_names():
+    """Claude 는 `Claude Desktop` 처럼 제품명 그대로 쓰면서 ChatGPT 만
+    "ChatGPT 데스크탑 앱" 으로 영문+한글이 섞여 있었다. OpenAI 는 "ChatGPT Desktop"
+    이라는 제품명을 쓰지 않는다 — 앱 이름이 그냥 ChatGPT 다."""
+    assert "ChatGPT 데스크탑" not in JS

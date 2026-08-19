@@ -867,8 +867,8 @@ def is_claude_code_installed() -> bool:
     return (Path.home() / ".claude.json").exists() or (Path.home() / ".claude").exists()
 
 
-# ── ChatGPT 데스크탑 앱 ──────────────────────────────────────────────────────
-# 2026-07-09 통합 이후 ChatGPT 데스크탑 앱은 Codex CLI와 같은 `~/.codex/config.toml`을
+# ── ChatGPT 앱 ──────────────────────────────────────────────────────
+# 2026-07-09 통합 이후 ChatGPT 앱은 Codex CLI와 같은 `~/.codex/config.toml`을
 # 읽는다 — codex 타겟에 등록하면 ChatGPT 앱에서도 Lens 도구가 그대로 뜬다. 그리고 앱은
 # 그 파일을 "켤 때" 읽고, 켜져 있는 동안 Lens 프로세스를 자기가 쥔다. 즉 Claude Desktop과
 # 똑같은 두 문제가 생긴다:
@@ -935,7 +935,7 @@ def _msix_aumid(exe_path: str) -> str | None:
 
 
 def _is_chatgpt_desktop_exe(exe_path: str | None, *, pid: int | None = None) -> bool:
-    """실행 파일 경로가 ChatGPT 데스크탑 앱인지. 아는 설치 위치 조각으로 판별하고,
+    """실행 파일 경로가 ChatGPT 앱인지. 아는 설치 위치 조각으로 판별하고,
     앞으로 위치가 바뀌면 보이는 창을 가진 GUI인지로 판단한다(Claude와 같은 순서)."""
     if not exe_path:
         return False
@@ -982,7 +982,7 @@ def _recall_chatgpt_exe() -> str | None:
 
 
 def chatgpt_desktop_processes() -> list:
-    """실행 중인 ChatGPT 데스크탑 앱 프로세스 목록(psutil.Process).
+    """실행 중인 ChatGPT 앱 프로세스 목록(psutil.Process).
     창·렌더러가 여러 개라 결과도 보통 여러 개다 — 전부 같은 앱이다."""
     try:
         import psutil
@@ -1009,7 +1009,7 @@ def chatgpt_desktop_processes() -> list:
 
 
 def is_chatgpt_desktop_running() -> bool:
-    """ChatGPT 데스크탑 앱이 지금 떠 있는지. 판단이 안 서면 False —
+    """ChatGPT 앱이 지금 떠 있는지. 판단이 안 서면 False —
     불필요한 재시작 안내로 겁주지 않는다(is_claude_desktop_running과 같은 원칙)."""
     return bool(chatgpt_desktop_processes())
 
@@ -1034,7 +1034,7 @@ def _chatgpt_main_processes() -> list:
 
 
 def quit_chatgpt_desktop(*, timeout: float = 10.0) -> bool:
-    """실행 중인 ChatGPT 데스크탑 앱을 종료한다. 종료됐으면(또는 애초에 안 떠 있었으면) True.
+    """실행 중인 ChatGPT 앱을 종료한다. 종료됐으면(또는 애초에 안 떠 있었으면) True.
 
     ChatGPT 앱 안에서 Codex 작업이 돌고 있으면 그것도 함께 끊긴다 — Claude Desktop과
     같은 성질이라, 호출하는 쪽에서 반드시 사용자 확인을 먼저 받는다."""
@@ -1094,7 +1094,7 @@ def _find_chatgpt_desktop_exe() -> str | None:
 
 
 def launch_chatgpt_desktop(exe_hint: str | None = None) -> bool:
-    """ChatGPT 데스크탑 앱을 실행한다. macOS는 `open -a`, Windows MSIX는 AUMID."""
+    """ChatGPT 앱을 실행한다. macOS는 `open -a`, Windows MSIX는 AUMID."""
     if sys.platform == "darwin":
         # .app 번들은 내부 실행 파일을 직접 띄우면 안 된다(런치 서비스를 거쳐야
         # Dock·활성화가 정상 동작한다).
@@ -1156,7 +1156,7 @@ def restart_chatgpt_desktop() -> dict:
 
 
 def is_chatgpt_desktop_installed() -> bool:
-    """ChatGPT 데스크탑 앱이 이 컴퓨터에 있는지(실행 중이 아니어도).
+    """ChatGPT 앱이 이 컴퓨터에 있는지(실행 중이 아니어도).
     실행 중 / 실행 파일 발견 / 기억해둔 경로 / 시작 메뉴·패키지 폴더 중 하나면 충분하다."""
     if is_chatgpt_desktop_running():
         return True
@@ -1319,7 +1319,7 @@ def restart_host_apps(ids: "list[str] | None" = None) -> dict:
 
 
 def is_codex_installed() -> bool:
-    """codex 타겟(= Codex CLI **와** ChatGPT 데스크탑 앱)을 쓸 수 있는 컴퓨터인지.
+    """codex 타겟(= Codex CLI **와** ChatGPT 앱)을 쓸 수 있는 컴퓨터인지.
 
     설치도 안 된 걸 MCP 등록 대상 체크박스로 보여주면 혼란만 주므로 UI가 이걸로
     걸러낸다. 그런데 이 타겟은 CLI 전용이 아니다 — ChatGPT 앱이 같은

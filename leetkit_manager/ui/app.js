@@ -1931,7 +1931,10 @@ const TOUR_STEPS = [
   {
     selector: "#readout",
     title: "전체 상태 요약",
-    desc: "몇 개 Lens가 정상인지 한눈에 보여줍니다.\n업데이트나 조치가 필요하면 여기 같이 표시됩니다.",
+    desc:
+      "몇 개 Lens가 정상인지 한눈에 보여줍니다.\n업데이트나 조치가 필요하면 여기 같이 표시됩니다.\n\n" +
+      "Lens는 Claude Desktop · Claude Code · ChatGPT\n어디에 연결해도 똑같이 동작합니다.\n" +
+      "여러 곳에 연결해두고 그날 쓰시는 쪽에서 물어보셔도 됩니다.",
   },
   {
     selector: ".card:first-child .focus-ring",
@@ -1976,7 +1979,7 @@ const TOUR_STEPS = [
   },
   // 상단바 버튼은 여기서부터 왼→오른쪽이 아니라 "자주 쓰는 순"으로 설명한다.
   // 예전엔 지원 문의·매니저 업데이트·가이드 셋만 있어서, 정작 제일 많이 누르는
-  // 진단 재실행과 문제 해결의 핵심인 Claude 다시 시작이 설명 없이 놓여 있었다.
+  // 진단 재실행과 문제 해결의 핵심인 "다시 시작"이 설명 없이 놓여 있었다.
   {
     selector: "#refresh-btn",
     title: "진단 재실행",
