@@ -649,6 +649,14 @@ async function runAction(action, lensName, extra, opts = {}) {
         hideBusyOverlay();
       }
       replaceCard(lensName, lens);
+      // 예전 배포는 다른 방식이었다. 그때 깔린 옛 파일이 남아 있으면 새 버전을 받아도
+      // 그게 먼저 잡혀서 예전 그대로 도는데, 사용자는 그런 게 있었는지도 모른다.
+      // 정리했으면 정리했다고, 못 지웠으면 못 지웠다고 말한다.
+      const legacyNote = result.legacy_removed
+        ? " 예전 방식으로 설치돼 있던 옛 파일도 정리했습니다."
+        : result.legacy_error
+          ? " (예전에 설치된 옛 파일은 정리하지 못했습니다 — 계속 이상하면 문의해주세요.)"
+          : "";
       if (!result.ok) {
         const blockingApps = result.blocking_apps || [];
         if (blockingApps.length && !opts.skipClaudePrompt) {
@@ -676,7 +684,7 @@ async function runAction(action, lensName, extra, opts = {}) {
         !opts.skipRestartPrompt &&
         !(((lens && lens.targets) || []).length)
       ) {
-        showToast(`${displayName} 설치 완료 — 이제 사용할 AI 앱에 연결해주세요.`);
+        showToast(`${displayName} 설치 완료 —${legacyNote} 이제 사용할 AI 앱에 연결해주세요.`);
         openRegisterModal(lensName);
       } else if (!opts.skipRestartPrompt) {
         // 업데이트로 실행 파일이 바뀌었을 수 있다. 설정 파일에는 **등록 당시의 경로**가
@@ -701,8 +709,8 @@ async function runAction(action, lensName, extra, opts = {}) {
         await noteLensFilesChanged({
           registeredOnHostApp: wasOnHostApp && wasInstalled,
           headline: wasInstalled
-            ? `${displayName} 업데이트 완료${lens && lens.installed_version ? ` (v${lens.installed_version})` : ""}.`
-            : `${displayName} 설치 완료.`,
+            ? `${displayName} 업데이트 완료${lens && lens.installed_version ? ` (v${lens.installed_version})` : ""}.${legacyNote}`
+            : `${displayName} 설치 완료.${legacyNote}`,
           afterRestart: "아직 이전 버전을 쓰고 있습니다.",
           whenClosedResult: "새 버전이 적용됩니다.",
         });

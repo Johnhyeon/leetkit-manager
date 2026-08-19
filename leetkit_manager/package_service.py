@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -376,16 +377,63 @@ def _infer_python_for_script(script_path: Path) -> Path | None:
     return None
 
 
+def _site_packages_for(python_exe: Path) -> list[Path]:
+    """그 Python 의 site-packages 후보 — 표준 Windows 설치와 venv 두 레이아웃."""
+    base = python_exe.parent
+    candidates = [base / "Lib" / "site-packages", base.parent / "Lib" / "site-packages"]
+    return [p for p in candidates if p.is_dir()]
+
+
+def is_editable_install(python_exe: Path, package_name: str) -> bool:
+    """그 Python 환경에서 이 패키지가 개발용(editable) 설치인지.
+
+    `pip install -e` 로 깔린 것도 PATH 에서 uv 관리 밖으로 잡히므로 "옛 pip 잔재"와
+    생김새가 같다. 고객 PC 에는 없지만 개발 PC 에는 있고, 자동으로 지우면 작업 환경이
+    통째로 사라진다.
+
+    판정은 파일로 한다. `pip show` 출력을 읽는 방법을 먼저 썼는데, 실기기에서 pip 자신의
+    로깅 오류로 출력이 중간에 잘려서 editable 인데 아니라고 답했다. 표준(PEP 610)인
+    `dist-info/direct_url.json` 의 `dir_info.editable` 이 확실하다. 옛 방식(develop)이나
+    일부 백엔드는 `.pth` 흔적만 남기므로 그것도 같이 본다.
+
+    확인 자체가 안 되면 False — 판단 못 하는 걸 editable 로 단정해 정리를 막지는 않는다."""
+    norm = package_name.replace("-", "_").lower()
+    for site_packages in _site_packages_for(python_exe):
+        try:
+            for dist_info in site_packages.glob(f"{norm}-*.dist-info"):
+                try:
+                    data = json.loads((dist_info / "direct_url.json").read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if (data.get("dir_info") or {}).get("editable"):
+                    return True
+            for pattern in (f"*editable*{norm}*.pth", f"*{norm}*editable*.pth"):
+                if any(site_packages.glob(pattern)):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def uninstall_legacy_pip_shadow(package_name: str, shadow_path: Path, *, timeout: float = _INSTALL_TIMEOUT) -> ProcessResult:
     """옛 pip 설치 잔재를 그 실행 파일과 같이 있는 python.exe로 pip uninstall한다.
     같이 있는 python.exe를 못 찾으면(레이아웃을 못 알아본 경우) 엉뚱한 Python
-    환경에서 잘못 실행하는 대신 안전하게 실패로 반환한다."""
+    환경에서 잘못 실행하는 대신 안전하게 실패로 반환한다.
+
+    개발용(editable) 설치는 건드리지 않는다 — 생김새가 같아서 구분이 안 되는데, 지우면
+    작업 환경이 사라진다."""
     python_exe = _infer_python_for_script(shadow_path)
     if python_exe is None:
         return ProcessResult(
             cmd=["pip", "uninstall", package_name],
             exit_code=1, timed_out=False, duration_s=0.0, stdout="",
             stderr=f"'{shadow_path}' 옆에서 python.exe를 찾을 수 없어 자동으로 지울 수 없습니다. 수동으로 삭제해주세요.",
+        )
+    if is_editable_install(python_exe, package_name):
+        return ProcessResult(
+            cmd=["pip", "uninstall", package_name],
+            exit_code=1, timed_out=False, duration_s=0.0, stdout="",
+            stderr=f"'{shadow_path}' 는 개발용으로 연결된 설치라 자동으로 지우지 않았습니다.",
         )
     return run_cli([str(python_exe), "-m", "pip", "uninstall", package_name, "-y"], timeout=timeout)
 

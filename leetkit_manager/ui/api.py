@@ -362,6 +362,10 @@ class Api:
             "rollback_command": result.rollback_command,
             "version": latest,
             "blocking_apps": _blocking_host_apps(result.install),
+            # 예전 pip 설치본을 정리했는지 — 사용자는 그런 게 있었는지도 모르므로
+            # 조용히 넘어가지 않고 결과에 실어 보낸다.
+            "legacy_removed": result.legacy_pip_removed,
+            "legacy_error": result.legacy_pip_error,
             # 실패 이유를 같이 돌려준다. 예전엔 ok=False만 보내서 화면에 "실패했습니다"
             # 밖에 못 띄웠고, 사용자도 우리도 원인을 알 방법이 없었다(실제로 맥에서
             # 업데이트가 계속 실패했는데 아무 단서가 없었다).

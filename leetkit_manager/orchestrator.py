@@ -9,7 +9,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from leetkit_manager import config_backup, package_service
+from leetkit_manager import config_backup, package_service, redaction
 from leetkit_manager.lens_contract import LENSES, LensSpec
 from leetkit_manager.models import ActivateResult, DoctorReport, SetupResult
 from leetkit_manager.process_runner import DEFAULT_TIMEOUT, ProcessResult, run_json_cli
@@ -411,6 +411,12 @@ class UpdateResult:
     post_doctor: LensDiagnosis | None
     config_backup_paths: list[Path] = field(default_factory=list)
     rollback_command: str | None = None
+    # 옛 pip 설치본을 정리했으면 그 실행 파일 경로. 화면이 "예전 설치본도 정리했다"고
+    # 말해줄 수 있게 남긴다(사용자는 그런 게 있었는지도 모른다).
+    legacy_pip_removed: str | None = None
+    # 정리를 시도했는데 실패한 경우의 이유. 업데이트 자체는 성공으로 두되, 옛 것이
+    # 남아 있다는 사실은 숨기지 않는다.
+    legacy_pip_error: str | None = None
 
 
 def update_lens(
@@ -433,6 +439,30 @@ def update_lens(
         # 한 번만 다시 시도한다. Claude Desktop은 사용자 확인 없이 닫지 않는다(UI가 물어본다).
         if package_service.stop_processes_using_package(lens.package_name, _lens_command_names(lens)):
             install = package_service.install_version(lens.package_name, target_version)
+
+    # 옛 `pip install` 잔재 정리 — **uv 설치가 성공한 뒤에만** 한다.
+    #
+    # 예전 배포가 pip 였기 때문에 그 시절 고객 PC 에는 시스템 Python 의 Scripts 에 실행
+    # 파일이 남아 있다. PATH 순서상 그게 uv 관리본보다 먼저 잡혀서, Manager 는 최신을
+    # 깔아놓고 "최신"이라 말하는데 터미널과 설정 파일은 옛 것을 가리킨다(이 PC 에서 실제로
+    # 세 호스트 모두 옛 버전을 띄우고 있었다). 순서를 뒤집으면 — 먼저 지우고 설치가
+    # 실패하면 — 고객에게 아무것도 안 남는다. 그래서 반드시 설치 성공 뒤다.
+    legacy_removed: str | None = None
+    legacy_error: str | None = None
+    if install.ok:
+        # **서버 커맨드까지** 본다. 실기기에서 확인: doctor/setup/activate 는 uv 쪽으로
+        # 잡히는데 정작 MCP 설정 파일에 적히는 서버 커맨드(`stocklens`)만 옛 pip 쪽으로
+        # 잡히는 상태가 실제로 있었다 — 셋만 보면 "잔재 없음"으로 지나친다.
+        shadow = package_service.find_legacy_pip_shadow(_lens_command_names(lens))
+        if shadow is not None:
+            legacy = package_service.uninstall_legacy_pip_shadow(lens.package_name, shadow)
+            if legacy.ok:
+                legacy_removed = str(shadow)
+            else:
+                # 지우지 못해도 업데이트를 실패로 만들지 않는다 — 새 버전은 이미 깔렸고,
+                # 등록 경로도 uv 관리본을 먼저 보게 돼 있다(각 Lens resolve_server_entry).
+                legacy_error = redaction.redact(legacy.stderr) or "예전 설치본을 정리하지 못했습니다."
+
     post_doctor = diagnose_lens(lens) if install.ok else None  # diagnose_lens 자체가 안전한 자동복구를 이미 적용한다
 
     ok = bool(
@@ -454,6 +484,8 @@ def update_lens(
         post_doctor=post_doctor,
         config_backup_paths=backup_paths,
         rollback_command=rollback_command,
+        legacy_pip_removed=legacy_removed,
+        legacy_pip_error=legacy_error,
     )
 
 
@@ -516,7 +548,7 @@ def uninstall_lens(lens: LensSpec, *, remove_license: bool = False) -> Uninstall
         if package_service.stop_processes_using_package(lens.package_name, _lens_command_names(lens)):
             uv_result = package_service.uninstall_version(lens.package_name)
 
-    shadow = package_service.find_legacy_pip_shadow([lens.doctor_cmd, lens.setup_cmd, lens.activate_cmd])
+    shadow = package_service.find_legacy_pip_shadow(_lens_command_names(lens))
     legacy_result = package_service.uninstall_legacy_pip_shadow(lens.package_name, shadow) if shadow else None
 
     overall_ok = uv_result.ok and (legacy_result is None or legacy_result.ok)
