@@ -367,21 +367,77 @@ def find_legacy_pip_shadow(command_names: list[str]) -> Path | None:
     return None
 
 
+def _python_from_shebang(script_path: Path) -> Path | None:
+    """pip 콘솔 스크립트의 shebang 에서 인터프리터 경로를 읽는다.
+
+    맥·리눅스에서 이게 가장 정확하다 — 스크립트가 텍스트 파일이고 첫 줄이
+    `#!/path/to/python3` 이라 어느 Python 이 이걸 깔았는지 스스로 적어둔다.
+    특히 `--user` 설치(`~/Library/Python/3.x/bin/`)는 그 폴더에 python 이 같이 있지
+    않아서 옆자리 추정으로는 못 찾는다. Windows 의 .exe 는 이진 파일이라 그냥 통과한다."""
+    try:
+        with open(script_path, "rb") as f:
+            first = f.readline(1024)
+    except OSError:
+        return None
+    if not first.startswith(b"#!"):
+        return None
+    line = first[2:].decode("utf-8", "replace").strip().strip('"').strip("'")
+    parts = line.split()
+    if not parts:
+        return None
+    # `#!/usr/bin/env python3` 형태면 뒤엣것이 인터프리터 이름이다 — 그건 경로가 아니라
+    # PATH 조회 대상이라 여기서는 쓰지 않는다(엉뚱한 Python 을 고르느니 포기한다).
+    if Path(parts[0]).name == "env":
+        return None
+    candidate = Path(parts[0])
+    return candidate if candidate.is_absolute() and candidate.exists() else None
+
+
 def _infer_python_for_script(script_path: Path) -> Path | None:
-    """pip entry-point 스크립트(.exe) 경로에서 같이 설치된 python.exe를 추정한다.
-    표준 Windows 설치는 Scripts/의 부모 폴더에 python.exe가 있고, venv는 Scripts/
-    안에 같이 있다 — 두 레이아웃 다 지원."""
-    for candidate in (script_path.parent / "python.exe", script_path.parent.parent / "python.exe"):
-        if candidate.exists():
-            return candidate
+    """pip entry-point 스크립트 경로에서 그걸 설치한 python 실행 파일을 추정한다.
+
+    Windows 표준 설치는 Scripts/의 부모 폴더에 python.exe 가 있고 venv 는 Scripts/ 안에
+    같이 있다. 맥·리눅스는 같은 `bin/` 안에 python3 가 있거나, 없으면 shebang 이 답이다."""
+    from_shebang = _python_from_shebang(script_path)
+    if from_shebang is not None:
+        return from_shebang
+
+    # 어떤 이름을 찾을지는 **지금 돌고 있는 OS** 가 아니라 그 설치본의 레이아웃이 정한다.
+    # (지원 번들·원격 진단처럼 다른 OS 에서 만들어진 경로를 다룰 수도 있다.)
+    names = ("python.exe", "python3", "python")
+    parents = (script_path.parent, script_path.parent.parent, script_path.parent.parent / "bin")
+    for parent in parents:
+        for name in names:
+            candidate = parent / name
+            if candidate.exists():
+                return candidate
     return None
 
 
 def _site_packages_for(python_exe: Path) -> list[Path]:
-    """그 Python 의 site-packages 후보 — 표준 Windows 설치와 venv 두 레이아웃."""
+    """그 Python 의 site-packages 후보.
+
+    Windows 는 `<prefix>\\Lib\\site-packages`, 맥·리눅스는
+    `<prefix>/lib/pythonX.Y/site-packages` 로 레이아웃이 다르다. Windows 것만 보면
+    맥에서는 editable 판정이 **항상 False** 가 되어 개발용 설치를 보호하지 못한다."""
     base = python_exe.parent
     candidates = [base / "Lib" / "site-packages", base.parent / "Lib" / "site-packages"]
-    return [p for p in candidates if p.is_dir()]
+    for root in (base.parent, base.parent.parent):
+        lib = root / "lib"
+        try:
+            if lib.is_dir():
+                candidates.extend(sorted(lib.glob("python*/site-packages")))
+        except OSError:
+            continue
+    seen: set[Path] = set()
+    out: list[Path] = []
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        if path.is_dir():
+            out.append(path)
+    return out
 
 
 def is_editable_install(python_exe: Path, package_name: str) -> bool:
@@ -427,7 +483,7 @@ def uninstall_legacy_pip_shadow(package_name: str, shadow_path: Path, *, timeout
         return ProcessResult(
             cmd=["pip", "uninstall", package_name],
             exit_code=1, timed_out=False, duration_s=0.0, stdout="",
-            stderr=f"'{shadow_path}' 옆에서 python.exe를 찾을 수 없어 자동으로 지울 수 없습니다. 수동으로 삭제해주세요.",
+            stderr=f"'{shadow_path}' 를 설치한 파이썬을 찾을 수 없어 자동으로 지울 수 없습니다. 수동으로 삭제해주세요.",
         )
     if is_editable_install(python_exe, package_name):
         return ProcessResult(
@@ -1017,8 +1073,12 @@ def _find_chatgpt_desktop_exe() -> str | None:
     권한으로 막힐 수 있어(그래서 켜져 있을 때 기억해둔 경로에 의존한다) 여기서는
     접근 가능한 경우만 훑는다."""
     if sys.platform == "darwin":
-        app = Path("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT")
-        return str(app) if app.exists() else None
+        # 계정에만 설치한 경우(~/Applications)도 본다 — /Applications 만 보면 놓친다.
+        for base in (Path("/Applications"), Path.home() / "Applications"):
+            app = base / "ChatGPT.app" / "Contents" / "MacOS" / "ChatGPT"
+            if app.exists():
+                return str(app)
+        return None
     if sys.platform != "win32":
         return None
     base = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "WindowsApps"
@@ -1119,8 +1179,9 @@ def is_chatgpt_desktop_installed() -> bool:
             except Exception:
                 pass
     else:
-        if Path("/Applications/ChatGPT.app").exists():
-            return True
+        for base in (Path("/Applications"), Path.home() / "Applications"):
+            if (base / "ChatGPT.app").exists():
+                return True
     return False
 
 

@@ -124,3 +124,66 @@ def test_cleanup_refuses_to_delete_an_editable_install(tmp_path):
     mock_run.assert_not_called()   # pip uninstall 을 아예 부르지 않는다
     assert result.ok is False
     assert "개발용" in result.stderr
+
+
+# ── 맥·리눅스 레이아웃 ──────────────────────────────────────────────────────
+# 두 helper 가 Windows 레이아웃만 알고 있었다. 맥에서는 정리 자체가 항상 실패하고
+# (게다가 실패 문구가 "python.exe"), editable 판정은 항상 False 라 개발용 설치를
+# 보호하지 못했다. 실제 맥에서 돌릴 수 없으므로 레이아웃을 만들어서 확인한다.
+
+
+def _unix_prefix(tmp_path, version="3.11"):
+    """<prefix>/bin/python3 + <prefix>/lib/pythonX.Y/site-packages"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    python3 = bin_dir / "python3"
+    python3.write_text("", encoding="utf-8")
+    site = tmp_path / "lib" / f"python{version}" / "site-packages"
+    site.mkdir(parents=True)
+    return bin_dir, python3, site
+
+
+def test_infers_python3_next_to_a_unix_console_script(tmp_path):
+    bin_dir, python3, _site = _unix_prefix(tmp_path)
+    script = bin_dir / "stocklens"
+    script.write_text("", encoding="utf-8")
+    assert package_service._infer_python_for_script(script) == python3
+
+
+def test_shebang_wins_for_user_scheme_installs(tmp_path):
+    """맥의 `--user` 설치(~/Library/Python/3.x/bin)는 그 폴더에 python 이 없다 —
+    옆자리 추정으로는 못 찾고, 스크립트 첫 줄이 답을 갖고 있다."""
+    real_python = tmp_path / "framework" / "bin" / "python3.11"
+    real_python.parent.mkdir(parents=True)
+    real_python.write_text("", encoding="utf-8")
+    lonely_bin = tmp_path / "Library" / "Python" / "3.11" / "bin"
+    lonely_bin.mkdir(parents=True)
+    script = lonely_bin / "stocklens"
+    script.write_text(f"#!{real_python}\nprint('x')\n", encoding="utf-8")
+    assert package_service._infer_python_for_script(script) == real_python
+
+
+def test_env_shebang_is_not_guessed(tmp_path):
+    """`#!/usr/bin/env python3` 은 경로가 아니라 PATH 조회다 — 엉뚱한 Python 으로
+    pip uninstall 하느니 포기한다."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    script = bin_dir / "stocklens"
+    script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    assert package_service._python_from_shebang(script) is None
+
+
+def test_site_packages_found_in_unix_layout(tmp_path):
+    _bin, python3, site = _unix_prefix(tmp_path)
+    assert site in package_service._site_packages_for(python3)
+
+
+def test_editable_guard_works_in_unix_layout(tmp_path):
+    """맥에서 editable 판정이 항상 False 였다 — 개발용 설치가 자동 삭제될 수 있었다."""
+    _bin, python3, site = _unix_prefix(tmp_path)
+    info = site / "telegramlens_mcp-0.5.2.dist-info"
+    info.mkdir()
+    (info / "direct_url.json").write_text(
+        '{"dir_info": {"editable": true}, "url": "file:///repo"}', encoding="utf-8"
+    )
+    assert package_service.is_editable_install(python3, "telegramlens-mcp") is True

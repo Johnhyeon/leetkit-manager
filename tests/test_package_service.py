@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -280,7 +281,10 @@ class TestLegacyPipShadow:
         with patch.object(package_service, "run_cli") as mock_run:
             result = package_service.uninstall_legacy_pip_shadow("stocklens-mcp", script)
         assert result.ok is False
-        assert "python.exe" in result.stderr
+        # 문구에 "python.exe"를 박아두지 않는다 — 맥에는 그런 파일이 없어서 그 안내가
+        # 아무 의미가 없다(정리 로직 자체도 맥 레이아웃을 보게 고쳤다).
+        assert "파이썬" in result.stderr
+        assert "수동으로 삭제" in result.stderr
         mock_run.assert_not_called()
 
 
@@ -925,3 +929,49 @@ class TestLatestVersionUsesTheSameIndexAsUv:
         json_api.json.return_value = {"info": {"version": "1.2.3"}}
         with patch("httpx.get", side_effect=[resp, json_api]):
             assert package_service.latest_pypi_version("x") == "1.2.3"
+
+
+class TestChatgptDesktopOnMacOS:
+    """맥에서의 동작 — 이 개발 PC 가 Windows 라 실행으로는 못 보고, 분기를 고정해서 본다.
+
+    맥은 `open -a` 로 띄워야 한다(.app 번들의 내부 실행 파일을 직접 실행하면 Dock·활성화가
+    깨진다). MSIX/AUMID 는 Windows 개념이라 맥 경로에서는 닿으면 안 된다."""
+
+    def test_launch_uses_open_command_and_never_touches_aumid(self):
+        with patch.object(package_service.sys, "platform", "darwin"), \
+             patch.object(package_service, "_msix_aumid") as mock_aumid, \
+             patch.object(package_service.subprocess, "run") as mock_run:
+            mock_run.return_value = SimpleNamespace(returncode=0)
+            assert package_service.launch_chatgpt_desktop() is True
+        args = mock_run.call_args[0][0]
+        assert args[:2] == ["open", "-a"]
+        assert args[2] == "ChatGPT"
+        mock_aumid.assert_not_called()
+
+    def test_launch_reports_failure_when_open_fails(self):
+        with patch.object(package_service.sys, "platform", "darwin"), \
+             patch.object(package_service.subprocess, "run") as mock_run:
+            mock_run.return_value = SimpleNamespace(returncode=1)
+            assert package_service.launch_chatgpt_desktop() is False
+
+    def test_finds_the_app_in_the_user_applications_folder(self, tmp_path):
+        """계정에만 설치한 경우(~/Applications)도 찾아야 한다."""
+        app = tmp_path / "Applications" / "ChatGPT.app" / "Contents" / "MacOS" / "ChatGPT"
+        app.parent.mkdir(parents=True)
+        app.write_text("", encoding="utf-8")
+        with patch.object(package_service.sys, "platform", "darwin"), \
+             patch.object(package_service.Path, "home", return_value=tmp_path):
+            assert package_service._find_chatgpt_desktop_exe() == str(app)
+
+    def test_installed_check_sees_the_user_applications_folder(self, tmp_path):
+        (tmp_path / "Applications" / "ChatGPT.app").mkdir(parents=True)
+        with patch.object(package_service.sys, "platform", "darwin"), \
+             patch.object(package_service.Path, "home", return_value=tmp_path), \
+             patch.object(package_service, "is_chatgpt_desktop_running", return_value=False), \
+             patch.object(package_service, "_recall_chatgpt_exe", return_value=None):
+            assert package_service.is_chatgpt_desktop_installed() is True
+
+    def test_macos_process_path_is_recognised(self):
+        """맥 실행 파일 경로는 `/Applications/ChatGPT.app/Contents/MacOS/ChatGPT` 다."""
+        mac = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
+        assert package_service._is_chatgpt_desktop_exe(mac, pid=None) is True

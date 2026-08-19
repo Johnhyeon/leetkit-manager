@@ -30,8 +30,19 @@ def record(lens, scenario, ok, note=""):
     print(("  [PASS] " if ok else "  [FAIL] ") + f"{scenario} {note}")
 
 
+def claude_desktop_dir(home: Path) -> Path:
+    """그 OS 에서 Claude Desktop 설정이 있는 폴더."""
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "Claude"
+    return home / "AppData" / "Roaming" / "Claude"
+
+
 def make_env(home: Path, *, codex: bool, claude_desktop: bool, home_var: str):
-    """가짜 PC 하나. Windows 의 Path.home() 은 USERPROFILE 을 본다."""
+    """가짜 PC 하나.
+
+    Windows 의 Path.home() 은 USERPROFILE 을, 맥·리눅스는 HOME 을 본다 — 둘 다 돌려놔야
+    진짜 홈을 안 건드린다(맥에서 이걸 빼먹으면 검증이 아니라 사고가 된다).
+    """
     appdata = home / "AppData" / "Roaming"
     local = home / "AppData" / "Local"
     (local / "Packages").mkdir(parents=True, exist_ok=True)  # 스토어판 Claude 없음
@@ -39,14 +50,13 @@ def make_env(home: Path, *, codex: bool, claude_desktop: bool, home_var: str):
     if codex:
         (home / ".codex").mkdir(parents=True, exist_ok=True)
     if claude_desktop:
-        (appdata / "Claude").mkdir(parents=True, exist_ok=True)
+        claude_desktop_dir(home).mkdir(parents=True, exist_ok=True)
 
     env = dict(os.environ)
     env.update(
         {
+            "HOME": str(home),
             "USERPROFILE": str(home),
-            "HOMEDRIVE": str(home.drive),
-            "HOMEPATH": str(home)[len(home.drive):],
             "APPDATA": str(appdata),
             "LOCALAPPDATA": str(local),
             home_var: str(home / ".lensdata"),
@@ -54,7 +64,10 @@ def make_env(home: Path, *, codex: bool, claude_desktop: bool, home_var: str):
             "PYTHONUTF8": "1",
         }
     )
-    # 이 두 개가 남아 있으면 실제 홈의 상태가 새어 들어온다.
+    if home.drive:
+        env["HOMEDRIVE"] = str(home.drive)
+        env["HOMEPATH"] = str(home)[len(home.drive):]
+    # 이 세 개가 남아 있으면 실제 홈의 상태가 새어 들어온다.
     for leak in ("STOCKLENS_TARGET", "DARTLENS_TARGET", "TELEGRAMLENS_TARGET"):
         env.pop(leak, None)
     return env
@@ -132,7 +145,7 @@ def check(lens, repo, module, key, home_var, scenario, *, codex, claude_desktop,
             return
 
         codex_file = home / ".codex" / "config.toml"
-        desktop_file = home / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json"
+        desktop_file = claude_desktop_dir(home) / "claude_desktop_config.json"
         if "codex" in expect_targets:
             if not codex_file.exists() or key not in codex_file.read_text(encoding="utf-8"):
                 record(lens, scenario, False, "config.toml 에 항목이 안 쓰임")
