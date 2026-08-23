@@ -728,6 +728,12 @@ body {
   gap: 10px;
 }
 
+/* display:flex 가 [hidden] 의 display:none 을 이긴다 — 재시작 모달의 "껐다 켤 앱"
+   목록은 앱이 하나뿐일 때 감춰야 하므로 여기서 명시적으로 눌러준다. */
+.register-targets[hidden] {
+  display: none;
+}
+
 #telegram-login-fields {
   display: flex;
   flex-direction: column;

@@ -1048,6 +1048,50 @@ async function confirmActivate() {
 
 let registerTargetLens = null;
 
+// 등록/해제 뒤에 할 말을 만든다. 기준은 **이번에 바뀐 타겟**뿐이다 — 안 바뀐 앱을
+// 껐다 켜라고 하면, 시킨 대로 해도 아무 변화가 없어서 "고장난 앱"이 된다.
+//
+// claude-desktop 타겟은 Claude Desktop, codex 타겟은 ChatGPT 앱을 껐다 켜야 반영된다
+// (codex는 CLI 전용이 아니다 — ChatGPT 앱이 같은 config.toml을 읽는다).
+// claude-code는 CLI라 껐다 켤 대상이 없다 — 새로 여는 대화부터 반영된다.
+//
+// runningChanged: 바뀐 타겟 중 지금 켜져 있어 껐다 켜야 하는 앱 — 호출한 쪽이 그 앱에
+// 대한 [다시 시작] 버튼을 만든다.
+function registrationChangeNotes(changedTargets, runningHosts, kind) {
+  const appear = kind === "add";
+  const hostIds = [...new Set(changedTargets.map((t) => TARGET_HOST_APP[t]).filter(Boolean))];
+  const runningChanged = (runningHosts || []).filter((a) => hostIds.includes(a.id));
+  const notes = [];
+  if (!changedTargets.length) return { notes, runningChanged };
+
+  if (runningChanged.length) {
+    // 해제 쪽은 단정하지 않는다 — 호스트 앱이 설정 파일을 다시 읽어 이미 목록에서
+    // 빠진 경우가 있다. 그때 "껐다 켜야 사라집니다"는 시키지 않아도 될 일을 시키는
+    // 거짓말이 된다("해도 아무 변화 없음"과 같은 종류의 실망이다).
+    notes.push(
+      appear
+        ? `${hostAppNames(runningChanged)}을(를) 껐다 켜야 도구가 나타납니다.`
+        : `${hostAppNames(runningChanged)}에 아직 도구가 남아 있으면 껐다 켜주세요.`
+    );
+  }
+  if (changedTargets.includes("claude-desktop") && !runningChanged.some((a) => a.id === "claude-desktop")) {
+    notes.push(`Claude Desktop을 ${appear ? "열면 도구가 나타납니다" : "다음에 열면 목록에서 빠집니다"}.`);
+  }
+  // codex인데 ChatGPT 앱이 안 떠 있는 경우 — CLI만 쓰는 사람일 수도 있어서 한쪽으로
+  // 단정하지 않고 둘 다 말한다.
+  if (changedTargets.includes("codex") && !runningChanged.some((a) => a.id === "chatgpt")) {
+    notes.push(
+      appear
+        ? "ChatGPT 앱은 열 때, Codex CLI는 새 대화부터 반영됩니다."
+        : "ChatGPT 앱은 다음에 열 때, Codex CLI는 새 대화부터 빠집니다."
+    );
+  }
+  if (changedTargets.includes("claude-code")) {
+    notes.push(`${TARGET_LABEL["claude-code"]}는 새로 시작하는 대화부터 ${appear ? "반영됩니다" : "빠집니다"}.`);
+  }
+  return { notes, runningChanged };
+}
+
 async function openRegisterModal(lensName) {
   registerTargetLens = lensName;
   const lens = lensDataCache[lensName];
@@ -1062,6 +1106,12 @@ async function openRegisterModal(lensName) {
   document.getElementById("register-backdrop").hidden = false;
 
   await refreshRegisterTargets(lensName);
+  // 이미 등록된 게 있으면 이 창의 성격을 먼저 말해준다 — 체크를 푸는 것이 해제라는 걸
+  // 모르면, 해제하려고 왔다가 그냥 [등록]만 다시 누르고 나간다.
+  if (((lensDataCache[lensName] || {}).targets || []).length) {
+    msgEl.textContent = "체크된 곳이 지금 연결된 곳입니다. 체크를 풀고 [등록]을 누르면 그 앱에서 해제됩니다.";
+    msgEl.className = "modal-msg";
+  }
   startRegisterTargetWatch(lensName);
 }
 
@@ -1070,6 +1120,13 @@ function checkedRegisterTargets() {
   return [...document.querySelectorAll("#register-targets input[type=checkbox]:checked")].map(
     (c) => c.value
   );
+}
+
+// 체크박스 옆에 붙는 상태 한 마디. "지금 등록돼 있음"이 눈에 보여야 체크를 푸는 것이
+// 곧 해제라는 게 읽힌다 — 안 그러면 체크박스가 "설치 여부" 표시로 오해된다.
+function targetStateNote(target, currentTargets) {
+  if (!target.installed) return " — 아직 설치 안 됨";
+  return currentTargets.includes(target.id) ? " — 지금 등록돼 있음" : "";
 }
 
 async function refreshRegisterTargets(lensName, { keepSelection = null } = {}) {
@@ -1083,12 +1140,21 @@ async function refreshRegisterTargets(lensName, { keepSelection = null } = {}) {
   // 그게 유일하게 쓸 수 있는 항목인데 체크가 꺼져 있어서, "다음"만 누르면 아무 데도
   // 등록되지 않은 채 마법사가 끝났다(ChatGPT 만 쓰는 고객의 첫 5분이 여기서 무너진다).
   const claudeAvailable = targets.some((t) => t.id !== "codex" && t.installed);
+
+  // 이미 어딘가에 등록된 Lens라면 이 창은 "지금 상태"를 고치는 자리다 — 체크는 실제
+  // 등록 상태 그대로 보여야 한다. 예전엔 설치만 돼 있으면 무조건 체크가 켜진 채로
+  // 열려서, 방금 Claude Desktop 등록을 해제한 사람이 창을 다시 열면 해제가 안 된 것처럼
+  // 보였다(설정 파일에서는 이미 지워진 뒤였다 — 화면만 거짓말을 했다).
+  // 추천 기본값은 아직 아무 데도 등록 안 한 **첫 등록**에서만 쓴다.
+  const alreadyRegistered = currentTargets.length > 0;
   container.innerHTML = targets
     .map((t) => {
       const checked = keepSelection
         ? keepSelection.includes(t.id)
         : t.installed &&
-          (t.id !== "codex" || currentTargets.includes(t.id) || !claudeAvailable);
+          (alreadyRegistered
+            ? currentTargets.includes(t.id)
+            : t.id !== "codex" || !claudeAvailable);
       // 아직 없는 앱은 등록해봐야 읽어갈 주체가 없다 — 막기만 하지 말고 받는 곳을
       // 바로 열 수 있게 해준다(없는 게 잘못이 아니라 다음 할 일을 알려주는 것).
       const getItHtml = t.installed
@@ -1097,7 +1163,7 @@ async function refreshRegisterTargets(lensName, { keepSelection = null } = {}) {
       return `
         <label class="register-target-row${t.installed ? "" : " disabled"}">
           <input type="checkbox" value="${t.id}" ${t.installed ? "" : "disabled"} ${checked && t.installed ? "checked" : ""}>
-          <span>${escapeHtml(t.label)}${t.installed ? "" : " — 아직 설치 안 됨"}</span>
+          <span>${escapeHtml(t.label)}${targetStateNote(t, currentTargets)}</span>
           ${getItHtml}
         </label>`;
     })
@@ -1185,10 +1251,20 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     document.querySelectorAll("#register-targets input[type=checkbox]:checked")
   ).map((el) => el.value);
   const msgEl = document.getElementById("register-msg");
+  // 이 등록으로 **무엇이 바뀌었나**를 뒤에서 따지려면 누르기 직전 상태가 필요하다.
+  const beforeTargets = ((lensDataCache[lensName] || {}).targets || []).slice();
   if (!checked.length) {
-    msgEl.textContent = "하나 이상 선택하세요.";
-    msgEl.className = "modal-msg fail";
-    return;
+    // 전부 체크를 푼 것은 "전부 해제"라는 뜻이다 — 등록된 게 있는데도 막아버리면
+    // 해제할 방법이 화면에서 사라진다(백엔드는 원래 이 경우를 처리한다).
+    if (!beforeTargets.length) {
+      msgEl.textContent = "하나 이상 선택하세요.";
+      msgEl.className = "modal-msg fail";
+      return;
+    }
+    const names = beforeTargets.map((t) => TARGET_LABEL[t] || t).join(", ");
+    if (!confirm(`${names} 연결을 모두 해제할까요?\n\n프로그램이 지워지는 건 아닙니다 — 연결만 끊습니다.`)) {
+      return;
+    }
   }
   const confirmBtn = document.getElementById("register-confirm");
   confirmBtn.disabled = true; // 더블클릭 시 subprocess 2개가 같은 설정 파일에 동시에 쓴다
@@ -1212,45 +1288,23 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     // 마법사 중이면 완료 화면에서 한 번만 안내하므로 여기선 생략 — 매 단계 반복하면
     // 잔소리가 된다. 카드에서 직접 등록한 경우엔 여기가 유일한 안내 지점이다.
     //
-    // 예전엔 "Claude Desktop이 켜져 있나"만 보고 안내했다 — Codex만 골라 등록해도
-    // Claude를 껐다 켜라고 해서, 시킨 대로 해도 아무 변화가 없었다. 방금 등록한
-    // 대상에 대해서만 말한다.
-    // 방금 고른 타겟 중 "껐다 켜야 하는 앱"이 무엇인지 → 그 앱이 지금 켜져 있는지.
-    // claude-desktop 타겟은 Claude Desktop, codex 타겟은 ChatGPT 앱이 그 대상이다
-    // (codex 타겟은 CLI 전용이 아니다 — ChatGPT 앱이 같은 config.toml을 읽는다).
-    const relevantHostIds = checked.map((t) => TARGET_HOST_APP[t]).filter(Boolean);
-    let runningHosts = [];
-    if (!onboardingActive && relevantHostIds.length) {
-      runningHosts = (await runningHostApps()).filter((a) => relevantHostIds.includes(a.id));
-    }
+    // 안내는 **이번에 실제로 바뀐 것**만 가지고 만든다. 예전엔 체크된 목록(checked)을
+    // 그대로 봤다 — Claude Desktop 체크를 풀어 해제해도 ChatGPT 체크가 남아 있으면
+    // "ChatGPT를 다시 시작하세요"가 떴다. ChatGPT는 아무것도 안 바뀌었고, 정작 도구를
+    // 아직 들고 있는 Claude Desktop 얘기는 아무도 안 해주는 상태였다.
+    const addedTargets = onboardingActive ? [] : checked.filter((t) => !beforeTargets.includes(t));
+    const removedTargets = onboardingActive ? [] : result.removed || [];
 
-    // Claude Code CLI·Codex CLI는 시작할 때 설정을 읽으므로 재시작할 대상이 따로 없다 —
-    // 다음에 새로 여는 대화부터 반영된다. "껐다 켜라"고 하면 뭘 끄라는 건지 알 수 없다.
-    const sessionTargets = checked
-      .filter((t) => t === "claude-code")
-      .map((t) => TARGET_LABEL[t] || t);
-    const notes = [];
-    if (runningHosts.length) {
-      notes.push(`${hostAppNames(runningHosts)}을(를) 껐다 켜야 도구가 나타납니다.`);
-    }
-    if (
-      !onboardingActive &&
-      checked.includes("claude-desktop") &&
-      !runningHosts.some((a) => a.id === "claude-desktop")
-    ) {
-      notes.push("Claude Desktop을 열면 도구가 나타납니다.");
-    }
-    if (!onboardingActive && sessionTargets.length) {
-      notes.push(`${sessionTargets.join(", ")}는 새로 시작하는 대화부터 반영됩니다.`);
-    }
-    // codex를 골랐는데 ChatGPT 앱이 안 떠 있는 경우 — CLI만 쓰는 사람일 수도 있어서
-    // 한쪽으로 단정하지 않고 둘 다 말한다.
-    if (!onboardingActive && checked.includes("codex") && !runningHosts.some((a) => a.id === "chatgpt")) {
-      notes.push("ChatGPT 앱은 열 때, Codex CLI는 새 대화부터 반영됩니다.");
-    }
+    // 바뀐 게 있을 때만 "지금 켜져 있는 앱"을 확인한다(안 바뀌었으면 껐다 켤 이유가 없다).
+    const running = addedTargets.length || removedTargets.length ? await runningHostApps() : [];
+    const added = registrationChangeNotes(addedTargets, running, "add");
+    const removed = registrationChangeNotes(removedTargets, running, "remove");
+    const notes = [...added.notes, ...removed.notes];
+
     // 카드에서 직접 등록한 경우엔 마법사 완료 화면을 안 보므로 여기서 같이 알려준다 —
-    // 처음 도구를 쓸 때 뜨는 허용 창에서 겁먹고 멈추지 않게.
-    if (notes.length) {
+    // 처음 도구를 쓸 때 뜨는 허용 창에서 겁먹고 멈추지 않게(해제만 한 경우엔 쓸 일이
+    // 없는 얘기라 붙이지 않는다).
+    if (addedTargets.length && notes.length) {
       notes.push("처음 도구를 쓸 때 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.");
     }
 
@@ -1268,26 +1322,44 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     if (credentialNote) notes.push(credentialNote);
 
     // 체크를 푼 곳은 실제로 해제된다 — 그걸 말해주지 않으면 정말 지워졌는지 알 수 없다.
-    const removedLabels = (result.removed || []).map((t) => TARGET_LABEL[t] || t);
-    const headline = removedLabels.length
-      ? `${removedLabels.join(", ")} 등록을 해제했습니다.`
-      : "등록 완료.";
+    // 반대로 아무것도 안 바뀐 경우(같은 상태로 다시 누름)에 "등록 완료"라고만 하면
+    // 방금 무슨 일이 일어난 건지 알 수 없다.
+    const addedLabels = addedTargets.map((t) => TARGET_LABEL[t] || t);
+    const removedLabels = removedTargets.map((t) => TARGET_LABEL[t] || t);
+    let headline;
+    if (addedLabels.length && removedLabels.length) {
+      headline = `${addedLabels.join(", ")} 등록 · ${removedLabels.join(", ")} 해제 완료.`;
+    } else if (removedLabels.length) {
+      headline = `${removedLabels.join(", ")} 등록을 해제했습니다.`;
+    } else if (addedLabels.length) {
+      headline = `${addedLabels.join(", ")}에 등록했습니다.`;
+    } else {
+      headline = onboardingActive ? "등록 완료." : "이미 이대로 연결돼 있습니다.";
+    }
     msgEl.textContent = notes.length ? `${headline.replace(/\.$/, "")} — ${notes.join(" ")}` : headline;
     msgEl.className = "modal-msg ok";
-    if (runningHosts.length) {
-      // 마법사 밖에서 등록한 경우엔 여기가 유일한 안내 지점이라, 안내만 하지 말고
-      // 바로 실행할 수단까지 같이 준다. 방금 등록한 앱만 껐다 켠다 — 다른 앱까지
-      // 건드리면 사용자가 손대지 않은 앱이 갑자기 닫힌다.
-      const restartIds = runningHosts.map((a) => a.id);
-      const restartBtn = document.createElement("button");
-      restartBtn.className = "action-btn primary";
-      restartBtn.textContent = `${hostAppNames(runningHosts)} 다시 시작`;
-      restartBtn.addEventListener("click", async () => {
-        await restartHostApps(restartBtn, restartIds);
-        closeRegisterModal(true);
+
+    // 마법사 밖에서 등록한 경우엔 여기가 유일한 안내 지점이라, 안내만 하지 말고
+    // 바로 실행할 수단까지 같이 준다. **바뀐 앱만** 껐다 켠다 — 다른 앱까지 건드리면
+    // 사용자가 손대지 않은 앱이 갑자기 닫힌다. 걸린 앱이 둘이면 버튼도 둘로 나눈다
+    // (한 버튼으로 둘 다 끄면 지금 대화 중인 쪽까지 같이 꺼진다).
+    const restartApps = [...added.runningChanged, ...removed.runningChanged].filter(
+      (a, i, arr) => arr.findIndex((x) => x.id === a.id) === i
+    );
+    if (restartApps.length) {
+      restartApps.forEach((app) => {
+        const restartBtn = document.createElement("button");
+        restartBtn.className = "action-btn primary";
+        restartBtn.textContent = `${app.label} 다시 시작`;
+        restartBtn.addEventListener("click", async () => {
+          await restartHostApps(restartBtn, [app.id]);
+          restartBtn.disabled = true; // 방금 껐다 켠 앱을 또 끄지 않게
+          // 남은 앱이 있으면 창을 열어둔다 — 나머지도 여기서 바로 누를 수 있게.
+          if (restartApps.length === 1) closeRegisterModal(true);
+        });
+        msgEl.appendChild(document.createElement("br"));
+        msgEl.appendChild(restartBtn);
       });
-      msgEl.appendChild(document.createElement("br"));
-      msgEl.appendChild(restartBtn);
       return; // 사용자가 직접 닫거나 재시작을 누를 때까지 모달 유지
     }
     setModalInteractive("register-backdrop", false); // 닫히기까지의 대기 동안 조작 차단
@@ -1678,11 +1750,17 @@ document.getElementById("restart-claude-btn").addEventListener("click", async (e
     );
     return;
   }
+  // 예전엔 확인창 하나로 켜져 있는 앱을 전부 껐다 — 둘 다 쓰는 사람에게는 손대지도
+  // 않은 앱이 같이 닫히는 일이었다. 둘 이상이면 어느 것을 껐다 켤지 고르게 한다.
   const names = hostAppNames(running);
-  if (!confirm(`${names}을(를) 껐다 다시 켤까요?\n\n등록한 도구를 새로 읽어들이려면 이 과정이 필요합니다.`)) {
-    return;
-  }
-  await restartHostApps(e.currentTarget, running.map((a) => a.id));
+  await offerHostRestart({
+    apps: running,
+    explain: false, // "새 파일을 받아도…"는 업데이트 안내다 — 직접 누른 이 자리엔 안 맞는다
+    title: `${names}을(를) 껐다 켤까요?`,
+    body:
+      (running.length > 1 ? "껐다 켤 앱을 아래에서 고르세요 — 체크를 풀면 그 앱은 그대로 둡니다.\n\n" : "") +
+      "등록한 도구를 새로 읽어들이려면 껐다 켜는 과정이 필요합니다.\n대화 내용은 지워지지 않습니다.",
+  });
 });
 
 /* ---------- 지원 문의 ---------- */
@@ -2727,19 +2805,54 @@ const RESTART_EXPLAINED_KEY = "leetkit-manager-restart-explained";
 // "업데이트했는데 그대로다"라고 느끼기 딱 좋은 자리다.
 let restartModalTargetIds = null; // 모달의 "지금 다시 시작"이 껐다 켤 앱 — 띄울 때 정해진다
 
-async function offerHostRestart({ headline, afterRestart }) {
-  const running = await runningHostApps();
+// 켜져 있는 앱이 둘 이상이면 "껐다 켤 앱"을 고르게 한다. 예전엔 [지금 다시 시작] 한
+// 번에 켜져 있는 앱이 전부 꺼졌다 — Claude만 손봤는데 대화 중이던 ChatGPT까지 같이
+// 닫히는 건 시킨 적 없는 종료다. 하나뿐이면 고를 게 없으므로 목록을 감춘다.
+function renderRestartTargets(apps) {
+  const box = document.getElementById("restart-targets");
+  const label = document.getElementById("restart-pick-label");
+  if (apps.length < 2) {
+    box.innerHTML = "";
+    box.hidden = true;
+    label.hidden = true;
+    return;
+  }
+  box.innerHTML = apps
+    .map(
+      (a) => `
+        <label class="register-target-row">
+          <input type="checkbox" value="${escapeAttr(a.id)}" checked>
+          <span>${escapeHtml(a.label)}</span>
+        </label>`
+    )
+    .join("");
+  box.hidden = false;
+  label.hidden = false;
+}
+
+// 모달이 실제로 껐다 켤 앱 — 목록이 떠 있으면 체크된 것만, 아니면 띄울 때 정해둔 전부.
+function restartModalSelectedIds() {
+  const box = document.getElementById("restart-targets");
+  if (box.hidden) return restartModalTargetIds;
+  return [...box.querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value);
+}
+
+// title·body·explain 은 이 창을 "직접 누른 다시 시작"으로도 쓰기 위한 갈래다
+// (업데이트 뒤 안내와 문구가 달라야 한다 — 그쪽은 "새 파일이 적용되려면"이 이유다).
+async function offerHostRestart({ headline, afterRestart, apps = null, title = null, body = null, explain = true }) {
+  const running = apps || (await runningHostApps());
   if (!running.length) return false;
 
   const names = hostAppNames(running);
   restartModalTargetIds = running.map((a) => a.id);
-  document.getElementById("restart-title").textContent = `${names}을(를) 다시 시작해주세요`;
+  document.getElementById("restart-title").textContent = title || `${names}을(를) 다시 시작해주세요`;
   document.getElementById("restart-body").textContent =
-    `${headline}\n\n지금 켜져 있는 ${names}은(는) ${afterRestart}\n껐다 켜야 반영됩니다.`;
+    body || `${headline}\n\n지금 켜져 있는 ${names}은(는) ${afterRestart}\n껐다 켜야 반영됩니다.`;
+  renderRestartTargets(running);
 
   const whyEl = document.getElementById("restart-why");
   const alreadyExplained = localStorage.getItem(RESTART_EXPLAINED_KEY);
-  if (alreadyExplained) {
+  if (!explain || alreadyExplained) {
     whyEl.hidden = true;
   } else {
     whyEl.textContent =
@@ -2768,7 +2881,12 @@ document.getElementById("restart-later").addEventListener("click", () => {
 });
 
 document.getElementById("restart-now").addEventListener("click", async (e) => {
-  await restartHostApps(e.currentTarget, restartModalTargetIds);
+  const ids = restartModalSelectedIds();
+  if (!ids || !ids.length) {
+    showToast("껐다 켤 앱을 하나 이상 골라주세요.");
+    return;
+  }
+  await restartHostApps(e.currentTarget, ids);
   closeRestartModal();
 });
 
@@ -2855,12 +2973,23 @@ async function finishOnboarding() {
       onboardingHideBanner();
       showToast(`${runningHostLabel}을(를) 껐다 켜면 도구가 나타납니다.`);
     });
-    document.getElementById("onboarding-restart-claude-btn").addEventListener("click", () =>
-      restartHostApps(
-        document.getElementById("onboarding-restart-claude-btn"),
-        runningHosts.map((a) => a.id)
-      )
-    );
+    document.getElementById("onboarding-restart-claude-btn").addEventListener("click", async () => {
+      const btn = document.getElementById("onboarding-restart-claude-btn");
+      // 켜져 있는 앱이 하나뿐이면 고를 게 없다 — 마지막 단계에 창을 한 번 더 띄우지
+      // 않는다. 둘이면 고르게 한다(등록과 무관한 앱까지 같이 꺼지면 안 된다).
+      if (runningHosts.length < 2) {
+        await restartHostApps(btn, runningHosts.map((a) => a.id));
+        return;
+      }
+      await offerHostRestart({
+        apps: runningHosts,
+        explain: false,
+        title: `${runningHostLabel}을(를) 껐다 켤까요?`,
+        body:
+          "껐다 켤 앱을 아래에서 고르세요 — 체크를 풀면 그 앱은 그대로 둡니다.\n\n" +
+          "방금 등록한 도구는 껐다 켜야 나타납니다.\n대화 내용은 지워지지 않습니다.",
+      });
+    });
     return;
   }
 

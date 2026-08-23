@@ -225,6 +225,9 @@
   <div class="modal restart-modal">
     <div class="modal-title" id="restart-title">Claude Desktop을 다시 시작해주세요</div>
     <div class="restart-body" id="restart-body"></div>
+    <!-- 켜져 있는 앱이 둘 이상일 때만 뜬다 — 한 번에 둘 다 끄지 않기 위한 자리다. -->
+    <div class="field-label" id="restart-pick-label" hidden>껐다 켤 앱</div>
+    <div class="register-targets" id="restart-targets" hidden></div>
     <div class="restart-why" id="restart-why" hidden></div>
     <div class="modal-actions">
       <button class="action-btn" id="restart-later">나중에 직접 할게요</button>

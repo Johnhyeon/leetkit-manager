@@ -23,9 +23,67 @@ def test_codex_is_prechecked_when_no_claude_host_is_available():
 
 
 def test_codex_is_not_prechecked_for_claude_users():
-    """Claude 를 쓰는 사람에게는 예전 규칙(이미 등록된 경우만 체크)이 그대로여야 한다 —
-    안 쓰는 곳에 등록되면 그쪽 앱이 뜰 때마다 도구가 늘어난다."""
-    assert 't.id !== "codex" || currentTargets.includes(t.id)' in JS
+    """Claude 를 쓰는 사람의 **첫 등록**에서는 codex 체크가 꺼져 있어야 한다 —
+    안 쓰는 곳에 등록되면 그쪽 앱이 뜰 때마다 도구가 늘어난다.
+    (이미 등록된 사람은 아래 test_register_modal_shows_actual_registration 규칙을 탄다.)"""
+    assert 't.id !== "codex" || !claudeAvailable' in JS
+
+
+def test_register_modal_shows_actual_registration():
+    """등록된 Lens 의 등록 창은 "지금 상태"를 그대로 보여야 한다.
+
+    실사용 버그: Claude Desktop 등록을 해제하고 창을 다시 열면 체크가 그대로 켜져 있어
+    해제가 안 된 것처럼 보였다(설정 파일에서는 이미 지워진 뒤였다 — 화면만 거짓말).
+    원인은 "설치돼 있으면 무조건 체크"였던 기본값이다."""
+    assert "const alreadyRegistered = currentTargets.length > 0;" in JS
+    assert "? currentTargets.includes(t.id)" in JS
+    # 체크박스 옆에 지금 연결 상태를 글자로도 보여준다(체크박스를 설치 여부로 오해하지 않게).
+    assert '" — 지금 등록돼 있음"' in JS
+
+
+def test_unregistering_everything_is_allowed():
+    """전부 체크를 푼 것은 "전부 해제"다. 예전엔 "하나 이상 선택하세요"로 막혀서
+    화면에서 전체 해제를 할 방법이 없었다(백엔드는 원래 이 경우를 처리한다)."""
+    assert "if (!beforeTargets.length) {" in JS
+    assert "연결을 모두 해제할까요" in JS
+
+
+def test_restart_prompt_follows_what_actually_changed():
+    """등록 후 안내는 **바뀐 타겟**만 보고 만들어야 한다.
+
+    실사용 버그: Claude Desktop 등록을 해제했는데 "ChatGPT 를 다시 시작하라"고 떴다.
+    체크된 목록(checked)만 보고 안내를 만들었기 때문이다 — 해제한 쪽은 목록에서 빠지고,
+    그대로 남아 있던(=아무것도 안 바뀐) ChatGPT 가 안내 대상이 됐다."""
+    assert "const relevantHostIds = checked.map" not in JS
+    assert "const beforeTargets = ((lensDataCache[lensName] || {}).targets || []).slice();" in JS
+    assert "const addedTargets = onboardingActive ? [] : checked.filter((t) => !beforeTargets.includes(t));" in JS
+    assert "const removedTargets = onboardingActive ? [] : result.removed || [];" in JS
+    assert "function registrationChangeNotes(changedTargets, runningHosts, kind) {" in JS
+    # 해제 쪽 문구가 따로 있어야 한다 — "나타납니다"만 있으면 해제에도 그 말이 나간다.
+    # 해제는 단정하지 않는다: 호스트 앱이 이미 목록에서 뺐을 수 있다.
+    assert "껐다 켜야 도구가 나타납니다." in JS
+    assert "에 아직 도구가 남아 있으면 껐다 켜주세요." in JS
+
+
+def test_restart_lets_you_choose_which_app():
+    """켜져 있는 앱이 둘일 때 한 번에 둘 다 끄지 않는다 — 손대지도 않은 앱이 같이
+    닫히는 건 시킨 적 없는 종료다(한쪽에서 대화 중일 수 있다)."""
+    assert "function renderRestartTargets(apps) {" in JS
+    assert "function restartModalSelectedIds() {" in JS
+    assert "const ids = restartModalSelectedIds();" in JS
+    # 상단 [다시 시작] 버튼도 확인창 하나로 전부 끄던 걸 고르기로 바꿨다.
+    assert "껐다 다시 켤까요" not in JS
+    # 등록 모달의 재시작 버튼은 앱마다 하나씩 만든다.
+    assert "restartApps.forEach((app) => {" in JS
+
+    html = (UI / "index.html").read_text(encoding="utf-8")
+    assert 'id="restart-targets"' in html
+    assert 'id="restart-pick-label"' in html
+
+    # .register-targets 의 display:flex 가 [hidden] 을 이긴다 — 명시적으로 눌러줘야
+    # 앱이 하나뿐일 때 목록이 감춰진다.
+    css = (UI / "style.css").read_text(encoding="utf-8")
+    assert ".register-targets[hidden]" in css
 
 
 def test_host_app_targets_are_mapped_for_restart_prompts():
