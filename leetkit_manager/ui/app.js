@@ -12,6 +12,12 @@ const TARGET_HOST_APP = { "claude-desktop": "claude-desktop", codex: "chatgpt" }
 // 보여주므로, 마지막으로 받은 각 Lens 데이터를 여기 캐싱해서 모달을 다시 fetch 없이 연다.
 const lensDataCache = {};
 
+// 이 타겟들에 등록돼 있으면 껐다 켜야 반영되는 GUI 앱 id. CLI 타겟(claude-code)은
+// 껐다 켤 대상이 없으므로 여기서 빠진다.
+function hostIdsForTargets(targets) {
+  return [...new Set((targets || []).map((t) => TARGET_HOST_APP[t]).filter(Boolean))];
+}
+
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
@@ -546,11 +552,15 @@ async function offerCloseHostAppsAndRetry(lensName, action, apps) {
     replaceCard(lensName, lens);
 
     updateBusyOverlay(`${names}을(를) 다시 켜는 중…`);
-    await window.pywebview.api.launch_host_apps(ids);
+    // 결과를 보고 말한다 — 예전엔 못 켰어도 "다시 켰습니다"라고 해서, 사용자는 앱이
+    // 꺼진 채로 "그럼 왜 안 보이지"를 겪었다.
+    const relaunch = await window.pywebview.api.launch_host_apps(ids);
     showToast(
-      retry.ok
-        ? `${label} 완료 — ${names}도 다시 켰습니다.`
-        : retry.error || `${label}에 실패했습니다.`
+      !retry.ok
+        ? retry.error || `${label}에 실패했습니다.`
+        : relaunch.ok
+          ? `${label} 완료 — ${names}도 다시 켰습니다.`
+          : `${label} 완료 — ${relaunch.error || `${names}을(를) 다시 켜지 못했습니다. 직접 켜주세요.`}`
     );
   } catch {
     showToast("처리 중 오류가 발생했습니다. 다시 시도해주세요.");
@@ -636,7 +646,7 @@ async function runAction(action, lensName, extra, opts = {}) {
       // codex 타겟도 센다 — 그쪽에 등록해둔 사람은 ChatGPT 앱을 껐다 켜야 새 버전이
       // 뜬다. 실제로 켜져 있는지는 noteLensFilesChanged가 다시 확인하므로, CLI만 쓰는
       // 사람에게는 재시작 안내가 가지 않는다.
-      const wasOnHostApp = ["claude-desktop", "codex"].some((t) => (before.targets || []).includes(t));
+      const beforeHostIds = hostIdsForTargets(before.targets);
       const wasInstalled = !before.not_installed;
       showBusyOverlay(`${displayName}를 설치하는 중…`);
       const stopPolling = startInstallProgressPolling((text) => updateBusyOverlay(`${displayName} · ${text}`));
@@ -707,7 +717,7 @@ async function runAction(action, lensName, extra, opts = {}) {
         // 윈도우는 파일 잠금 때문에 대개 blocking_apps로 걸려 껐다 켜는 흐름을
         // 타지만, 맥은 잠금이 없어 켜진 채로 "성공"하고 조용히 옛 버전이 남는다.
         await noteLensFilesChanged({
-          registeredOnHostApp: wasOnHostApp && wasInstalled,
+          hostAppIds: wasInstalled ? beforeHostIds : [],
           headline: wasInstalled
             ? `${displayName} 업데이트 완료${lens && lens.installed_version ? ` (v${lens.installed_version})` : ""}.${legacyNote}`
             : `${displayName} 설치 완료.${legacyNote}`,
@@ -719,9 +729,7 @@ async function runAction(action, lensName, extra, opts = {}) {
       const displayName = (lensDataCache[lensName] || {}).display_name || lensName;
       // 삭제해도 MCP 설정은 남는다(패키지만 지운다) — 켜져 있는 Claude에는 도구가
       // 그대로 보이고, 누르면 그때서야 실패한다. 지우기 전에 물려 있었는지 봐둔다.
-      const wasOnHostApp = ["claude-desktop", "codex"].some((t) =>
-        ((lensDataCache[lensName] || {}).targets || []).includes(t)
-      );
+      const wasHostIds = hostIdsForTargets((lensDataCache[lensName] || {}).targets);
       showBusyOverlay(`${displayName}를 삭제하는 중…`);
       let result, lens;
       try {
@@ -733,7 +741,7 @@ async function runAction(action, lensName, extra, opts = {}) {
       replaceCard(lensName, lens);
       if (result.ok) {
         await noteLensFilesChanged({
-          registeredOnHostApp: wasOnHostApp,
+          hostAppIds: wasHostIds,
           headline: result.license_removed
             ? `${displayName}를 삭제했습니다 — 라이선스도 이 컴퓨터에서 지웠습니다.`
             : `${displayName}를 삭제했습니다 — 다시 설치할 수 있습니다.`,
@@ -1059,7 +1067,7 @@ let registerTargetLens = null;
 // 대한 [다시 시작] 버튼을 만든다.
 function registrationChangeNotes(changedTargets, runningHosts, kind) {
   const appear = kind === "add";
-  const hostIds = [...new Set(changedTargets.map((t) => TARGET_HOST_APP[t]).filter(Boolean))];
+  const hostIds = hostIdsForTargets(changedTargets);
   const runningChanged = (runningHosts || []).filter((a) => hostIds.includes(a.id));
   const notes = [];
   if (!changedTargets.length) return { notes, runningChanged };
@@ -2840,7 +2848,7 @@ function restartModalSelectedIds() {
 // title·body·explain 은 이 창을 "직접 누른 다시 시작"으로도 쓰기 위한 갈래다
 // (업데이트 뒤 안내와 문구가 달라야 한다 — 그쪽은 "새 파일이 적용되려면"이 이유다).
 async function offerHostRestart({ headline, afterRestart, apps = null, title = null, body = null, explain = true }) {
-  const running = apps || (await runningHostApps());
+  const running = Array.isArray(apps) ? apps : await runningHostApps();
   if (!running.length) return false;
 
   const names = hostAppNames(running);
@@ -2890,22 +2898,30 @@ document.getElementById("restart-now").addEventListener("click", async (e) => {
   closeRestartModal();
 });
 
-// Lens를 업데이트·삭제한 뒤 부른다. Claude Desktop에 등록돼 있지 않으면 지금 다시
-// 읽어갈 쪽이 없으므로 아무 말도 하지 않는다(신규 설치 직후가 그렇다 — 그쪽은
-// MCP 등록 모달이 따로 안내한다).
-async function noteLensFilesChanged({ registeredOnHostApp, headline, afterRestart, whenClosedResult }) {
-  if (!registeredOnHostApp) {
+// Lens를 업데이트·삭제한 뒤 부른다. 어디에도 등록돼 있지 않으면 지금 다시 읽어갈
+// 쪽이 없으므로 아무 말도 하지 않는다(신규 설치 직후가 그렇다 — 그쪽은 MCP 등록
+// 모달이 따로 안내한다).
+//
+// hostAppIds = **이 Lens가 실제로 물려 있는** 앱. 예전엔 "물려 있나"를 참/거짓으로만
+// 받고 실제 대상은 "지금 켜져 있는 앱 전부"로 잡았다 — StockLens만 업데이트했는데
+// 옆에 켜둔 ChatGPT까지 껐다 켜라고 했고, 그 앱은 StockLens를 띄운 적도 없다.
+async function noteLensFilesChanged({ hostAppIds, headline, afterRestart, whenClosedResult }) {
+  const ids = hostAppIds || [];
+  if (!ids.length) {
     showToast(headline);
     return;
   }
-  const shown = await offerHostRestart({ headline, afterRestart });
+  const running = (await runningHostApps()).filter((a) => ids.includes(a.id));
+  const shown = await offerHostRestart({ apps: running, headline, afterRestart });
   // 안 켜져 있으면 시킬 일이 없다 — 다음에 열면 알아서 적용된다는 사실만 알려준다.
-  // 어느 앱을 말할지는 이 컴퓨터에 있는 앱에서 가져온다("앱"이라고만 하면 막연하다).
+  // 어느 앱을 말할지도 이 Lens가 물려 있는 앱으로 좁힌다("앱"이라고만 하면 막연하고,
+  // 안 물린 앱을 대면 열어봐야 아무 변화가 없다).
   if (!shown) {
-    const installed = installedHostApps.length
-      ? hostAppNames(installedHostApps)
-      : "Claude Desktop";
-    showToast(`${headline} 다음에 ${installed}을(를) 열면 ${whenClosedResult}`);
+    const label =
+      hostAppNames(installedHostApps.filter((a) => ids.includes(a.id))) ||
+      hostAppNames(installedHostApps) ||
+      "Claude Desktop";
+    showToast(`${headline} 다음에 ${label}을(를) 열면 ${whenClosedResult}`);
   }
 }
 
@@ -2947,7 +2963,12 @@ async function finishOnboarding() {
   // MCP 등록은 설정 파일을 고치는 것뿐이고 Claude Desktop은 그 파일을 "켤 때" 읽는다 —
   // 이미 떠 있으면 도구가 안 보인다. 여기서 안내하지 않으면 고객은 "설치가 안 됐다"고
   // 판단한다. 실제로 떠 있을 때만 말해서 불필요하게 겁주지 않는다.
-  const runningHosts = await runningHostApps();
+  // 방금 설정에서 **실제로 등록된 곳**만 대상으로 한다. 예전엔 켜져 있는 앱 전부라,
+  // Claude에만 등록한 사람에게도 옆에 띄워둔 ChatGPT를 껐다 켜라고 했다.
+  const registeredHostIds = [
+    ...new Set(Object.values(lensDataCache).flatMap((l) => hostIdsForTargets(l.targets))),
+  ];
+  const runningHosts = (await runningHostApps()).filter((a) => registeredHostIds.includes(a.id));
   const runningHostLabel = hostAppNames(runningHosts);
 
   // TelegramLens는 설정을 마쳐도 아직 모은 데이터가 없다 — 수집은 Claude Desktop을
@@ -2960,8 +2981,12 @@ async function finishOnboarding() {
   // 처음 도구를 쓸 때 Claude가 "허용하시겠습니까?"를 묻는다. 미리 말해두지 않으면
   // 설치가 잘못됐거나 위험한 걸 깐 줄 알고 거기서 멈춘다 — 한 번 허용하면 다시
   // 안 묻는다는 것까지 같이 알려줘야 안심하고 누른다.
+  // 어느 앱이 묻는지는 등록한 곳에 달렸다 — ChatGPT만 쓰는 사람에게 "Claude가
+  // 물어봅니다"라고 하면, 안 쓰는 앱 이름이 나와 자기 얘기가 아닌 게 된다.
+  const permissionApp =
+    hostAppNames(installedHostApps.filter((a) => registeredHostIds.includes(a.id))) || "AI 앱";
   const permissionNote =
-    " 처음 도구를 쓸 때 Claude가 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.";
+    ` 처음 도구를 쓸 때 ${permissionApp}이(가) 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.`;
 
   if (runningHosts.length) {
     onboardingSetBanner(
@@ -2993,7 +3018,10 @@ async function finishOnboarding() {
     return;
   }
 
-  const openWhat = installedHostApps.length ? hostAppNames(installedHostApps) : "Claude Desktop";
+  const openWhat =
+    hostAppNames(installedHostApps.filter((a) => registeredHostIds.includes(a.id))) ||
+    hostAppNames(installedHostApps) ||
+    "Claude Desktop";
   onboardingSetBanner(
     `모든 설정이 끝났습니다! ${openWhat}을(를) 열어주세요.` + telegramNote + permissionNote,
     `<button class="action-btn primary" id="onboarding-done-btn">알겠습니다</button>`
@@ -3278,9 +3306,8 @@ async function runLensUpdatesFromNotice() {
 
   // 껐다 켜라는 안내가 Lens마다 따로 뜨면 3개일 때 3번이다 — 낱개 안내는 끄고
   // 아래에서 다 끝난 뒤 한 번만 말한다(물어보는 것도 한 번, 안내도 한 번).
-  const onHostApp = lenses.filter((l) =>
-    ["claude-desktop", "codex"].some((t) => (l.targets || []).includes(t))
-  );
+  const onHostApp = lenses.filter((l) => hostIdsForTargets(l.targets).length);
+  const onHostAppIds = [...new Set(onHostApp.flatMap((l) => hostIdsForTargets(l.targets)))];
 
   // 한 번에 하나씩 — uv tool install이 같은 디렉터리를 건드리므로 동시에 돌리면
   // 서로의 파일을 쥔 채 실패한다. runAction이 진행률 오버레이까지 맡는다.
@@ -3289,12 +3316,13 @@ async function runLensUpdatesFromNotice() {
   }
   recomputeSummaryFromCache();
 
+  let relaunch = null;
   if (closedHostIds) {
     showBusyOverlay("앱을 다시 켜는 중…");
     try {
-      await window.pywebview.api.launch_host_apps(closedHostIds);
+      relaunch = await window.pywebview.api.launch_host_apps(closedHostIds);
     } catch {
-      /* 못 켜도 업데이트 자체는 끝났다 — 아래 안내에서 직접 켜라고 말한다 */
+      /* 못 켜도 업데이트 자체는 끝났다 — 아래에서 직접 켜라고 말한다 */
     }
     hideBusyOverlay();
   }
@@ -3307,7 +3335,12 @@ async function runLensUpdatesFromNotice() {
   }
   if (closedHostIds) {
     // 우리가 껐다 켰으니 새 버전으로 이미 다시 떴다 — 더 시킬 게 없다.
-    showToast("업데이트를 마치고 앱을 다시 켰습니다.");
+    // 다만 못 켠 경우에는 그렇게 말하면 안 된다(우리가 껐으므로 지금 꺼져 있다).
+    showToast(
+      relaunch && relaunch.ok
+        ? "업데이트를 마치고 앱을 다시 켰습니다."
+        : (relaunch && relaunch.error) || "업데이트를 마쳤습니다 — 앱은 직접 켜주세요."
+    );
     await handOffToReviewPrompt();
     return;
   }
@@ -3317,7 +3350,7 @@ async function runLensUpdatesFromNotice() {
   // 돌리고 있는데, 예전엔 그냥 "업데이트를 마쳤습니다"로 끝나서 끝난 줄 알았다.
   const done = onHostApp.map((l) => l.display_name).join(", ");
   await noteLensFilesChanged({
-    registeredOnHostApp: onHostApp.length > 0,
+    hostAppIds: onHostAppIds,
     headline: done ? `${done} 업데이트 완료.` : "업데이트를 마쳤습니다.",
     afterRestart: "아직 이전 버전을 쓰고 있습니다.",
     whenClosedResult: "새 버전이 적용됩니다.",

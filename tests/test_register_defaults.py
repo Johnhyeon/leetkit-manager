@@ -86,6 +86,39 @@ def test_restart_lets_you_choose_which_app():
     assert ".register-targets[hidden]" in css
 
 
+def test_lens_restart_prompt_targets_only_the_apps_it_runs_on():
+    """Lens 하나를 업데이트·삭제한 뒤의 재시작 안내는 **그 Lens가 물려 있는 앱**만
+    지목해야 한다.
+
+    예전엔 "물려 있나"를 참/거짓으로만 받고 실제 대상은 "지금 켜져 있는 앱 전부"로
+    잡았다 — StockLens만 업데이트했는데 옆에 켜둔 ChatGPT까지 껐다 켜라고 했고,
+    그 앱은 StockLens를 띄운 적도 없다(등록 모달에서 고친 것과 같은 부류)."""
+    assert "function hostIdsForTargets(targets) {" in JS
+    assert "async function noteLensFilesChanged({ hostAppIds, headline, afterRestart, whenClosedResult }) {" in JS
+    assert "registeredOnHostApp" not in JS
+    assert "const running = (await runningHostApps()).filter((a) => ids.includes(a.id));" in JS
+    # 빈 배열이 "대상 없음"으로 읽혀야 한다 — `apps || …` 였을 때는 빈 배열이 falsy라
+    # 켜져 있는 앱 전부로 조용히 되돌아갔다.
+    assert "const running = Array.isArray(apps) ? apps : await runningHostApps();" in JS
+
+
+def test_relaunch_is_only_claimed_when_it_worked():
+    """"다시 켰습니다"는 실제로 켜졌을 때만 할 말이다 — 우리가 껐으므로, 못 켠 채로
+    그렇게 말하면 사용자는 앱이 꺼진 줄도 모르고 "왜 안 보이지"를 겪는다."""
+    assert "const relaunch = await window.pywebview.api.launch_host_apps(ids);" in JS
+    assert "relaunch && relaunch.ok" in JS
+
+
+def test_onboarding_finish_names_only_registered_apps():
+    """마법사 마지막 안내도 같은 규칙 — 등록한 곳만 말한다. 그리고 허용 창을 띄우는
+    앱 이름도 등록한 곳에서 가져온다(ChatGPT만 쓰는 사람에게 "Claude가 물어봅니다"는
+    자기 얘기가 아니다)."""
+    assert "const registeredHostIds = [" in JS
+    assert "(await runningHostApps()).filter((a) => registeredHostIds.includes(a.id))" in JS
+    assert "처음 도구를 쓸 때 Claude가 허용 여부를 물어봅니다" not in JS
+    assert "${permissionApp}이(가) 허용 여부를 물어봅니다" in JS
+
+
 def test_host_app_targets_are_mapped_for_restart_prompts():
     """codex 타겟은 ChatGPT 앱을 가리킨다 — 이 표가 없으면 등록·업데이트 후 재시작
     안내가 ChatGPT 사용자에게 가지 않는다."""
