@@ -38,7 +38,7 @@ def test_register_modal_shows_actual_registration():
     assert "const alreadyRegistered = currentTargets.length > 0;" in JS
     assert "? currentTargets.includes(t.id)" in JS
     # 체크박스 옆에 지금 연결 상태를 글자로도 보여준다(체크박스를 설치 여부로 오해하지 않게).
-    assert '" — 지금 등록돼 있음"' in JS
+    assert '" (지금 등록돼 있음)"' in JS
 
 
 def test_unregistering_everything_is_allowed():
@@ -61,8 +61,8 @@ def test_restart_prompt_follows_what_actually_changed():
     assert "function registrationChangeNotes(changedTargets, runningHosts, kind) {" in JS
     # 해제 쪽 문구가 따로 있어야 한다 — "나타납니다"만 있으면 해제에도 그 말이 나간다.
     # 해제는 단정하지 않는다: 호스트 앱이 이미 목록에서 뺐을 수 있다.
-    assert "껐다 켜야 도구가 나타납니다." in JS
-    assert "에 아직 도구가 남아 있으면 껐다 켜주세요." in JS
+    assert "껐다 켜야 도구가 나타납니다" in JS
+    assert "에 아직 도구가 남아 있으면 껐다 켜주세요" in JS
 
 
 def test_restart_lets_you_choose_which_app():

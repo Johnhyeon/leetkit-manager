@@ -1438,6 +1438,26 @@ body {
   flex-shrink: 0;
 }
 
+/* 두 갈래를 각각 상자로 떼어놓는다 — 한 덩어리로 붙어 있으면 어느 설명이 어느
+   선택지의 것인지 눈으로 구분이 안 된다(주 고객층 40-50대 기준). */
+.uninstall-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.uninstall-choices .uninstall-option {
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+}
+
+/* 고른 쪽이 어느 것인지 한눈에 — 라디오 점 하나로는 약하다. */
+.uninstall-choices .uninstall-option:has(input:checked) {
+  border-color: var(--ok);
+}
+
 .uninstall-hint {
   display: block;
   margin-top: 4px;

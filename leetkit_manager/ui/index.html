@@ -86,7 +86,7 @@
       </div>
       <div class="support-value support-body" id="support-body"></div>
     </div>
-    <p class="support-hint">방금 열린 폴더에 있는 zip 파일을 메일에 첨부해서 보내주세요.</p>
+    <p class="support-hint">방금 열린 폴더에 있는 zip 파일을 메일에 첨부해서 보내주세요</p>
     <div class="modal-actions">
       <button class="action-btn" id="support-close">닫기</button>
       <button class="action-btn primary" id="support-copy">메일 내용 복사</button>
@@ -101,7 +101,7 @@
 <div class="modal-backdrop" id="troubleshoot-backdrop" hidden>
   <div class="modal troubleshoot-modal">
     <div class="modal-title">문의 전에 해볼 것</div>
-    <p class="troubleshoot-lead">위에서부터 순서대로 눌러보세요. 대부분 1번에서 해결됩니다.</p>
+    <p class="troubleshoot-lead">위에서부터 순서대로 눌러보세요</p>
     <ol class="troubleshoot-steps" id="troubleshoot-steps"></ol>
     <div class="modal-actions">
       <button class="action-btn" id="troubleshoot-close">닫기</button>
@@ -174,13 +174,25 @@
   <div class="modal">
     <div class="modal-title" id="uninstall-title"></div>
     <div class="modal-msg" id="uninstall-msg"></div>
-    <label class="uninstall-option">
-      <input type="checkbox" id="uninstall-with-license">
-      <span>
-        이 컴퓨터에서 <strong>라이선스도 함께 삭제</strong>
-        <span class="uninstall-hint">이 컴퓨터를 더 이상 쓰지 않으신다면 함께 지워주세요. 남겨두면 이 컴퓨터를 쓰는 다른 사람이 그대로 사용할 수 있습니다. 다시 쓰시려면 구매하실 때 받으신 키를 다시 넣으시면 됩니다.</span>
-      </span>
-    </label>
+    <!-- 체크박스 하나("라이선스도 삭제")로는 안 눌렀을 때 무슨 일이 일어나는지가
+         안 보였다. 지우고 나면 AI 앱 연결을 해제할 수단(Lens 의 setup 명령)도 같이
+         사라지므로, 그 갈림길을 여기서 말로 보여주고 고르게 한다. -->
+    <div class="uninstall-choices">
+      <label class="uninstall-option">
+        <input type="radio" name="uninstall-mode" value="package" checked>
+        <span>
+          <strong>프로그램만 지우기</strong>
+          <span class="uninstall-hint" id="uninstall-hint-package"></span>
+        </span>
+      </label>
+      <label class="uninstall-option">
+        <input type="radio" name="uninstall-mode" value="full">
+        <span>
+          <strong>이 컴퓨터에서 완전히 정리</strong>
+          <span class="uninstall-hint" id="uninstall-hint-full"></span>
+        </span>
+      </label>
+    </div>
     <div class="modal-actions">
       <button class="action-btn" id="uninstall-cancel">취소</button>
       <button class="action-btn danger" id="uninstall-confirm">삭제</button>
@@ -242,7 +254,7 @@
 <div class="modal-backdrop" id="getapp-backdrop" hidden>
   <div class="modal">
     <div class="modal-title">Lens를 쓸 앱 받기</div>
-    <div class="modal-msg">Lens는 아래 앱 안에서 동작합니다. 둘 중 하나만 있으면 됩니다.</div>
+    <div class="modal-msg">Lens는 아래 앱 안에서 동작합니다 (둘 중 하나만 있으면 됩니다)</div>
     <div id="getapp-list"></div>
     <div class="modal-actions">
       <button class="action-btn" id="getapp-close">닫기</button>
@@ -297,7 +309,7 @@
 <div class="busy-overlay" id="busy-overlay" hidden>
   <div class="busy-spinner" aria-hidden="true"></div>
   <div class="busy-text" id="busy-text"></div>
-  <div class="busy-hint">잠시만 기다려주세요 — 최대 1분 정도 걸릴 수 있습니다.</div>
+  <div class="busy-hint">잠시만 기다려주세요 (최대 1분 정도 걸릴 수 있습니다)</div>
 </div>
 
 <div class="toast" id="toast" hidden></div>

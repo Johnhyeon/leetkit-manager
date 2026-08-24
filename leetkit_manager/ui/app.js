@@ -303,7 +303,7 @@ const EXAMPLE_LENS_DATA = {
     {
       id: "MCP_CONFIG_VALID",
       status: "fail",
-      summary: "Claude Code에 아직 등록돼 있지 않습니다.",
+      summary: "Claude Code에 아직 등록돼 있지 않습니다",
       details: { lines: ["Claude Desktop: 등록됨", "Claude Code: 미등록"] },
       action: "stocklens-setup --target claude-code",
     },
@@ -399,13 +399,13 @@ function credentialStatusNote(lens) {
   }
   if (missing.length) {
     const list = missing.join(", ");
-    return `${list}${particle(list, "이", "가")} 아직입니다 — 카드에서 마저 끝내주세요. 그 전까지는 도구가 잠겨 있습니다.`;
+    return `${list}${particle(list, "이", "가")} 아직입니다, 카드에서 마저 끝내주세요`;
   }
   if (ready.length) {
     // 키는 설정 파일이 아니라 OS 자격 증명 저장소에 들어간다. 파일만 보면 없어
     // 보이므로, 이미 돼 있다는 걸 말해주지 않으면 멀쩡한 걸 다시 넣게 된다.
     const list = ready.join(", ");
-    return `${list}${particle(list, "은", "는")} 이미 등록돼 있어 그대로 씁니다.`;
+    return `${list}${particle(list, "은", "는")} 이미 등록돼 있어 그대로 씁니다`;
   }
   return "";
 }
@@ -522,17 +522,17 @@ function hostAppNames(apps) {
   return (apps || []).map((a) => a.label).join(" · ");
 }
 
-async function offerCloseHostAppsAndRetry(lensName, action, apps) {
+async function offerCloseHostAppsAndRetry(lensName, action, apps, fullCleanup = false) {
   const displayName = (lensDataCache[lensName] || {}).display_name || lensName;
   const label = action === "uninstall" ? "삭제" : "설치";
   const names = hostAppNames(apps) || "AI 앱";
   const ids = (apps || []).map((a) => a.id);
   const ok = confirm(
-    `${names}이(가) ${displayName} 파일을 사용 중이라 ${label}할 수 없습니다.\n\n` +
+    `${names}이(가) ${displayName} 파일을 사용 중이라 ${label}할 수 없습니다\n\n` +
       `${names}을(를) 잠시 껐다가 ${label}를 진행하고, 끝나면 다시 켤까요?`
   );
   if (!ok) {
-    showToast(`${names}을(를) 완전히 종료한 뒤 다시 ${label}해주세요.`);
+    showToast(`${names}을(를) 완전히 종료한 뒤 다시 ${label}해주세요`);
     return;
   }
 
@@ -540,13 +540,15 @@ async function offerCloseHostAppsAndRetry(lensName, action, apps) {
   try {
     const quit = await window.pywebview.api.quit_host_apps(ids);
     if (!quit.ok) {
-      showToast(quit.error || `${names}을(를) 종료하지 못했습니다.`);
+      showToast(quit.error || `${names}을(를) 종료하지 못했습니다`);
       return;
     }
     updateBusyOverlay(`${displayName}를 ${label}하는 중…`);
     const retry =
       action === "uninstall"
-        ? await window.pywebview.api.uninstall(lensName)
+        // 앱을 닫고 다시 시도하는 경로에서도 사용자가 고른 "완전히 정리"를 그대로
+        // 지킨다 — 예전엔 이 인자가 빠져 라이선스만 조용히 남았다.
+        ? await window.pywebview.api.uninstall(lensName, fullCleanup)
         : await window.pywebview.api.install_or_update(lensName);
     const lens = await window.pywebview.api.diagnose_one(lensName, false);
     replaceCard(lensName, lens);
@@ -557,13 +559,13 @@ async function offerCloseHostAppsAndRetry(lensName, action, apps) {
     const relaunch = await window.pywebview.api.launch_host_apps(ids);
     showToast(
       !retry.ok
-        ? retry.error || `${label}에 실패했습니다.`
+        ? retry.error || `${label}에 실패했습니다`
         : relaunch.ok
-          ? `${label} 완료 — ${names}도 다시 켰습니다.`
-          : `${label} 완료 — ${relaunch.error || `${names}을(를) 다시 켜지 못했습니다. 직접 켜주세요.`}`
+          ? `${label} 완료, ${names}도 다시 켰습니다`
+          : `${label} 완료, ${relaunch.error || `${names}을(를) 다시 켜지 못했습니다, 직접 켜주세요`}`
     );
   } catch {
-    showToast("처리 중 오류가 발생했습니다. 다시 시도해주세요.");
+    showToast("처리 중 오류가 발생했습니다, 다시 시도해주세요");
   } finally {
     hideBusyOverlay();
   }
@@ -611,7 +613,7 @@ function startInstallProgressPolling(render) {
 // 시작 전에 한 번만 묻고 여기서는 안 묻는다.
 async function runAction(action, lensName, extra, opts = {}) {
   if (runningActions.has(lensName)) {
-    showToast("이미 처리 중입니다 — 잠시만 기다려주세요.");
+    showToast("이미 처리 중입니다, 잠시만 기다려주세요");
     return;
   }
   runningActions.add(lensName);
@@ -631,11 +633,11 @@ async function runAction(action, lensName, extra, opts = {}) {
       const lens = await window.pywebview.api.diagnose_one(lensName, false);
       replaceCard(lensName, lens);
       if (!result.ok) {
-        showToast(result.error || "복구에 실패했습니다.");
+        showToast(result.error || "복구에 실패했습니다");
       } else {
         const actions = (result.result && result.result.actions) || [];
         const failed = actions.find((a) => a.status === "failed");
-        if (failed) showToast(failed.detail || "일부 복구 작업이 실패했습니다.");
+        if (failed) showToast(failed.detail || "일부 복구 작업이 실패했습니다");
       }
     } else if (action === "install") {
       const displayName = (lensDataCache[lensName] || {}).display_name || lensName;
@@ -663,9 +665,9 @@ async function runAction(action, lensName, extra, opts = {}) {
       // 그게 먼저 잡혀서 예전 그대로 도는데, 사용자는 그런 게 있었는지도 모른다.
       // 정리했으면 정리했다고, 못 지웠으면 못 지웠다고 말한다.
       const legacyNote = result.legacy_removed
-        ? " 예전 방식으로 설치돼 있던 옛 파일도 정리했습니다."
+        ? " (예전 방식으로 설치돼 있던 옛 파일도 정리했습니다)"
         : result.legacy_error
-          ? " (예전에 설치된 옛 파일은 정리하지 못했습니다 — 계속 이상하면 문의해주세요.)"
+          ? " (예전에 설치된 옛 파일은 정리하지 못했습니다, 계속 이상하면 문의해주세요)"
           : "";
       if (!result.ok) {
         const blockingApps = result.blocking_apps || [];
@@ -673,14 +675,14 @@ async function runAction(action, lensName, extra, opts = {}) {
           await offerCloseHostAppsAndRetry(lensName, "install", blockingApps);
         } else if (blockingApps.length) {
           // 일괄 처리 중 — 이미 한 번 물어봤으므로 다시 안 묻고 사실만 남긴다.
-          showToast(`${displayName}: ${hostAppNames(blockingApps)}이(가) 파일을 쓰고 있어 건너뛰었습니다.`);
+          showToast(`${displayName}: ${hostAppNames(blockingApps)}이(가) 파일을 쓰고 있어 건너뛰었습니다`);
         } else {
           showToast(
             result.rollback_command
               // 이유를 먼저 말한다 — 예전엔 "실패했습니다"와 복구 명령뿐이라, 사용자도
               // 우리도 왜 실패했는지 알 방법이 없었다.
-              ? `설치/업데이트 실패 — ${result.error || "원인을 알 수 없습니다"} (이전 버전 복구: ${result.rollback_command})`
-              : `설치/업데이트 실패 — ${result.error || "원인을 알 수 없습니다"}`
+              ? `설치/업데이트 실패: ${result.error || "원인을 알 수 없습니다"} (이전 버전 복구: ${result.rollback_command})`
+              : `설치/업데이트 실패: ${result.error || "원인을 알 수 없습니다"}`
           );
         }
       } else if (
@@ -694,7 +696,7 @@ async function runAction(action, lensName, extra, opts = {}) {
         !opts.skipRestartPrompt &&
         !(((lens && lens.targets) || []).length)
       ) {
-        showToast(`${displayName} 설치 완료 —${legacyNote} 이제 사용할 AI 앱에 연결해주세요.`);
+        showToast(`${displayName} 설치 완료, 이제 사용할 AI 앱에 연결해주세요${legacyNote}`);
         openRegisterModal(lensName);
       } else if (!opts.skipRestartPrompt) {
         // 업데이트로 실행 파일이 바뀌었을 수 있다. 설정 파일에는 **등록 당시의 경로**가
@@ -721,37 +723,85 @@ async function runAction(action, lensName, extra, opts = {}) {
           headline: wasInstalled
             ? `${displayName} 업데이트 완료${lens && lens.installed_version ? ` (v${lens.installed_version})` : ""}.${legacyNote}`
             : `${displayName} 설치 완료.${legacyNote}`,
-          afterRestart: "아직 이전 버전을 쓰고 있습니다.",
-          whenClosedResult: "새 버전이 적용됩니다.",
+          afterRestart: "아직 이전 버전을 쓰고 있습니다",
+          whenClosedResult: "새 버전이 적용됩니다",
         });
       }
     } else if (action === "uninstall") {
       const displayName = (lensDataCache[lensName] || {}).display_name || lensName;
-      // 삭제해도 MCP 설정은 남는다(패키지만 지운다) — 켜져 있는 Claude에는 도구가
+      // 삭제는 패키지만 지운다 — MCP 등록은 그대로 남는다. 켜져 있는 앱에는 도구가
       // 그대로 보이고, 누르면 그때서야 실패한다. 지우기 전에 물려 있었는지 봐둔다.
-      const wasHostIds = hostIdsForTargets((lensDataCache[lensName] || {}).targets);
+      const wasTargets = ((lensDataCache[lensName] || {}).targets || []).slice();
+      const wasTargetNames = wasTargets.map((t) => TARGET_LABEL[t] || t).join(", ");
+      const wasHostIds = hostIdsForTargets(wasTargets);
+      const fullCleanup = extra === "full-cleanup";
+
+      // 연결 해제는 **지우기 전에만** 할 수 있다. 해제는 Lens 의 setup 명령이 하는데,
+      // 패키지를 지우면 그 명령도 같이 사라진다 — 그러면 호스트 앱 설정에는 없는
+      // 프로그램을 가리키는 항목만 남고, 매니저는 그걸 영영 지울 수 없다(매니저는
+      // 설정 파일을 직접 건드리지 않는다). 그래서 순서가 이렇게 고정이다.
+      let unregistered = false;
+      if (fullCleanup && wasTargets.length) {
+        showBusyOverlay(`${displayName} 연결을 해제하는 중…`);
+        let removal;
+        try {
+          removal = await window.pywebview.api.register(lensName, []); // 빈 목록 = 전부 해제
+        } catch {
+          removal = { ok: false, error: "연결 해제 중 오류가 발생했습니다" };
+        }
+        hideBusyOverlay();
+        unregistered = !!(removal && removal.ok);
+        if (!unregistered) {
+          // 여기서 그냥 지워버리면 되돌릴 수 없는 쪽으로 사용자를 끌고 가는 셈이다.
+          // 다만 막아버리면 "호환되지 않는 버전"을 지우려는 사람의 유일한 탈출구가
+          // 사라진다 — 무슨 일이 생기는지 말하고 고르게 한다.
+          const go = confirm(
+            `${wasTargetNames} 연결을 해제하지 못했습니다\n\n` +
+              `${(removal && removal.error) || "원인을 알 수 없습니다"}\n\n` +
+              `지금 지우면 ${wasTargetNames}에는 이름만 남습니다\n\n그래도 지울까요?`
+          );
+          if (!go) {
+            showToast("삭제를 멈췄습니다, 연결은 그대로입니다");
+            return;
+          }
+        }
+      }
       showBusyOverlay(`${displayName}를 삭제하는 중…`);
       let result, lens;
       try {
-        result = await window.pywebview.api.uninstall(lensName, extra === "with-license");
+        result = await window.pywebview.api.uninstall(lensName, fullCleanup);
         lens = await window.pywebview.api.diagnose_one(lensName, false);
       } finally {
         hideBusyOverlay();
       }
       replaceCard(lensName, lens);
-      if (result.ok) {
+      if (result.ok && unregistered) {
+        // 연결까지 지웠으니 껐다 켜면 정말로 정리된다 — 이제 이 안내가 사실이다.
         await noteLensFilesChanged({
           hostAppIds: wasHostIds,
-          headline: result.license_removed
-            ? `${displayName}를 삭제했습니다 — 라이선스도 이 컴퓨터에서 지웠습니다.`
-            : `${displayName}를 삭제했습니다 — 다시 설치할 수 있습니다.`,
-          afterRestart: "삭제된 도구를 아직 들고 있습니다.",
-          whenClosedResult: "정리됩니다.",
+          headline: `${displayName}를 삭제하고 ${wasTargetNames} 연결도 해제했습니다${
+            result.license_removed ? ", 라이선스도 지웠습니다" : ""
+          }`,
+          afterRestart: "삭제된 도구를 아직 들고 있습니다",
+          whenClosedResult: "정리됩니다",
         });
+      } else if (result.ok && wasTargets.length) {
+        // 연결을 남긴 경우 — 껐다 켜도 정리되지 않는다(설정에 항목이 그대로 있다).
+        // 예전엔 여기서도 "껐다 켜면 정리됩니다"라고 했는데 사실이 아니었다.
+        // 시킬 게 없으니 시키지 않고, 지금 상태가 어떤지만 정확히 말한다.
+        showToast(
+          `${displayName} 삭제 완료, ${wasTargetNames} 연결은 남겨뒀습니다`
+        );
+      } else if (result.ok) {
+        showToast(
+          result.license_removed
+            ? `${displayName} 삭제 완료, 라이선스도 지웠습니다`
+            : `${displayName} 삭제 완료`
+        );
       } else if ((result.blocking_apps || []).length) {
-        await offerCloseHostAppsAndRetry(lensName, "uninstall", result.blocking_apps);
+        await offerCloseHostAppsAndRetry(lensName, "uninstall", result.blocking_apps, fullCleanup);
       } else {
-        showToast(result.error || "삭제에 실패했습니다.");
+        showToast(result.error || "삭제에 실패했습니다");
       }
     }
   } finally {
@@ -793,7 +843,7 @@ function verifyPendingResolve(replacedLensName) {
   const label = CHECK_ID_LABEL[checkId] || checkId;
   const check = lens.checks.find((c) => c.id === checkId);
   const solved = !check || ["ok", "active", "skip", "info-skip"].includes(check.status);
-  showToast(solved ? `${label} — 해결됐습니다.` : `${label} — 아직 남아 있습니다.`);
+  showToast(solved ? `${label} 해결됨` : `${label} 아직 남아 있음`);
 }
 
 async function resolveCheck(lensName, checkId, resolver, repairId) {
@@ -889,7 +939,7 @@ function renderActivateModalState(lens, displayName) {
   document.getElementById("modal-buy").hidden = !!(lens && lens.license_status === "active");
 
   if (lens && lens.not_installed) {
-    msgEl.textContent = `${displayName}가 아직 설치되지 않았습니다. 먼저 설치해야 활성화할 수 있어요.`;
+    msgEl.textContent = `${displayName}가 아직 설치되지 않았습니다, 먼저 설치해주세요`;
     msgEl.className = "modal-msg fail";
     keyInput.disabled = true;
     apiKeyInput.disabled = true;
@@ -899,7 +949,7 @@ function renderActivateModalState(lens, displayName) {
     installBtn.textContent = "설치";
     installBtn.dataset.mode = "install";
   } else if (lens && lens.update_available) {
-    msgEl.textContent = "새 버전이 있습니다. 업데이트하거나, 지금 버전으로 바로 활성화해도 됩니다.";
+    msgEl.textContent = "새 버전이 있습니다, 지금 버전으로 바로 활성화해도 됩니다";
     msgEl.className = "modal-msg";
     keyInput.disabled = false;
     apiKeyInput.disabled = false;
@@ -945,7 +995,7 @@ document.getElementById("modal-install-btn").addEventListener("click", async () 
     // 빠져나갈 방법이 없었다.
     stopPolling();
     hideBusyOverlay();
-    msgEl.textContent = "설치/업데이트 중 오류가 발생했습니다. 다시 시도해주세요.";
+    msgEl.textContent = "설치/업데이트 중 오류가 발생했습니다, 다시 시도해주세요";
     msgEl.className = "modal-msg fail";
     installBtn.disabled = false;
     installBtn.textContent = isUpdate ? "업데이트" : "설치";
@@ -957,10 +1007,10 @@ document.getElementById("modal-install-btn").addEventListener("click", async () 
 
   if (result.ok) {
     renderActivateModalState(lens, lens.display_name);
-    msgEl.textContent = isUpdate ? "업데이트 완료." : "설치 완료! 이제 라이선스 키를 입력하세요.";
+    msgEl.textContent = isUpdate ? "업데이트 완료" : "설치 완료! 이제 라이선스 키를 입력하세요";
     msgEl.className = "modal-msg ok";
   } else {
-    msgEl.textContent = "설치/업데이트에 실패했습니다. 잠시 후 다시 시도해주세요.";
+    msgEl.textContent = "설치/업데이트에 실패했습니다, 잠시 후 다시 시도해주세요";
     msgEl.className = "modal-msg fail";
     installBtn.disabled = false;
     installBtn.textContent = isUpdate ? "업데이트" : "설치";
@@ -990,12 +1040,12 @@ async function confirmActivate() {
   const msgEl = document.getElementById("modal-msg");
 
   if (!key) {
-    msgEl.textContent = "라이선스 키를 입력하세요.";
+    msgEl.textContent = "라이선스 키를 입력하세요";
     msgEl.className = "modal-msg fail";
     return;
   }
   if (needsApiKey && !apiKey) {
-    msgEl.textContent = "DART API 키를 입력하세요.";
+    msgEl.textContent = "DART API 키를 입력하세요";
     msgEl.className = "modal-msg fail";
     return;
   }
@@ -1078,24 +1128,24 @@ function registrationChangeNotes(changedTargets, runningHosts, kind) {
     // 거짓말이 된다("해도 아무 변화 없음"과 같은 종류의 실망이다).
     notes.push(
       appear
-        ? `${hostAppNames(runningChanged)}을(를) 껐다 켜야 도구가 나타납니다.`
-        : `${hostAppNames(runningChanged)}에 아직 도구가 남아 있으면 껐다 켜주세요.`
+        ? `${hostAppNames(runningChanged)}을(를) 껐다 켜야 도구가 나타납니다`
+        : `${hostAppNames(runningChanged)}에 아직 도구가 남아 있으면 껐다 켜주세요`
     );
   }
   if (changedTargets.includes("claude-desktop") && !runningChanged.some((a) => a.id === "claude-desktop")) {
-    notes.push(`Claude Desktop을 ${appear ? "열면 도구가 나타납니다" : "다음에 열면 목록에서 빠집니다"}.`);
+    notes.push(`Claude Desktop을 ${appear ? "열면 도구가 나타납니다" : "다음에 열면 목록에서 빠집니다"}`);
   }
   // codex인데 ChatGPT 앱이 안 떠 있는 경우 — CLI만 쓰는 사람일 수도 있어서 한쪽으로
   // 단정하지 않고 둘 다 말한다.
   if (changedTargets.includes("codex") && !runningChanged.some((a) => a.id === "chatgpt")) {
     notes.push(
       appear
-        ? "ChatGPT 앱은 열 때, Codex CLI는 새 대화부터 반영됩니다."
-        : "ChatGPT 앱은 다음에 열 때, Codex CLI는 새 대화부터 빠집니다."
+        ? "ChatGPT 앱은 열 때, Codex CLI는 새 대화부터 반영됩니다"
+        : "ChatGPT 앱은 다음에 열 때, Codex CLI는 새 대화부터 빠집니다"
     );
   }
   if (changedTargets.includes("claude-code")) {
-    notes.push(`${TARGET_LABEL["claude-code"]}는 새로 시작하는 대화부터 ${appear ? "반영됩니다" : "빠집니다"}.`);
+    notes.push(`${TARGET_LABEL["claude-code"]}는 새로 시작하는 대화부터 ${appear ? "반영됩니다" : "빠집니다"}`);
   }
   return { notes, runningChanged };
 }
@@ -1104,7 +1154,7 @@ async function openRegisterModal(lensName) {
   registerTargetLens = lensName;
   const lens = lensDataCache[lensName];
   const displayName = lens ? lens.display_name : lensName;
-  document.getElementById("register-title").textContent = `${displayName} — MCP 등록 대상`;
+  document.getElementById("register-title").textContent = `${displayName} MCP 등록 대상`;
   setModalInteractive("register-backdrop", true); // 직전 대기 중 잠근 걸 푼다
   const msgEl = document.getElementById("register-msg");
   msgEl.textContent = "";
@@ -1117,7 +1167,7 @@ async function openRegisterModal(lensName) {
   // 이미 등록된 게 있으면 이 창의 성격을 먼저 말해준다 — 체크를 푸는 것이 해제라는 걸
   // 모르면, 해제하려고 왔다가 그냥 [등록]만 다시 누르고 나간다.
   if (((lensDataCache[lensName] || {}).targets || []).length) {
-    msgEl.textContent = "체크된 곳이 지금 연결된 곳입니다. 체크를 풀고 [등록]을 누르면 그 앱에서 해제됩니다.";
+    msgEl.textContent = "체크를 풀고 [등록]을 누르면 그 앱에서 해제됩니다";
     msgEl.className = "modal-msg";
   }
   startRegisterTargetWatch(lensName);
@@ -1133,8 +1183,8 @@ function checkedRegisterTargets() {
 // 체크박스 옆에 붙는 상태 한 마디. "지금 등록돼 있음"이 눈에 보여야 체크를 푸는 것이
 // 곧 해제라는 게 읽힌다 — 안 그러면 체크박스가 "설치 여부" 표시로 오해된다.
 function targetStateNote(target, currentTargets) {
-  if (!target.installed) return " — 아직 설치 안 됨";
-  return currentTargets.includes(target.id) ? " — 지금 등록돼 있음" : "";
+  if (!target.installed) return " (아직 설치 안 됨)";
+  return currentTargets.includes(target.id) ? " (지금 등록돼 있음)" : "";
 }
 
 async function refreshRegisterTargets(lensName, { keepSelection = null } = {}) {
@@ -1182,7 +1232,7 @@ async function refreshRegisterTargets(lensName, { keepSelection = null } = {}) {
       e.preventDefault(); // label 안이라 클릭이 체크박스로 새지 않게
       window.pywebview.api.open_url(btn.dataset.installUrl);
       const msgEl = document.getElementById("register-msg");
-      msgEl.textContent = "설치가 끝나면 여기서 자동으로 확인합니다 — 창은 열어두세요.";
+      msgEl.textContent = "설치가 끝나면 자동으로 확인합니다, 창은 열어두세요";
       msgEl.className = "modal-msg";
     });
   });
@@ -1226,7 +1276,7 @@ function startRegisterTargetWatch(lensName) {
       if (box) box.checked = true;
     });
     const msgEl = document.getElementById("register-msg");
-    msgEl.textContent = `${nowInstalled.map((t) => t.label).join(", ")} 설치를 확인했습니다 — '등록'을 눌러 계속하세요.`;
+    msgEl.textContent = `${nowInstalled.map((t) => t.label).join(", ")} 설치 확인됨, [등록]을 눌러주세요`;
     msgEl.className = "modal-msg ok";
   }, 3000);
 }
@@ -1265,12 +1315,12 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     // 전부 체크를 푼 것은 "전부 해제"라는 뜻이다 — 등록된 게 있는데도 막아버리면
     // 해제할 방법이 화면에서 사라진다(백엔드는 원래 이 경우를 처리한다).
     if (!beforeTargets.length) {
-      msgEl.textContent = "하나 이상 선택하세요.";
+      msgEl.textContent = "하나 이상 선택하세요";
       msgEl.className = "modal-msg fail";
       return;
     }
     const names = beforeTargets.map((t) => TARGET_LABEL[t] || t).join(", ");
-    if (!confirm(`${names} 연결을 모두 해제할까요?\n\n프로그램이 지워지는 건 아닙니다 — 연결만 끊습니다.`)) {
+    if (!confirm(`${names} 연결을 모두 해제할까요?\n\n프로그램은 그대로 두고 연결만 끊습니다`)) {
       return;
     }
   }
@@ -1284,7 +1334,7 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     result = await window.pywebview.api.register(lensName, checked);
     lens = await window.pywebview.api.diagnose_one(lensName, false);
   } catch {
-    msgEl.textContent = "등록 중 오류가 발생했습니다. 다시 시도해주세요.";
+    msgEl.textContent = "등록 중 오류가 발생했습니다, 다시 시도해주세요";
     msgEl.className = "modal-msg fail";
     confirmBtn.disabled = false;
     return;
@@ -1313,7 +1363,7 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     // 처음 도구를 쓸 때 뜨는 허용 창에서 겁먹고 멈추지 않게(해제만 한 경우엔 쓸 일이
     // 없는 얘기라 붙이지 않는다).
     if (addedTargets.length && notes.length) {
-      notes.push("처음 도구를 쓸 때 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.");
+      notes.push("처음 도구를 쓸 때 허용 여부를 물어봅니다 (한 번 허용하면 다시 묻지 않습니다)");
     }
 
     // 등록만으로는 도구가 안 도는 경우를 말해준다.
@@ -1336,15 +1386,15 @@ document.getElementById("register-confirm").addEventListener("click", async () =
     const removedLabels = removedTargets.map((t) => TARGET_LABEL[t] || t);
     let headline;
     if (addedLabels.length && removedLabels.length) {
-      headline = `${addedLabels.join(", ")} 등록 · ${removedLabels.join(", ")} 해제 완료.`;
+      headline = `${addedLabels.join(", ")} 등록, ${removedLabels.join(", ")} 해제 완료`;
     } else if (removedLabels.length) {
-      headline = `${removedLabels.join(", ")} 등록을 해제했습니다.`;
+      headline = `${removedLabels.join(", ")} 연결을 해제했습니다`;
     } else if (addedLabels.length) {
-      headline = `${addedLabels.join(", ")}에 등록했습니다.`;
+      headline = `${addedLabels.join(", ")}에 등록했습니다`;
     } else {
-      headline = onboardingActive ? "등록 완료." : "이미 이대로 연결돼 있습니다.";
+      headline = onboardingActive ? "등록 완료" : "이미 이대로 연결돼 있습니다";
     }
-    msgEl.textContent = notes.length ? `${headline.replace(/\.$/, "")} — ${notes.join(" ")}` : headline;
+    msgEl.textContent = notes.length ? `${headline}, ${notes.join(" ")}` : headline;
     msgEl.className = "modal-msg ok";
 
     // 마법사 밖에서 등록한 경우엔 여기가 유일한 안내 지점이라, 안내만 하지 말고
@@ -1376,7 +1426,7 @@ document.getElementById("register-confirm").addEventListener("click", async () =
       if (registerTargetLens === lensName) closeRegisterModal(true);
     }, 700);
   } else {
-    msgEl.textContent = result.error || "등록에 실패했습니다.";
+    msgEl.textContent = result.error || "등록에 실패했습니다";
     msgEl.className = "modal-msg fail";
   }
 });
@@ -1464,7 +1514,7 @@ function applyTelegramLoginStatus(status) {
   const nextBtn = document.getElementById("telegram-login-next");
 
   if (status.status === "need_credentials") {
-    msgEl.textContent = "처음 연결이라 API_ID/API_HASH가 필요합니다 — my.telegram.org를 열었습니다.";
+    msgEl.textContent = "API_ID/API_HASH가 필요합니다, my.telegram.org를 열었습니다";
     msgEl.className = "modal-msg";
     renderTelegramLoginStep("credentials");
     window.pywebview.api.open_telegram_api_signup();
@@ -1476,17 +1526,17 @@ function applyTelegramLoginStatus(status) {
     // channel은 login_cli가 텔레그램 서버 응답에서 실제 전송 경로를 읽어온 값 —
     // "텔레그램 앱으로 보냈다"고 무조건 가정하면 실제로 SMS/전화로 갔을 때 엉뚱한 곳을
     // 보게 만든다(실사용 중 "코드가 안 온다" 문의의 원인이었음).
-    msgEl.textContent = status.channel || "인증 코드를 보냈습니다.";
+    msgEl.textContent = status.channel || "인증 코드를 보냈습니다";
     msgEl.className = "modal-msg ok";
     renderTelegramLoginStep("code");
   } else if (status.status === "need_2fa") {
-    msgEl.textContent = "2단계 인증이 걸려 있는 계정입니다.";
+    msgEl.textContent = "2단계 인증이 걸려 있는 계정입니다";
     msgEl.className = "modal-msg";
     renderTelegramLoginStep("2fa");
   } else if (status.status === "error") {
     // 단계는 그대로 — 같은 입력칸을 다시 보여주고 값만 비워 재입력을 유도한다
     // (기존 대화형 CLI가 같은 자리에서 재시도하던 것과 동일한 동작).
-    msgEl.textContent = status.message || "오류가 발생했습니다. 다시 시도해주세요.";
+    msgEl.textContent = status.message || "오류가 발생했습니다, 다시 시도해주세요";
     msgEl.className = "modal-msg fail";
     document.querySelectorAll("#telegram-login-fields input").forEach((el) => (el.value = ""));
     const firstInput = document.querySelector("#telegram-login-fields input");
@@ -1512,7 +1562,7 @@ function applyTelegramLoginStatus(status) {
       if (telegramLoginTargetLens === lensName) closeTelegramLoginModal(true);
     }, 1200);
   } else {
-    msgEl.textContent = "알 수 없는 응답입니다.";
+    msgEl.textContent = "알 수 없는 응답입니다";
     msgEl.className = "modal-msg fail";
   }
 }
@@ -1561,7 +1611,7 @@ document.getElementById("telegram-login-next").addEventListener("click", async (
   } catch {
     // 여기서 안 잡으면 "확인하는 중…"에서 버튼이 영구 비활성 — 로그인 도중 빠져나갈
     // 방법이 취소밖에 없었다.
-    msgEl.textContent = "확인 중 오류가 발생했습니다. 다시 시도해주세요.";
+    msgEl.textContent = "확인 중 오류가 발생했습니다, 다시 시도해주세요";
     msgEl.className = "modal-msg fail";
   } finally {
     nextBtn.disabled = false;
@@ -1576,7 +1626,7 @@ document.addEventListener("click", (e) => {
   if (action === "copy-cmd") {
     const cmd = btn.dataset.cmd;
     window.pywebview.api.copy_to_clipboard(cmd).then((ok) => {
-      showToast(ok ? "명령어가 복사되었습니다." : "클립보드 복사에 실패했습니다.");
+      showToast(ok ? "명령어가 복사되었습니다" : "클립보드 복사에 실패했습니다");
     });
     return;
   }
@@ -1600,7 +1650,7 @@ document.addEventListener("click", (e) => {
   }
   if (action === "purchase") {
     window.pywebview.api.open_purchase_page();
-    showToast("브라우저에서 구매 페이지를 열었습니다.");
+    showToast("브라우저에서 구매 페이지를 열었습니다");
     return;
   }
   if (action === "uninstall") {
@@ -1634,10 +1684,10 @@ async function copyDiagnosticText(lensName, btn) {
   const text = await window.pywebview.api.diagnostic_text(lensName);
   const ok = await window.pywebview.api.copy_to_clipboard(text);
   if (!ok) {
-    showToast("클립보드 복사에 실패했습니다.");
+    showToast("클립보드 복사에 실패했습니다");
     return;
   }
-  showToast("진단 결과가 복사되었습니다.");
+  showToast("진단 결과가 복사되었습니다");
   const original = btn.textContent;
   btn.textContent = "복사됨 ✓";
   btn.disabled = true;
@@ -1652,7 +1702,7 @@ document.getElementById("modal-cancel").addEventListener("click", () => closeAct
 // 모달은 열어둔 채로 브라우저만 띄운다 — 결제하고 메일로 받은 키를 바로 여기 붙여넣게.
 document.getElementById("modal-buy-btn").addEventListener("click", async () => {
   await window.pywebview.api.open_purchase_page();
-  showToast("브라우저에서 구매 페이지를 열었습니다.");
+  showToast("브라우저에서 구매 페이지를 열었습니다");
 });
 document.getElementById("modal-confirm").addEventListener("click", confirmActivate);
 document.getElementById("modal-apikey-reopen-signup").addEventListener("click", () => {
@@ -1702,7 +1752,7 @@ async function openGetAppModal() {
     apps = [];
   }
   if (!apps.length) {
-    showToast("받는 곳을 열지 못했습니다. 잠시 뒤 다시 시도해주세요.");
+    showToast("받는 곳을 열지 못했습니다, 잠시 뒤 다시 시도해주세요");
     return;
   }
   const list = document.getElementById("getapp-list");
@@ -1710,7 +1760,7 @@ async function openGetAppModal() {
     .map(
       (a) => `
         <div class="register-target-row${a.installed ? " disabled" : ""}">
-          <span>${escapeHtml(a.label)}${a.installed ? " — 이미 있습니다" : ""}</span>
+          <span>${escapeHtml(a.label)}${a.installed ? " (이미 있습니다)" : ""}</span>
           ${
             a.installed
               ? ""
@@ -1722,7 +1772,7 @@ async function openGetAppModal() {
   list.querySelectorAll(".target-install-link").forEach((btn) => {
     btn.addEventListener("click", () => {
       window.pywebview.api.open_url(btn.dataset.installUrl);
-      showToast("설치가 끝나면 \"진단 재실행\"을 눌러주세요.");
+      showToast("설치가 끝나면 [진단 재실행]을 눌러주세요");
     });
   });
   document.getElementById("getapp-backdrop").hidden = false;
@@ -1754,7 +1804,7 @@ document.getElementById("restart-claude-btn").addEventListener("click", async (e
   if (!running.length) {
     const r = await window.pywebview.api.launch_host_apps(installedHostApps.map((a) => a.id));
     showToast(
-      r.ok ? `${(r.launched || []).join(" · ")}을(를) 실행했습니다.` : r.error || "실행하지 못했습니다."
+      r.ok ? `${(r.launched || []).join(" · ")}을(를) 실행했습니다` : r.error || "실행하지 못했습니다"
     );
     return;
   }
@@ -1766,8 +1816,8 @@ document.getElementById("restart-claude-btn").addEventListener("click", async (e
     explain: false, // "새 파일을 받아도…"는 업데이트 안내다 — 직접 누른 이 자리엔 안 맞는다
     title: `${names}을(를) 껐다 켤까요?`,
     body:
-      (running.length > 1 ? "껐다 켤 앱을 아래에서 고르세요 — 체크를 풀면 그 앱은 그대로 둡니다.\n\n" : "") +
-      "등록한 도구를 새로 읽어들이려면 껐다 켜는 과정이 필요합니다.\n대화 내용은 지워지지 않습니다.",
+      (running.length > 1 ? "껐다 켤 앱을 고르세요\n체크를 푼 앱은 그대로 둡니다\n\n" : "") +
+      "대화 내용은 지워지지 않습니다",
   });
 });
 
@@ -1790,7 +1840,7 @@ async function openSupportModal() {
     // 만들지도 못했으면 왜 그런지 알려준다 — 도움이 필요한 사람이 도움을 요청할
     // 방법까지 잃으면 안 되니, 메일 주소는 그대로 띄워준다.
     if (info.ok === false) {
-      statusEl.textContent = `파일을 만들지 못했습니다. ${info.error || ""}\n아래 주소로 이 문구와 함께 메일 주세요.`;
+      statusEl.textContent = `파일을 만들지 못했습니다 ${info.error || ""}\n아래 주소로 이 문구와 함께 메일 주세요`;
       statusEl.className = "modal-msg fail";
       document.getElementById("support-to").textContent = info.to || "";
       return;
@@ -1800,14 +1850,14 @@ async function openSupportModal() {
     // 폴더가 실제로 열렸을 때만 열렸다고 한다. 못 열었으면 어디 있는지 알려줘야
     // 사용자가 열리지도 않은 창을 찾지 않는다(맥에서 권한 때문에 막힐 수 있다).
     statusEl.textContent = info.revealed
-      ? "폴더가 열렸습니다 — zip 파일을 첨부해 보내주세요."
-      : `아래 파일을 첨부해 보내주세요.\n${info.zip_path}`;
+      ? "폴더가 열렸습니다, zip 파일을 첨부해 보내주세요"
+      : `아래 파일을 첨부해 보내주세요\n${info.zip_path}`;
     statusEl.className = "modal-msg ok";
     document.getElementById("support-to").textContent = info.to;
     document.getElementById("support-subject").textContent = info.subject;
     document.getElementById("support-body").textContent = info.body;
   } catch (e) {
-    statusEl.textContent = `번들을 만들지 못했습니다. ${(e && e.message) || ""}`.trim();
+    statusEl.textContent = `번들을 만들지 못했습니다 ${(e && e.message) || ""}`.trim();
     statusEl.className = "modal-msg fail";
   }
 }
@@ -1826,17 +1876,17 @@ document.getElementById("support-backdrop").addEventListener("click", async (e) 
   if (!btn) return;
   const text = (document.getElementById(btn.dataset.copyFrom) || {}).textContent || "";
   if (!text.trim()) {
-    showToast("아직 만들어지지 않았습니다. 잠시 후 다시 눌러주세요.");
+    showToast("아직 만들어지지 않았습니다, 잠시 후 다시 눌러주세요");
     return;
   }
   const ok = await window.pywebview.api.copy_to_clipboard(text);
-  showToast(ok ? "복사되었습니다." : "클립보드 복사에 실패했습니다.");
+  showToast(ok ? "복사되었습니다" : "클립보드 복사에 실패했습니다");
 });
 document.getElementById("support-copy").addEventListener("click", async () => {
   if (!supportInfo) return;
   const text = `받는사람: ${supportInfo.to}\n제목: ${supportInfo.subject}\n\n${supportInfo.body}`;
   const ok = await window.pywebview.api.copy_to_clipboard(text);
-  showToast(ok ? "메일 내용이 복사되었습니다." : "클립보드 복사에 실패했습니다.");
+  showToast(ok ? "메일 내용이 복사되었습니다" : "클립보드 복사에 실패했습니다");
 });
 
 /* ---------- 문제 해결(문의 전에 해볼 것) ----------
@@ -1853,8 +1903,7 @@ const TROUBLESHOOT_STEPS = [
     key: "restart",
     title: "쓰는 앱(Claude · ChatGPT)을 완전히 껐다 켜기",
     desc:
-      "창을 X로 닫는 것만으로는 새 설정이 적용되지 않습니다. " +
-      "도구가 안 보이거나 방금 바꾼 게 반영이 안 될 때는 대부분 여기서 끝납니다.",
+      "창을 X로 닫는 것만으로는 새 설정이 적용되지 않습니다, 도구가 안 보일 때 먼저 해보세요",
     action: "지금 다시 시작",
     async run(setResult) {
       const running = await runningHostApps();
@@ -1864,7 +1913,7 @@ const TROUBLESHOOT_STEPS = [
         if (!installed.length) {
           setResult(
             "fail",
-            "Claude Desktop이나 ChatGPT 앱이 필요합니다. 위 \"AI 앱 받기\" 버튼에서 받는 곳을 열 수 있습니다."
+            "Claude Desktop이나 ChatGPT 앱이 필요합니다, 위 [AI 앱 받기]에서 받으실 수 있습니다"
           );
           return;
         }
@@ -1872,8 +1921,8 @@ const TROUBLESHOOT_STEPS = [
         setResult(
           r.ok ? "ok" : "fail",
           r.ok
-            ? `${(r.launched || []).join(" · ")}을(를) 실행했습니다.`
-            : r.error || "실행하지 못했습니다. 직접 열어주세요."
+            ? `${(r.launched || []).join(" · ")}을(를) 실행했습니다`
+            : r.error || "실행하지 못했습니다, 직접 열어주세요"
         );
         return;
       }
@@ -1881,15 +1930,15 @@ const TROUBLESHOOT_STEPS = [
       setResult(
         r.ok ? "ok" : "fail",
         r.ok
-          ? `${(r.restarted || []).join(" · ")}을(를) 다시 시작했습니다. 그 앱에서 다시 한 번 물어봐주세요.`
-          : r.error || "다시 시작하지 못했습니다. 트레이 아이콘에서 종료 후 직접 열어주세요."
+          ? `${(r.restarted || []).join(" · ")} 다시 시작 완료, 그 앱에서 다시 물어봐주세요`
+          : r.error || "다시 시작하지 못했습니다, 트레이 아이콘에서 종료 후 직접 열어주세요"
       );
     },
   },
   {
     key: "update",
     title: "최신 버전인지 확인",
-    desc: "겪고 계신 문제가 이미 고쳐졌을 수 있습니다. 업데이트는 1~2분이면 끝납니다.",
+    desc: "이미 고쳐진 문제일 수 있습니다, 업데이트는 1~2분이면 끝납니다",
     action: "업데이트 확인",
     async run(setResult) {
       // 캐시가 아니라 지금 다시 본다 — 이 창을 연 이유가 "뭔가 이상하다"이므로,
@@ -1898,11 +1947,11 @@ const TROUBLESHOOT_STEPS = [
       render(data);
       const stale = lensesWithUpdates();
       if (!stale.length) {
-        setResult("ok", "설치된 Lens가 모두 최신 버전입니다.");
+        setResult("ok", "설치된 Lens가 모두 최신 버전입니다");
         return;
       }
       const names = stale.map((l) => `${l.display_name} v${l.latest_version}`).join(", ");
-      setResult("warn", `업데이트가 있습니다 — ${names}`);
+      setResult("warn", `업데이트가 있습니다: ${names}`);
       closeTroubleshootModal();
       maybeShowUpdateNotice({ force: true });
     },
@@ -1911,15 +1960,14 @@ const TROUBLESHOOT_STEPS = [
     key: "connect",
     title: "데이터가 실제로 들어오는지 점검",
     desc:
-      "설치·라이선스·인터넷 연결을 한 번에 확인합니다. " +
-      "실제로 시세를 한 번 불러보기 때문에 30초쯤 걸릴 수 있습니다.",
+      "설치·라이선스·인터넷 연결을 한 번에 확인합니다, 30초쯤 걸립니다",
     action: "지금 점검",
     async run(setResult) {
       const data = await window.pywebview.api.diagnose(true);
       render(data);
       const bad = (data.lenses || []).filter((l) => !l.not_installed && l.overall === "fail");
       if (!bad.length) {
-        setResult("ok", "모두 정상입니다 — 데이터를 가져오는 데 문제가 없습니다.");
+        setResult("ok", "모두 정상입니다");
         return;
       }
       // 무엇이 잘못됐는지(summary)와 무엇을 하면 되는지(action)를 같이 적는다.
@@ -1937,7 +1985,7 @@ const TROUBLESHOOT_STEPS = [
           if (c.action) lines.push(`   → ${c.action}`);
         });
         if (l.repairable_repair_id) {
-          lines.push("   → 아래 카드의 [고치기] 버튼으로 바로 해결할 수 있습니다.");
+          lines.push("   → 아래 카드의 [고치기] 버튼으로 바로 해결할 수 있습니다");
         }
       });
       setResult("fail", lines.join("\n"));
@@ -1984,7 +2032,7 @@ async function runTroubleshootStep(key, btn) {
   try {
     await step.run((status, text) => setTroubleshootResult(key, status, text));
   } catch (e) {
-    setTroubleshootResult(key, "fail", `확인하지 못했습니다. ${(e && e.message) || ""}`.trim());
+    setTroubleshootResult(key, "fail", `확인하지 못했습니다 ${(e && e.message) || ""}`.trim());
   } finally {
     troubleshootBusy = false;
     btn.disabled = false;
@@ -2024,19 +2072,19 @@ const TOUR_STEPS = [
     selector: "#readout",
     title: "전체 상태 요약",
     desc:
-      "몇 개 Lens가 정상인지 한눈에 보여줍니다.\n업데이트나 조치가 필요하면 여기 같이 표시됩니다.\n\n" +
-      "Lens는 Claude Desktop · Claude Code · ChatGPT\n어디에 연결해도 똑같이 동작합니다.\n" +
-      "여러 곳에 연결해두고 그날 쓰시는 쪽에서 물어보셔도 됩니다.",
+      "몇 개 Lens가 정상인지 한눈에 보여줍니다\n업데이트나 조치가 필요하면 여기 같이 표시됩니다\n\n" +
+      "Lens는 Claude Desktop · Claude Code · ChatGPT\n어디에 연결해도 똑같이 동작합니다\n" +
+      "여러 곳에 연결해두고 그날 쓰시는 쪽에서 물어보셔도 됩니다",
   },
   {
     selector: ".card:first-child .focus-ring",
     title: "상태 표시등",
-    desc: "원 색깔로 상태를 보여줍니다.\n\n틸색(가득 참) — 정상\n주황 — 주의\n빨강 — 조치 필요\n회색 — 아직 설치 안 됨",
+    desc: "원 색깔로 상태를 보여줍니다\n\n틸색(가득 참): 정상\n주황: 주의\n빨강: 조치 필요\n회색: 아직 설치 안 됨",
   },
   {
     selector: ".card:first-child .field-list",
     title: "세부 정보",
-    desc: "이 Lens의 상태를 항목별로 보여줍니다.\n\n업데이트가 있는지\n라이선스가 활성화됐는지\nMCP에 등록됐는지\n마지막으로 진단한 시각",
+    desc: "이 Lens의 상태를 항목별로 보여줍니다\n\n업데이트가 있는지\n라이선스가 활성화됐는지\nMCP에 등록됐는지\n마지막으로 진단한 시각",
   },
   {
     selector: ".card:first-child",
@@ -2044,30 +2092,30 @@ const TOUR_STEPS = [
     // "명령어를 누르면 복사된다"고 안내하고 있었는데, 지금은 누르면 그 자리에서
     // 실행되고 끝나면 자동으로 다시 진단한다 — 기능이 바뀐 뒤 설명이 안 따라왔었다.
     desc:
-      "문제가 있으면 카드에 \"문제 N건\" 블록이 나타나고,\n무엇이 걸렸는지 옆에 같이 보입니다.\n" +
-      "누르면 자세한 내용을 따로 창으로 보여줍니다.\n\n" +
-      "지금 이 Lens는 문제가 없어 그 블록이 안 보이지만,\n예시로 그 창을 띄워드릴게요.\n\n" +
-      "\"조치\" 옆의 굵은 명령어를 누르면 그 자리에서 실행되고,\n끝나면 해결됐는지 자동으로 다시 진단합니다.",
+      "문제가 있으면 카드에 [문제 N건] 블록이 나타나고,\n무엇이 걸렸는지 옆에 같이 보입니다\n" +
+      "누르면 자세한 내용을 따로 창으로 보여줍니다\n\n" +
+      "지금 이 Lens는 문제가 없어 그 블록이 안 보이지만,\n예시로 그 창을 띄워드릴게요\n\n" +
+      "[조치] 옆의 굵은 명령어를 누르면 그 자리에서 실행되고,\n끝나면 해결됐는지 자동으로 다시 진단합니다",
     demo: "detail",
   },
   {
     selector: ".card:first-child .actions",
     title: "동작 버튼",
     desc:
-      "진단 — 지금 상태를 다시 검사합니다\n" +
+      "진단: 지금 상태를 다시 검사합니다\n" +
       // 앱 이름을 여기 다 늘어놓으면 한 줄을 넘겨 접히고, 접힌 줄이 다음 항목처럼
       // 보여 목록 모양이 무너진다 — 어떤 앱이 있는지는 누르면 나오는 모달이 보여준다.
-      "MCP 등록 — 어떤 앱에 연결할지 고릅니다\n" +
-      "활성화 — 라이선스 키를 넣습니다\n" +
-      "복구 — 발견된 문제를 자동으로 고칩니다\n\n" +
+      "MCP 등록: 어떤 앱에 연결할지 고릅니다\n" +
+      "활성화: 라이선스 키를 넣습니다\n" +
+      "복구: 발견된 문제를 자동으로 고칩니다\n\n" +
       // 아래 넷은 상황·Lens에 따라서만 나타난다. 특히 삭제는 빨간 버튼인데 설명이
       // 아예 없어서, 가이드를 다 본 사람도 그게 뭘 지우는지 모르는 채로 남았다.
-      "상황에 따라 더 나타나는 버튼도 있습니다.\n\n" +
-      "설치 / 업데이트 — 아직 없거나 새 버전이 있을 때\n" +
-      "텔레그램 로그인 — TelegramLens 카드에만\n" +
-      "삭제 — 이 Lens를 지웁니다(빨간 버튼).\n" +
-      "받은 라이선스 키는 그대로라 다시 설치할 수 있습니다.\n\n" +
-      "결과 복사는 \"문제 자세히\" 창 안에 있습니다.",
+      "상황에 따라 더 나타나는 버튼도 있습니다\n\n" +
+      "설치 / 업데이트: 아직 없거나 새 버전이 있을 때\n" +
+      "텔레그램 로그인: TelegramLens 카드에만\n" +
+      "삭제: 이 Lens를 지웁니다 (빨간 버튼)\n" +
+      "받은 라이선스 키는 그대로라 다시 설치할 수 있습니다\n\n" +
+      "결과 복사는 [문제 자세히] 창 안에 있습니다",
   },
   // 상단바 버튼은 여기서부터 왼→오른쪽이 아니라 "자주 쓰는 순"으로 설명한다.
   // 예전엔 지원 문의·매니저 업데이트·가이드 셋만 있어서, 정작 제일 많이 누르는
@@ -2076,9 +2124,9 @@ const TOUR_STEPS = [
     selector: "#refresh-btn",
     title: "진단 재실행",
     desc:
-      "지금 상태를 처음부터 다시 검사합니다.\n" +
-      "Lens를 설치하거나 키를 넣은 뒤 눌러 확인하세요.\n\n" +
-      "새 버전이 나왔는지도 같이 확인해서,\n있으면 위 버튼들에 업데이트 표시가 뜹니다.",
+      "지금 상태를 처음부터 다시 검사합니다\n" +
+      "Lens를 설치하거나 키를 넣은 뒤 눌러 확인하세요\n\n" +
+      "새 버전이 나왔는지도 같이 확인해서,\n있으면 위 버튼들에 업데이트 표시가 뜹니다",
   },
   {
     selector: "#restart-claude-btn",
@@ -2088,20 +2136,20 @@ const TOUR_STEPS = [
     title: (el) => el.textContent,
     desc: (el) =>
       el.textContent.includes("받기")
-        ? "Lens는 Claude Desktop이나 ChatGPT 앱 안에서 동작합니다.\n둘 중 하나만 있으면 됩니다.\n\n" +
-          "여기를 누르면 두 곳의 받는 링크를 나란히 보여드립니다.\n설치가 끝나면 \"진단 재실행\"을 눌러주세요.\n" +
-          "그러면 이 버튼이 \"다시 시작\"으로 바뀝니다."
-        : "Claude Desktop·ChatGPT는 켜질 때 설정을 읽고 Lens를 띄웁니다.\n" +
-          "그래서 켜져 있는 동안에 바꾼 것은 그대로 반영되지 않습니다.\n\n" +
-          "MCP 등록을 바꿨을 때, Lens를 업데이트·삭제했을 때\n이 버튼을 눌러주세요.\n" +
-          "그때 켜져 있는 앱만 껐다 켭니다.\n\n" +
-          "\"등록은 됐다는데 도구가 안 보인다\",\n\"업데이트했는데 그대로다\" —\n대부분 여기를 누르면 해결됩니다.",
+        ? "Lens는 Claude Desktop이나 ChatGPT 앱 안에서 동작합니다\n둘 중 하나만 있으면 됩니다\n\n" +
+          "여기를 누르면 두 곳의 받는 링크를 나란히 보여드립니다\n설치가 끝나면 [진단 재실행]을 눌러주세요\n" +
+          "그러면 이 버튼이 [다시 시작]으로 바뀝니다"
+        : "Claude Desktop·ChatGPT는 켜질 때 설정을 읽고 Lens를 띄웁니다\n" +
+          "그래서 켜져 있는 동안에 바꾼 것은 그대로 반영되지 않습니다\n\n" +
+          "MCP 등록을 바꿨을 때, Lens를 업데이트·삭제했을 때\n이 버튼을 눌러주세요\n" +
+          "껐다 켤 앱은 그때 고르실 수 있습니다\n\n" +
+          "\"등록은 됐다는데 도구가 안 보인다\"\n\"업데이트했는데 그대로다\"\n대부분 여기를 누르면 해결됩니다",
     requiresVisible: true,
   },
   {
     selector: "#patchnotes-btn",
     title: "패치노트",
-    desc: "업데이트마다 무엇이 바뀌었는지 적어둔 페이지를 엽니다.",
+    desc: "업데이트마다 무엇이 바뀌었는지 적어둔 페이지를 엽니다",
   },
   {
     // 투어 순서를 상단 버튼 배치와 같게 둔다 — 설명을 듣고 눈을 들었을 때 그 자리에
@@ -2109,16 +2157,16 @@ const TOUR_STEPS = [
     selector: "#troubleshoot-btn",
     title: "문제 해결",
     desc:
-      "무언가 안 될 때 문의보다 먼저 눌러보세요.\n읽는 설명이 아니라 눌러서 바로 실행되는 순서입니다.\n\n" +
+      "무언가 안 될 때 문의보다 먼저 눌러보세요\n눌러서 바로 실행되는 순서입니다\n\n" +
       "1. 쓰는 앱(Claude · ChatGPT)을 완전히 껐다 켜기\n2. 최신 버전인지 확인\n3. 데이터가 실제로 들어오는지 점검\n\n" +
-      "문제가 있으면 원인과 함께\n무엇을 하면 되는지까지 알려드립니다.",
+      "문제가 있으면 원인과 할 일을 같이 알려드립니다",
   },
   {
     selector: "#support-btn",
     title: "지원 문의",
     desc:
-      "문제 해결로도 안 풀리면 여기를 눌러보세요.\n로그를 모아 zip으로 만들고 그 폴더를 열어줍니다.\n\n" +
-      "받는사람, 제목, 내용 옆의 [복사]를 눌러\n메일의 각 칸에 붙여넣고 zip을 첨부해 보내시면 됩니다.",
+      "문제 해결로도 안 풀리면 여기를 눌러보세요\n로그를 모아 zip으로 만들고 그 폴더를 열어줍니다\n\n" +
+      "받는사람, 제목, 내용 옆의 [복사]를 눌러\n메일의 각 칸에 붙여넣고 zip을 첨부해 보내시면 됩니다",
   },
   {
     selector: "#self-update-btn",
@@ -2131,16 +2179,16 @@ const TOUR_STEPS = [
       // 예전엔 "닫히니 바탕화면 아이콘으로 다시 실행하세요"라고 안내했는데,
       // 지금은 새 버전이 스스로 뜬다 — 동작이 바뀐 뒤 설명이 안 따라왔었다.
       (usedFallback
-        ? "LeetKit Manager 자체에 새 버전이 나오면\n이 줄 맨 앞에 \"업데이트\" 버튼이 생깁니다.\n" +
-          "지금은 최신이라 안 보입니다.\n\n"
-        : "LeetKit Manager 자체의 새 버전이 있을 때만 나타납니다.\n\n") +
-      "누르면 설치한 뒤 앱이 잠깐 닫혔다가\n새 버전으로 다시 열립니다. 그대로 기다리시면 됩니다.\n\n" +
-      "앱을 켤 때 뜨는 업데이트 안내에도 같이 나오니\n이 버튼을 놓치셔도 괜찮습니다.",
+        ? "LeetKit Manager 자체에 새 버전이 나오면\n이 줄 맨 앞에 [업데이트] 버튼이 생깁니다\n" +
+          "지금은 최신이라 안 보입니다\n\n"
+        : "LeetKit Manager 자체의 새 버전이 있을 때만 나타납니다\n\n") +
+      "누르면 설치한 뒤 앱이 잠깐 닫혔다가\n새 버전으로 다시 열립니다\n\n" +
+      "앱을 켤 때 뜨는 업데이트 안내에도 같이 나오니\n이 버튼을 놓치셔도 괜찮습니다",
   },
   {
     selector: "#guide-btn",
     title: "가이드 다시 보기",
-    desc: "이 설명은 여기 버튼을 눌러 언제든 다시 볼 수 있습니다.",
+    desc: "이 설명은 여기 버튼을 눌러 언제든 다시 볼 수 있습니다",
   },
 ];
 
@@ -2463,7 +2511,7 @@ async function openPatchNotes() {
     // 예전엔 여기서 없는 변수(body)를 써서 ReferenceError가 났다 — 못 불러왔다는
     // 안내 대신 "불러오는 중…"인 채로 창이 굳었고, 그 창이 화면을 덮고 있어서
     // 뒤에 있던 모달의 버튼까지 안 눌리는 것처럼 보였다.
-    panel.innerHTML = `<div class="patchnotes-empty">패치노트를 불러오지 못했습니다.\n인터넷 연결을 확인하고 다시 눌러주세요.</div>`;
+    panel.innerHTML = `<div class="patchnotes-empty">패치노트를 불러오지 못했습니다\n인터넷 연결을 확인하고 다시 눌러주세요</div>`;
     return;
   }
   renderPatchNotes(products);
@@ -2678,12 +2726,12 @@ function skipOnboarding() {
 
 async function startOnboarding() {
   onboardingActive = true;
-  onboardingSetBanner("실행 아이콘(바로가기)을 만들 폴더를 골라주세요 — 프로그램 파일 자체는 복사되지 않고, 그 폴더엔 아이콘 하나만 생깁니다.", "");
+  onboardingSetBanner("실행 아이콘(바로가기)을 만들 폴더를 골라주세요", "");
 
   const shortcutResult = await window.pywebview.api.choose_shortcut_location();
   if (!onboardingActive) return;
   if (shortcutResult && shortcutResult.ok === false) {
-    showToast("바로가기 생성에 실패했습니다 — 나중에 이 프로그램 파일을 직접 바탕화면으로 드래그해서 만들 수 있습니다.");
+    showToast("바로가기 생성에 실패했습니다, 프로그램 파일을 바탕화면으로 드래그해도 됩니다");
   }
 
   const data = await window.pywebview.api.diagnose(false);
@@ -2730,7 +2778,7 @@ async function onboardingProcessCurrentLens() {
     // 넘어가는 대신 원인을 보여주고 재시도/건너뛰기를 고르게 한다.
     if (!result.ok || lens.not_installed) {
       onboardingSetBanner(
-        `${onboardingProgressLabel()} · ${lens.display_name} · 설치에 실패했습니다.`,
+        `${onboardingProgressLabel()} · ${lens.display_name} · 설치에 실패했습니다`,
         `<button class="action-btn" id="onboarding-skip-btn">마법사 끄기</button>
          <button class="action-btn" id="onboarding-skip-lens-btn">이 Lens 건너뛰기</button>
          <button class="action-btn primary" id="onboarding-retry-btn">다시 시도</button>`
@@ -2855,7 +2903,7 @@ async function offerHostRestart({ headline, afterRestart, apps = null, title = n
   restartModalTargetIds = running.map((a) => a.id);
   document.getElementById("restart-title").textContent = title || `${names}을(를) 다시 시작해주세요`;
   document.getElementById("restart-body").textContent =
-    body || `${headline}\n\n지금 켜져 있는 ${names}은(는) ${afterRestart}\n껐다 켜야 반영됩니다.`;
+    body || `${headline}\n\n지금 켜져 있는 ${names}은(는) ${afterRestart}\n껐다 켜야 반영됩니다`;
   renderRestartTargets(running);
 
   const whyEl = document.getElementById("restart-why");
@@ -2864,10 +2912,9 @@ async function offerHostRestart({ headline, afterRestart, apps = null, title = n
     whyEl.hidden = true;
   } else {
     whyEl.textContent =
-      "처음이시니 한 번만 설명드릴게요.\n\n" +
-      `${names}은(는) 켜질 때 Lens 프로그램을 같이 띄웁니다. ` +
-      "그래서 새 파일을 받아도, 이미 떠 있는 쪽은 받기 전 버전 그대로 돌아갑니다.\n\n" +
-      "껐다 켜면 새로 받은 파일로 다시 뜹니다. 대화 내용은 지워지지 않습니다.";
+      `${names}은(는) 켜질 때 Lens를 같이 띄웁니다\n` +
+      "이미 떠 있는 쪽은 받기 전 버전 그대로입니다\n" +
+      "껐다 켜면 새 파일로 다시 뜹니다\n대화 내용은 지워지지 않습니다";
     whyEl.hidden = false;
     localStorage.setItem(RESTART_EXPLAINED_KEY, "1");
   }
@@ -2885,13 +2932,13 @@ function closeRestartModal() {
 
 document.getElementById("restart-later").addEventListener("click", () => {
   closeRestartModal();
-  showToast("앱을 껐다 켜면 적용됩니다 — 위 \"다시 시작\" 버튼으로도 됩니다.");
+  showToast("앱을 껐다 켜면 적용됩니다");
 });
 
 document.getElementById("restart-now").addEventListener("click", async (e) => {
   const ids = restartModalSelectedIds();
   if (!ids || !ids.length) {
-    showToast("껐다 켤 앱을 하나 이상 골라주세요.");
+    showToast("껐다 켤 앱을 하나 이상 골라주세요");
     return;
   }
   await restartHostApps(e.currentTarget, ids);
@@ -2938,14 +2985,14 @@ async function restartHostApps(btn, ids) {
       const names = (result.restarted || []).join(" · ");
       showToast(
         names
-          ? `${names}을(를) 다시 시작했습니다 — 이제 도구가 보일 거예요.`
-          : "다시 시작할 앱이 켜져 있지 않았습니다."
+          ? `${names} 다시 시작 완료`
+          : "다시 시작할 앱이 켜져 있지 않았습니다"
       );
     } else {
-      showToast(result.error || "다시 시작하지 못했습니다. 직접 껐다 켜주세요.");
+      showToast(result.error || "다시 시작하지 못했습니다, 직접 껐다 켜주세요");
     }
   } catch {
-    showToast("다시 시작하지 못했습니다. 직접 껐다 켜주세요.");
+    showToast("다시 시작하지 못했습니다, 직접 껐다 켜주세요");
   } finally {
     // 성공 경로에서 그냥 return하면 상단 상시 버튼이 "다시 시작하는 중…"인 채로
     // 영구 비활성으로 굳는다(마법사 배너는 사라져서 티가 안 났다).
@@ -2975,7 +3022,7 @@ async function finishOnboarding() {
   // 열어야 시작된다. 이 사실을 미리 깔아두지 않으면, 방금 다 설치한 사람이 "왜 아무
   // 내용이 없지?"라고 느낀다. 다 끝난 화면에서 한 줄로 미리 알려준다.
   const telegramNote = lensDataCache["telegramlens"]
-    ? " 앱을 열면 텔레그램 채널 메시지 수집이 시작됩니다."
+    ? " 앱을 열면 텔레그램 채널 메시지 수집이 시작됩니다"
     : "";
 
   // 처음 도구를 쓸 때 Claude가 "허용하시겠습니까?"를 묻는다. 미리 말해두지 않으면
@@ -2986,17 +3033,17 @@ async function finishOnboarding() {
   const permissionApp =
     hostAppNames(installedHostApps.filter((a) => registeredHostIds.includes(a.id))) || "AI 앱";
   const permissionNote =
-    ` 처음 도구를 쓸 때 ${permissionApp}이(가) 허용 여부를 물어봅니다 — 한 번 허용하면 다시 묻지 않습니다.`;
+    ` 처음 도구를 쓸 때 ${permissionApp}이(가) 허용 여부를 물어봅니다 (한 번 허용하면 다시 묻지 않습니다)`;
 
   if (runningHosts.length) {
     onboardingSetBanner(
-      `설정이 끝났습니다! 마지막으로 ${runningHostLabel}을(를) 껐다 켜야 도구가 나타납니다.` + telegramNote + permissionNote,
+      `설정이 끝났습니다! 마지막으로 ${runningHostLabel}을(를) 껐다 켜야 도구가 나타납니다` + telegramNote + permissionNote,
       `<button class="action-btn" id="onboarding-done-btn">나중에 직접 할게요</button>
        <button class="action-btn primary" id="onboarding-restart-claude-btn">지금 다시 시작</button>`
     );
     document.getElementById("onboarding-done-btn").addEventListener("click", () => {
       onboardingHideBanner();
-      showToast(`${runningHostLabel}을(를) 껐다 켜면 도구가 나타납니다.`);
+      showToast(`${runningHostLabel}을(를) 껐다 켜면 도구가 나타납니다`);
     });
     document.getElementById("onboarding-restart-claude-btn").addEventListener("click", async () => {
       const btn = document.getElementById("onboarding-restart-claude-btn");
@@ -3011,8 +3058,8 @@ async function finishOnboarding() {
         explain: false,
         title: `${runningHostLabel}을(를) 껐다 켤까요?`,
         body:
-          "껐다 켤 앱을 아래에서 고르세요 — 체크를 풀면 그 앱은 그대로 둡니다.\n\n" +
-          "방금 등록한 도구는 껐다 켜야 나타납니다.\n대화 내용은 지워지지 않습니다.",
+          "껐다 켤 앱을 고르세요\n체크를 푼 앱은 그대로 둡니다\n\n" +
+          "방금 등록한 도구는 껐다 켜야 나타납니다\n대화 내용은 지워지지 않습니다",
       });
     });
     return;
@@ -3023,12 +3070,12 @@ async function finishOnboarding() {
     hostAppNames(installedHostApps) ||
     "Claude Desktop";
   onboardingSetBanner(
-    `모든 설정이 끝났습니다! ${openWhat}을(를) 열어주세요.` + telegramNote + permissionNote,
+    `모든 설정이 끝났습니다! ${openWhat}을(를) 열어주세요` + telegramNote + permissionNote,
     `<button class="action-btn primary" id="onboarding-done-btn">알겠습니다</button>`
   );
   document.getElementById("onboarding-done-btn").addEventListener("click", () => {
     onboardingHideBanner();
-    showToast("설정은 언제든 각 카드에서 다시 바꿀 수 있습니다.");
+    showToast("설정은 언제든 각 카드에서 다시 바꿀 수 있습니다");
   });
 }
 
@@ -3113,7 +3160,7 @@ async function maybeShowExpiredNotice() {
   const names = expired.map((l) => l.display_name).join(", ");
   document.getElementById("expired-title").textContent = `${names} 사용 기간이 끝났습니다`;
   document.getElementById("expired-lead").textContent =
-    "써보시는 동안 도움이 되셨길 바랍니다.\n계속 쓰시려면 라이선스를 구매하시면 됩니다.";
+    "써보시는 동안 도움이 되셨길 바랍니다\n계속 쓰시려면 라이선스를 구매하시면 됩니다";
 
   let usage = [];
   try {
@@ -3126,7 +3173,7 @@ async function maybeShowExpiredNotice() {
   renderExpiredProducts(usage);
 
   document.getElementById("expired-keep").textContent =
-    "설정과 모아둔 데이터는 그대로 있습니다. 구매하신 키를 넣으시면 이어서 쓰실 수 있고, 처음부터 다시 하실 필요는 없습니다.";
+    "설정과 모아둔 데이터는 그대로 있습니다\n구매하신 키를 넣으시면 이어서 쓰실 수 있습니다";
 
   document.getElementById("expired-backdrop").hidden = false;
 }
@@ -3143,7 +3190,7 @@ document.getElementById("expired-have-key").addEventListener("click", () => {
 // 창은 닫지 않는다 — 사고 돌아와 바로 "키가 있어요"를 누를 수 있어야 한다.
 document.getElementById("expired-buy").addEventListener("click", async () => {
   await window.pywebview.api.open_purchase_page();
-  showToast("브라우저에서 구매 페이지를 열었습니다.");
+  showToast("브라우저에서 구매 페이지를 열었습니다");
 });
 
 /* ---------- 삭제 확인 ---------- */
@@ -3156,11 +3203,26 @@ function openUninstallModal(lensName) {
   uninstallTargetLens = lensName;
   const lens = lensDataCache[lensName];
   const displayName = lens ? lens.display_name : lensName;
+  const targets = (lens && lens.targets) || [];
+  const connected = targets.map((t) => TARGET_LABEL[t] || t).join(" · ");
+
   document.getElementById("uninstall-title").textContent = `${displayName} 삭제`;
-  document.getElementById("uninstall-msg").textContent =
-    "프로그램을 지웁니다. 다시 설치하면 그대로 이어서 쓰실 수 있습니다.";
-  // 기본은 남기기 — 삭제의 대부분은 "지웠다 다시 깔기"라, 매번 키를 다시 넣게 하면 안 된다.
-  document.getElementById("uninstall-with-license").checked = false;
+  document.getElementById("uninstall-msg").textContent = connected
+    ? `지금 ${connected}에 연결돼 있습니다`
+    : "";
+
+  // 안 고른 쪽에 무슨 일이 일어나는지까지 적는다 — 예전 체크박스는 "라이선스도 삭제"
+  // 하나뿐이라, 그냥 지웠을 때 연결이 남는다는 사실을 아무 데서도 알 수 없었다.
+  document.getElementById("uninstall-hint-package").textContent = connected
+    ? "라이선스 키와 AI 앱 연결은 그대로 둡니다"
+    : "라이선스 키는 그대로 둡니다";
+  document.getElementById("uninstall-hint-full").textContent = connected
+    ? "AI 앱 연결을 해제하고 라이선스 키도 지웁니다"
+    : "라이선스 키도 함께 지웁니다";
+
+  // 기본은 남기기 — 삭제의 대부분은 "지웠다 다시 깔기"라, 매번 연결과 키를 다시
+  // 넣게 하면 안 된다.
+  document.querySelector('input[name="uninstall-mode"][value="package"]').checked = true;
   document.getElementById("uninstall-backdrop").hidden = false;
 }
 
@@ -3173,9 +3235,10 @@ document.getElementById("uninstall-cancel").addEventListener("click", closeUnins
 
 document.getElementById("uninstall-confirm").addEventListener("click", () => {
   const lensName = uninstallTargetLens;
-  const withLicense = document.getElementById("uninstall-with-license").checked;
+  const picked = document.querySelector('input[name="uninstall-mode"]:checked');
+  const fullCleanup = !!picked && picked.value === "full";
   closeUninstallModal();
-  if (lensName) runAction("uninstall", lensName, withLicense ? "with-license" : null);
+  if (lensName) runAction("uninstall", lensName, fullCleanup ? "full-cleanup" : null);
 });
 
 /* ---------- 업데이트 알림 ---------- */
@@ -3265,10 +3328,10 @@ function maybeShowUpdateNotice({ force = false, afterUserAction = false } = {}) 
     noteEl.hidden = true;
   } else {
     noteEl.textContent =
-      "처음이시죠? \"지금 업데이트\"를 누르면 새 파일을 받아 바꿔 끼웁니다. " +
-      "Lens 하나에 1~2분쯤 걸립니다.\n\n" +
-      "쓰시는 앱(Claude Desktop · ChatGPT)이 켜져 있으면 잠시 껐다 켜도 될지 먼저 여쭤봅니다. " +
-      "대화 내용은 지워지지 않습니다.";
+      "[지금 업데이트]를 누르면 새 파일을 받아 바꿔 끼웁니다\n" +
+      "Lens 하나에 1~2분쯤 걸립니다\n\n" +
+      "쓰시는 앱이 켜져 있으면 잠시 껐다 켜도 될지 먼저 여쭤봅니다\n" +
+      "대화 내용은 지워지지 않습니다";
     noteEl.hidden = false;
     localStorage.setItem(UPDATE_EXPLAINED_KEY, "1");
   }
@@ -3329,7 +3392,7 @@ async function runLensUpdatesFromNotice() {
 
   const left = lensesWithUpdates();
   if (left.length) {
-    showToast("일부 업데이트가 남았습니다 — 카드에서 다시 시도해주세요.");
+    showToast("일부 업데이트가 남았습니다, 카드에서 다시 시도해주세요");
     await handOffToReviewPrompt();
     return;
   }
@@ -3338,8 +3401,8 @@ async function runLensUpdatesFromNotice() {
     // 다만 못 켠 경우에는 그렇게 말하면 안 된다(우리가 껐으므로 지금 꺼져 있다).
     showToast(
       relaunch && relaunch.ok
-        ? "업데이트를 마치고 앱을 다시 켰습니다."
-        : (relaunch && relaunch.error) || "업데이트를 마쳤습니다 — 앱은 직접 켜주세요."
+        ? "업데이트를 마치고 앱을 다시 켰습니다"
+        : (relaunch && relaunch.error) || "업데이트를 마쳤습니다, 앱은 직접 켜주세요"
     );
     await handOffToReviewPrompt();
     return;
@@ -3351,9 +3414,9 @@ async function runLensUpdatesFromNotice() {
   const done = onHostApp.map((l) => l.display_name).join(", ");
   await noteLensFilesChanged({
     hostAppIds: onHostAppIds,
-    headline: done ? `${done} 업데이트 완료.` : "업데이트를 마쳤습니다.",
-    afterRestart: "아직 이전 버전을 쓰고 있습니다.",
-    whenClosedResult: "새 버전이 적용됩니다.",
+    headline: done ? `${done} 업데이트 완료` : "업데이트를 마쳤습니다",
+    afterRestart: "아직 이전 버전을 쓰고 있습니다",
+    whenClosedResult: "새 버전이 적용됩니다",
   });
   // 재시작 모달을 띄웠으면 그게 닫힐 때 이어서 후기를 묻는다(closeRestartModal).
   if (document.getElementById("restart-backdrop").hidden) await handOffToReviewPrompt();
@@ -3368,7 +3431,7 @@ async function closeHostAppsForBulkUpdate(count) {
   const names = hostAppNames(running);
   const ids = running.map((a) => a.id);
   const ok = confirm(
-    `${names}이(가) 켜져 있으면 Lens 파일을 쓰고 있어 업데이트가 막힐 수 있습니다.\n\n` +
+    `${names}이(가) 켜져 있으면 Lens 파일을 쓰고 있어 업데이트가 막힐 수 있습니다\n\n` +
       `잠시 껐다가 ${count}개를 업데이트하고, 끝나면 다시 켤까요?`
   );
   if (!ok) return null;
@@ -3378,7 +3441,7 @@ async function closeHostAppsForBulkUpdate(count) {
     const quit = await window.pywebview.api.quit_host_apps(ids);
     if (!quit.ok) {
       hideBusyOverlay();
-      showToast(quit.error || `${names}을(를) 종료하지 못했습니다 — 그대로 진행합니다.`);
+      showToast(quit.error || `${names}을(를) 종료하지 못했습니다, 그대로 진행합니다`);
       return null;
     }
     return ids;
@@ -3476,8 +3539,8 @@ document.getElementById("review-open").addEventListener("click", async () => {
   const opened = await window.pywebview.api.open_review_url();
   showToast(
     opened
-      ? "브라우저에서 열었습니다. 정말 고맙습니다!"
-      : "브라우저를 열지 못했습니다. 나중에 다시 안내드릴게요."
+      ? "브라우저에서 열었습니다, 정말 고맙습니다!"
+      : "브라우저를 열지 못했습니다, 나중에 다시 안내드릴게요"
   );
 });
 
@@ -3531,13 +3594,13 @@ async function runSelfUpdate(btn = null) {
     // (relaunching이 아예 안 오는 단일 exe 경로는 replace_running_exe가 같이 띄운다.)
     showToast(
       result.relaunching === false
-        ? `v${result.version}로 업데이트됨 — 앱을 닫습니다. 바로가기로 다시 열어주세요.`
-        : `v${result.version}로 업데이트됨 — 앱을 다시 시작합니다`
+        ? `v${result.version} 업데이트 완료, 앱을 닫습니다 (바로가기로 다시 열어주세요)`
+        : `v${result.version} 업데이트 완료, 앱을 다시 시작합니다`
     );
     showBusyOverlay("앱을 다시 시작하는 중…");
     setTimeout(() => window.pywebview.api.quit(), 1600);
   } else {
-    showToast(result.error || "업데이트에 실패했습니다.");
+    showToast(result.error || "업데이트에 실패했습니다");
     if (btn) {
       btn.disabled = false;
       btn.textContent = "업데이트";
@@ -3559,7 +3622,7 @@ document.getElementById("self-update-btn").addEventListener("click", (e) => runS
 // 알려서 사용자가 다시 시도할 수 있게 한다.
 window.addEventListener("unhandledrejection", (e) => {
   const detail = (e.reason && (e.reason.message || e.reason)) || "";
-  showToast(`처리 중 오류가 발생했습니다. 다시 시도해주세요. ${detail}`.trim());
+  showToast(`처리 중 오류가 발생했습니다, 다시 시도해주세요 ${detail}`.trim());
 });
 
 window.addEventListener("pywebviewready", async () => {
@@ -3569,7 +3632,7 @@ window.addEventListener("pywebviewready", async () => {
     await loadDiagnosis();
   } catch {
     document.getElementById("readout-text").textContent =
-      "진단에 실패했습니다 — '진단 재실행'을 눌러 다시 시도해주세요.";
+      "진단에 실패했습니다, [진단 재실행]을 눌러주세요";
   }
   try {
     await checkSelfUpdate();
