@@ -800,3 +800,39 @@ class TestRemoveLicenseOnUninstall:
         result = orchestrator.uninstall_lens(STOCKLENS, remove_license=True)
         assert result.license_removed is False
         assert key.exists(), "삭제 실패 시엔 키가 남아 있어야 한다"
+
+
+class TestWindowsPolicyBlock:
+    """Lens 실행 파일이 Windows 정책(스마트 앱 제어)에 막힌 상태. 미설치도, 버전 문제도
+    아니다 — 설치·재설치·업데이트 어느 것도 이걸 풀지 못한다."""
+
+    def test_blocked_is_not_reported_as_not_installed(self):
+        with patch.object(orchestrator, "run_json_cli", return_value=(_fake_process(error="blocked"), None)):
+            diag = orchestrator.diagnose_lens(STOCKLENS)
+        assert diag.blocked is True
+        assert diag.not_installed is False
+        assert diag.incompatible is False
+        assert diag.readiness == "Windows가 실행을 차단함"
+
+    def test_blocked_counts_as_needing_attention(self):
+        with patch.object(orchestrator, "run_json_cli", return_value=(_fake_process(error="blocked"), None)):
+            diag = orchestrator.diagnose_lens(STOCKLENS)
+        assert orchestrator.has_actionable_problem(diag) is True
+
+    def test_activate_says_what_to_do_instead_of_a_parse_error(self):
+        with patch.object(orchestrator, "run_json_cli", return_value=(_fake_process(error="blocked"), None)):
+            result = orchestrator.activate_lens(STOCKLENS, "SOME-KEY")
+        assert result.ok is False
+        assert result.error_code == "blocked"
+        assert "스마트 앱 제어" in result.message
+        assert "파싱" not in result.message
+
+    def test_message_names_the_blocked_file_and_the_switch_to_flip(self):
+        proc = ProcessResult(
+            cmd=[r"C:\Users\me\.local\bin\stocklens-doctor.exe", "--json"],
+            exit_code=None, stdout="", stderr="", timed_out=False, duration_s=0.0, error="blocked",
+        )
+        msg = orchestrator.windows_block_message(proc)
+        assert "stocklens-doctor.exe" in msg
+        assert "Windows 보안" in msg
+        assert "4551" in msg

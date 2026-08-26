@@ -71,6 +71,7 @@ def _diagnosis_to_dict(d: LensDiagnosis) -> dict:
         "readiness": d.readiness,
         "not_installed": d.not_installed,
         "incompatible": d.incompatible,
+        "blocked": d.blocked,
         "extra_credentials": list(d.lens.extra_credentials),
         "installed_version": report.installed_version if report else None,
         "latest_version": report.latest_version if report else None,
@@ -121,6 +122,10 @@ def _problem_detail(d: LensDiagnosis) -> str | None:
     "업데이트해도 그대로"에 갇힌다 — 실제 종료 코드와 출력 첫 줄을 그대로 보여준다.
     """
     p = d.process
+    # Windows가 실행 파일을 막은 경우가 제일 먼저다 — 아래 어떤 판정도 이 상태에는
+    # 틀린 조치를 시킨다("업데이트", "삭제 후 재설치"는 정책 차단을 못 푼다).
+    if d.blocked:
+        return redaction.redact(orchestrator.windows_block_message(p))
     # 시간 초과는 버전 문제와 할 일이 정반대다 — 여기에 "삭제 후 재설치"를 붙이면
     # 멀쩡한 설치를 지우게 만든다. 느린 PC나 쌓인 데이터가 많은 경우가 대부분이다.
     if d.timed_out:
@@ -147,6 +152,10 @@ def _install_failure_reason(process) -> str | None:
     있으므로 따로 문구를 만든다."""
     if process is None:
         return None
+    # uv 자체가, 또는 uv가 방금 깐 Lens 실행 파일이 정책에 막히면 stderr가 비어 있어
+    # 아래 "첫 줄 보여주기"로는 아무 말도 못 한다.
+    if getattr(process, "error", None) == "blocked":
+        return redaction.redact(orchestrator.windows_block_message(process))
     if getattr(process, "timed_out", False):
         return "시간이 오래 걸려 중단했습니다. 네트워크가 느리거나 받을 파일이 많을 때 그렇습니다 — 다시 시도해보세요."
     detail = _first_meaningful_line(getattr(process, "stderr", "")) or _first_meaningful_line(

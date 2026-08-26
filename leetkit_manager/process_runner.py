@@ -21,6 +21,12 @@ from dataclasses import dataclass
 
 DEFAULT_TIMEOUT = 30.0
 
+# CreateProcess가 "이 파일은 정책상 실행할 수 없다"로 거절할 때 돌려주는 Windows 코드
+# (ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION). Windows 11의 스마트 앱 제어·WDAC·AppLocker가
+# 서명되지 않은 exe를 막으면 여기로 떨어진다 — Lens 실행 파일은 uv가 만든 서명 없는
+# 스크립트 exe라 이 정책이 켜진 PC에서는 통째로 실행이 막힌다(고객 문의로 확인).
+ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION = 4551
+
 # PyInstaller onefile 부트로더가 자기 프로세스에 심는 변수들. 이걸 그대로 물려받은
 # 자식이 또 onefile exe면, 부트로더가 "나는 이미 풀린 뒤의 2단계다"라고 판단해서
 # **압축을 새로 풀지 않고 부모의 임시 폴더를 그대로 쓴다**. 그리고 부모가 끝나면
@@ -69,12 +75,25 @@ class ProcessResult:
     stderr: str
     timed_out: bool
     duration_s: float
-    # "not_found"(커맨드 자체가 없음) | "timeout" | None(정상 종료 — exit_code로 성공/실패 판단)
+    # "not_found"(커맨드 자체가 없음) | "timeout" | "blocked"(Windows 정책이 실행을 막음)
+    # | "launch_failed"(그 밖의 실행 자체 실패) | None(정상 종료 — exit_code로 성공/실패 판단)
     error: str | None = None
 
     @property
     def ok(self) -> bool:
         return self.error is None and self.exit_code == 0
+
+
+def _launch_error(exc: OSError) -> str:
+    """자식을 "띄우는" 단계에서 난 OSError를 ProcessResult.error 값으로 옮긴다.
+
+    not_found(WinError 2)는 호출부가 FileNotFoundError로 이미 걸러낸 뒤라, 여기 오는 건
+    "파일은 있는데 실행이 거절됐다"는 쪽이다. 그중 정책 차단만 따로 이름을 준다 —
+    사용자가 할 일이 완전히 다르기 때문이다(재설치가 아니라 Windows 설정을 바꿔야 한다).
+    """
+    if getattr(exc, "winerror", None) == ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION:
+        return "blocked"
+    return "launch_failed"
 
 
 def run_cli(
@@ -123,6 +142,23 @@ def run_cli(
             duration_s=time.monotonic() - start,
             error="not_found",
         )
+    except OSError as e:
+        # subprocess.run은 자식을 띄우는 데 실패하면 OSError를 그대로 올린다. 예전엔 이게
+        # 진단 스레드를 뚫고 UI까지 올라가, 고객 화면에 원문만 남았다:
+        #   "확인하지 못했습니다 [WinError 4551] 애플리케이션 제어 정책에서 이 파일을
+        #    차단했습니다"
+        # 무엇을 하라는 말이 없고, 게다가 예외가 진단 전체를 끊어 나머지 Lens 결과도
+        # 통째로 사라졌다. 여기서 결과값으로 바꿔 잡으면 다른 Lens 진단은 계속되고,
+        # 화면에는 orchestrator가 만든 안내 문구가 나간다.
+        return ProcessResult(
+            cmd=cmd,
+            exit_code=None,
+            stdout="",
+            stderr=str(e),
+            timed_out=False,
+            duration_s=time.monotonic() - start,
+            error=_launch_error(e),
+        )
 
     return ProcessResult(
         cmd=cmd,
@@ -164,6 +200,11 @@ def run_cli_streaming(
         return ProcessResult(
             cmd=cmd, exit_code=None, stdout="", stderr="", timed_out=False,
             duration_s=time.monotonic() - start, error="not_found",
+        )
+    except OSError as e:
+        return ProcessResult(
+            cmd=cmd, exit_code=None, stdout="", stderr=str(e), timed_out=False,
+            duration_s=time.monotonic() - start, error=_launch_error(e),
         )
 
     collected: list[str] = []

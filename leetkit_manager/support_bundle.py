@@ -340,6 +340,13 @@ def _summary_text(
     for diag in orchestrator.run_full_diagnosis(LENSES, online=True, timeout=_DIAGNOSIS_TIMEOUT):
         version = diag.report.installed_version if diag.report else "?"
         lines.append(f"[{diag.lens.display_name}] v{version} — {diag.readiness}")
+        # doctor를 아예 못 띄운 경우엔 report가 없어서 아래 블록이 통째로 비고, 상태
+        # 한 줄만 남는다. 정책 차단은 "어느 파일이 막혔나"가 그대로 조치 대상이라
+        # (서명 붙일 대상이기도 하다) 받아보는 쪽에 그 한 줄이 꼭 필요하다.
+        if diag.blocked:
+            blocked_file = Path(diag.process.cmd[0]).name if diag.process.cmd else "?"
+            lines.append("  - Windows 애플리케이션 제어 정책이 실행을 거절함(오류 4551)")
+            lines.append(f"  - 차단된 파일: {blocked_file}")
         if diag.report:
             problems = [c for c in diag.report.checks if c.status not in ("ok", "active", "skip", "info-skip")]
             in_progress = [c for c in diag.report.checks if c.status == "active"]

@@ -33,6 +33,7 @@ class LensDiagnosis:
     not_installed: bool = False
     incompatible: bool = False
     timed_out: bool = False
+    blocked: bool = False  # Windows 정책이 Lens 실행 파일 자체를 막음(스마트 앱 제어 등)
 
     @property
     def readiness(self) -> str:
@@ -44,11 +45,41 @@ class LensDiagnosis:
         # TelegramLens 진단이 6.2초 걸려 12초 제한을 넘길락 말락 했다.
         if self.timed_out:
             return "확인 시간 초과"
+        # 미설치와 헷갈리면 안 된다 — 파일은 멀쩡히 있는데 Windows가 실행을 거절한
+        # 상태라, "설치"나 "재설치"를 아무리 눌러도 그대로다.
+        if self.blocked:
+            return "Windows가 실행을 차단함"
         if self.incompatible:
             return "호환되지 않는 Lens 버전"
         if self.report is None:
             return "확인 실패"
         return self.report.readiness
+
+
+def windows_block_message(process: ProcessResult) -> str:
+    """Windows가 실행 파일 자체를 막았을 때(ProcessResult.error == "blocked") 화면 문구.
+
+    진단·활성화·설치가 전부 같은 벽에 부딪히므로 문구를 한 곳에서만 만든다. 원인은
+    거의 항상 Windows 11의 스마트 앱 제어다 — 서명 없는 exe를 차단하는데, uv가 만드는
+    Lens 실행 파일이 정확히 거기 해당한다. 우리가 코드 서명을 붙이기 전까지는 사용자가
+    그 스위치를 내리는 것 말고 방법이 없다.
+
+    "한 번 끄면 다시 못 켠다"를 굳이 적는 이유: 사실이고(다시 켜려면 Windows 재설치),
+    나중에 알게 되면 우리가 숨긴 게 된다.
+
+    설정 앱 경로 대신 'Windows 보안' 앱 이름으로 안내한다 — 설정 트리의 이름은 빌드마다
+    조금씩 다른데 앱 이름은 시작 메뉴 검색으로 바로 찾을 수 있다.
+    """
+    name = Path(process.cmd[0]).name if process.cmd else "프로그램"
+    return (
+        f"Windows가 '{name}' 실행을 차단했습니다(오류 4551). "
+        "Windows 11의 '스마트 앱 제어'가 서명되지 않은 프로그램을 막을 때 생기는 현상이며, "
+        "설치가 잘못된 것이 아닙니다. "
+        "시작 메뉴에서 'Windows 보안'을 열고 → '앱 및 브라우저 컨트롤' → "
+        "'스마트 앱 제어 설정' → '끄기'를 선택한 뒤 PC를 다시 시작하고 다시 시도해주세요"
+        "(한 번 끄면 다시 켤 수 없습니다). "
+        "회사·학교에서 관리하는 PC라면 관리자가 건 정책일 수 있어 관리자에게 문의해야 합니다."
+    )
 
 
 def diagnose_lens(
@@ -97,6 +128,8 @@ def _diagnose_lens_once(
 
     if process.error == "not_found":
         return LensDiagnosis(lens=lens, report=None, process=process, not_installed=True)
+    if process.error == "blocked":
+        return LensDiagnosis(lens=lens, report=None, process=process, blocked=True)
     if process.timed_out:
         return LensDiagnosis(lens=lens, report=None, process=process, timed_out=True)
     # dict가 아닌 유효 JSON(배열·문자열·숫자)도 파서는 그대로 통과시킨다 — 그대로
@@ -246,6 +279,8 @@ def setup_lens(
     for target_arg in target_groups:
         cmd = [package_service.resolve_lens_command(lens.setup_cmd), "--target", target_arg, "--json", "--non-interactive"]
         process, payload = run_json_cli(cmd, timeout=timeout)
+        if process.error == "blocked":
+            return SetupResult(ok=False, error_code="blocked", error=windows_block_message(process))
         if payload is None:
             ok = False
             error = _unsupported_flag_message(lens, process) or f"setup 응답을 파싱할 수 없습니다 (exit={process.exit_code})."
@@ -290,6 +325,8 @@ def unregister_lens(
             "--target", target_arg, "--remove", "--json", "--non-interactive",
         ]
         process, payload = run_json_cli(cmd, timeout=timeout)
+        if process.error == "blocked":
+            return SetupResult(ok=False, error_code="blocked", error=windows_block_message(process))
         if payload is None:
             ok = False
             # 옛 버전 Lens에는 --remove가 없다 — 그 사실을 그대로 말해준다.
@@ -319,6 +356,8 @@ def activate_lens(
             error_code="not_installed",
             message=f"{lens.display_name}가 아직 설치되지 않았습니다. 먼저 '설치' 버튼을 눌러주세요.",
         )
+    if process.error == "blocked":
+        return ActivateResult(ok=False, error_code="blocked", message=windows_block_message(process))
     if payload is None:
         return ActivateResult(ok=False, message=f"activate 응답을 파싱할 수 없습니다 (exit={process.exit_code}).")
     return ActivateResult.from_json(payload, exit_code=process.exit_code)
@@ -372,6 +411,8 @@ def register_api_key(
                 ok=False, error_code="not_installed",
                 error=f"{lens.display_name}가 아직 설치되지 않았습니다. 먼저 '설치' 버튼을 눌러주세요.",
             )
+        if process.error == "blocked":
+            return SetupResult(ok=False, error_code="blocked", error=windows_block_message(process))
         if payload is None:
             ok = False
             error = _unsupported_flag_message(lens, process) or f"setup 응답을 파싱할 수 없습니다 (exit={process.exit_code})."

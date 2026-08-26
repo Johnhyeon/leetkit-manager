@@ -46,7 +46,12 @@ function renderEmphasis(text) {
 function statusClass(readiness) {
   if (readiness === "정상") return "ok";
   if (readiness === "주의") return "warn";
-  if (readiness === "조치 필요" || readiness === "호환되지 않는 Lens 버전") return "fail";
+  if (
+    readiness === "조치 필요" ||
+    readiness === "호환되지 않는 Lens 버전" ||
+    readiness === "Windows가 실행을 차단함"
+  )
+    return "fail";
   return "neutral";
 }
 
@@ -879,7 +884,7 @@ async function resolveCheck(lensName, checkId, resolver, repairId) {
 // 서로 달라서(StockLens만 critical 개념을 써서 일부 실패를 degraded로 낮춘다)
 // overall만 보면 실제 실패가 "조치 필요"에서 빠진다.
 function lensHasActionableProblem(lens) {
-  if (lens.not_installed || lens.incompatible) return true;
+  if (lens.not_installed || lens.incompatible || lens.blocked) return true;
   if (lens.overall === "fail") return true;
   return (lens.checks || []).some((c) => c.status === "fail");
 }
@@ -1965,7 +1970,11 @@ const TROUBLESHOOT_STEPS = [
     async run(setResult) {
       const data = await window.pywebview.api.diagnose(true);
       render(data);
-      const bad = (data.lenses || []).filter((l) => !l.not_installed && l.overall === "fail");
+      const bad = (data.lenses || []).filter(
+        // blocked는 doctor를 아예 못 띄운 상태라 overall이 null이다 — "fail"만 보면
+        // 제일 심하게 막힌 Lens가 오히려 목록에서 빠진다.
+        (l) => !l.not_installed && (l.overall === "fail" || l.blocked)
+      );
       if (!bad.length) {
         setResult("ok", "모두 정상입니다");
         return;
@@ -2020,6 +2029,21 @@ function setTroubleshootResult(key, status, text) {
   el.className = `troubleshoot-step-result ${status}`;
 }
 
+// Windows 정책 차단은 Python 쪽에서 결과값으로 바꿔 잡지만(process_runner), 다른
+// 경로로 예외가 올라오는 경우까지 원문("[WinError 4551] 애플리케이션 제어 정책에서 이
+// 파일을 차단했습니다")이 그대로 남으면 고객은 할 일을 알 수 없다. 마지막 안전망.
+function troubleshootFailureText(e) {
+  const raw = (e && e.message) || "";
+  if (raw.includes("4551") || raw.includes("애플리케이션 제어 정책")) {
+    return (
+      "Windows가 프로그램 실행을 차단했습니다(오류 4551) " +
+      "시작 메뉴 → 'Windows 보안' → '앱 및 브라우저 컨트롤' → " +
+      "'스마트 앱 제어 설정'을 '끄기'로 바꾼 뒤 PC를 다시 시작해주세요"
+    );
+  }
+  return `확인하지 못했습니다 ${raw}`.trim();
+}
+
 async function runTroubleshootStep(key, btn) {
   const step = TROUBLESHOOT_STEPS.find((s) => s.key === key);
   if (!step || troubleshootBusy) return;
@@ -2032,7 +2056,7 @@ async function runTroubleshootStep(key, btn) {
   try {
     await step.run((status, text) => setTroubleshootResult(key, status, text));
   } catch (e) {
-    setTroubleshootResult(key, "fail", `확인하지 못했습니다 ${(e && e.message) || ""}`.trim());
+    setTroubleshootResult(key, "fail", troubleshootFailureText(e));
   } finally {
     troubleshootBusy = false;
     btn.disabled = false;
