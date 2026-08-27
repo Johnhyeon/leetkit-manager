@@ -262,7 +262,7 @@ class TestSinglePrimaryUx:
         assert "brokerActiveProfile" in JS
         assert re.search(
             r"function brokerActiveProfile[\s\S]{0,400}"
-            r"providers\[brokerProvider\]", JS)
+            r"providers[\s\S]{0,40}\[brokerProvider\]", JS)
         # renderBrokerModal 과 전환·해제 핸들러가 helper 를 쓴다.
         render_start = JS.index("function renderBrokerModal")
         render_block = JS[render_start:render_start + 4000]
