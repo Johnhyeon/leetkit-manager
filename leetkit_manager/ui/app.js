@@ -2841,11 +2841,10 @@ function placeTooltip(rect, tw, th, pad) {
   return fallback[0];
 }
 
-function positionTour(i) {
-  const step = tourSteps[i];
-  // 데모(예시 모달)를 먼저 열어야 모달 안 요소의 자리가 잡힌다 — 순서를
-  // 뒤집으면 첫 표시에서 스포트라이트가 0x0 자리를 가리킨다.
-  applyStepDemo(step);
+// 하이라이트·툴팁 좌표만 다시 잡는다 (데모·문구 갱신 없이). 스크롤·리사이즈
+// 재배치에서도 이걸 부른다 — 하이라이트는 position:fixed 라 화면이 움직이면
+// 좌표를 다시 재야 한다.
+function layoutTourStep(step) {
   const rect = step.el.getBoundingClientRect();
   const pad = 6;
 
@@ -2857,12 +2856,6 @@ function positionTour(i) {
   hl.style.top = `${rect.top - pad}px`;
   hl.style.width = `${rect.width + pad * 2}px`;
   hl.style.height = `${rect.height + pad * 2}px`;
-
-  document.getElementById("tour-step-label").textContent = `${i + 1} / ${tourSteps.length}`;
-  document.getElementById("tour-title").textContent = step.title;
-  document.getElementById("tour-desc").textContent = step.desc;
-  document.getElementById("tour-prev").style.visibility = i === 0 ? "hidden" : "visible";
-  document.getElementById("tour-next").textContent = i === tourSteps.length - 1 ? "완료" : "다음";
 
   const tooltip = document.getElementById("tour-tooltip");
   const tw = tooltip.offsetWidth || 300;
@@ -2878,9 +2871,44 @@ function positionTour(i) {
     tooltip.style.top = `${spot.top}px`;
     tooltip.style.left = `${spot.left}px`;
   }
-
-  step.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
+
+function positionTour(i) {
+  const step = tourSteps[i];
+  // 데모(예시 모달)를 먼저 열어야 모달 안 요소의 자리가 잡힌다 — 순서를
+  // 뒤집으면 첫 표시에서 스포트라이트가 0x0 자리를 가리킨다.
+  applyStepDemo(step);
+
+  document.getElementById("tour-step-label").textContent = `${i + 1} / ${tourSteps.length}`;
+  document.getElementById("tour-title").textContent = step.title;
+  document.getElementById("tour-desc").textContent = step.desc;
+  document.getElementById("tour-prev").style.visibility = i === 0 ? "hidden" : "visible";
+  document.getElementById("tour-next").textContent = i === tourSteps.length - 1 ? "완료" : "다음";
+
+  // 좌표를 재기 **전에** 즉시 스크롤한다. 예전엔 측정 후 smooth 스크롤이라,
+  // 스크롤이 필요한 대상(긴 모달 아래쪽 등)에서 스포트라이트가 스크롤 전
+  // 좌표에 남았다. 부드러운 이동감은 하이라이트 자체의 transition 이 낸다.
+  step.el.scrollIntoView({ block: "nearest", behavior: "auto" });
+  layoutTourStep(step);
+}
+
+// 투어 중 사용자가 스크롤하거나 창 크기를 바꾸면 현재 단계를 다시 배치한다.
+// capture:true 로 잡아야 모달 backdrop 처럼 중첩 컨테이너의 스크롤도 온다.
+let tourRelayoutQueued = false;
+
+function onTourRelayout() {
+  if (document.getElementById("tour-overlay").hidden) return;
+  if (tourRelayoutQueued) return;
+  tourRelayoutQueued = true;
+  requestAnimationFrame(() => {
+    tourRelayoutQueued = false;
+    const step = tourSteps[tourIndex];
+    if (step) layoutTourStep(step);
+  });
+}
+
+window.addEventListener("scroll", onTourRelayout, true);
+window.addEventListener("resize", onTourRelayout);
 
 // 화면에 실제로 자리를 차지하고 있는지. hidden 속성만 보면 부모가 숨겨진 경우를 놓친다.
 function isOnScreen(el) {
