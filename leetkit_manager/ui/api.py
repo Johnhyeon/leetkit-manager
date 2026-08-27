@@ -339,6 +339,10 @@ class Api:
             "error_code": result.error_code,
             "status": result.status,
             "verification": result.verification,
+            # 커밋 성공 + 상태 재조회 실패를 UI 까지 전달한다 - 버리면
+            # 경고 없는 "연결 완료"가 뜬다 (리뷰 지적).
+            "status_unavailable": result.status_unavailable,
+            "warnings": result.warnings,
         }
         if result.ok and rediagnose:
             try:

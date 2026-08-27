@@ -1187,6 +1187,21 @@ document.getElementById("broker-change-key-btn").addEventListener("click", () =>
   renderBrokerModal({ supported: true, status: brokerLastStatus || {} });
 });
 
+// 성공 알림 - 커밋은 됐는데 상태 재조회가 실패한 경우(status_unavailable)
+// 경고를 함께 보여준다. 그냥 성공 토스트만 띄우면 사용자는 상태 표시가
+// 왜 비었는지 모른 채 "기존 키 유지"로 오해할 수 있다.
+function brokerSuccessNotice(result, message) {
+  if (result && result.status_unavailable) {
+    const warn =
+      (result.warnings || [])[0] ||
+      "변경은 저장됐지만 상태 표시를 새로 읽지 못했습니다";
+    setBrokerState("limited", warn);
+    showToast(`${message}, 상태 표시는 잠시 후 다시 확인해주세요`);
+    return;
+  }
+  showToast(message);
+}
+
 // 설치·업데이트·삭제와 같은 잠금(runningActions)을 공유한다 — 설치 중에
 // 연결을 바꾸거나, 연결 시험 중에 삭제가 시작되는 조합을 막는다.
 async function brokerCall(fn) {
@@ -1267,7 +1282,8 @@ document.getElementById("broker-connect-btn").addEventListener("click", () => {
     if (result.lens) replaceCard(brokerLensName, result.lens);
     await refreshBrokerModal();
     const v = result.verification || {};
-    showToast(
+    brokerSuccessNotice(
+      result,
       `연결 완료, 국내 분봉 ${brokerCapLabel(v.kr_intraday)} / 미국 분봉 ${brokerCapLabel(v.us_intraday)}`
     );
   });
@@ -1309,7 +1325,7 @@ document
       }
       if (result.lens) replaceCard(brokerLensName, result.lens);
       await refreshBrokerModal();
-      showToast("현재 환경 연결을 해제했습니다, 프로그램과 라이선스는 그대로입니다");
+      brokerSuccessNotice(result, "현재 환경 연결을 해제했습니다, 프로그램과 라이선스는 그대로입니다");
     });
   });
 
@@ -1330,7 +1346,7 @@ document
       brokerEditingKey = false;
       if (result.lens) replaceCard(brokerLensName, result.lens);
       await refreshBrokerModal();
-      showToast(`${brokerProviderLabel()} 연결을 모두 해제하고 관련 캐시를 지웠습니다`);
+      brokerSuccessNotice(result, `${brokerProviderLabel()} 연결을 모두 해제하고 관련 캐시를 지웠습니다`);
     });
   });
 
@@ -1360,7 +1376,7 @@ document.getElementById("broker-mode-save-btn").addEventListener("click", () => 
     }
     brokerCurrentMode = checked.value;
     document.getElementById("broker-mode-save-btn").hidden = true;
-    showToast("차트 데이터 사용 방식을 저장했습니다");
+    brokerSuccessNotice(result, "차트 데이터 사용 방식을 저장했습니다");
   });
 });
 

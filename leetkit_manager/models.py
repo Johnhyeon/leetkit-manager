@@ -157,6 +157,11 @@ class BrokerActionResult:
     verification: dict = field(default_factory=dict)
     error_code: str | None = None
     message: str | None = None
+    # 커밋은 성공했지만 상태 재조회가 실패한 경우 (keychain 일시 불가 등).
+    # UI 는 성공으로 처리하되 이 경고를 함께 보여줘야 한다 - 버리면
+    # "연결 완료"만 떠서 상태 표시가 왜 비었는지 알 수 없다.
+    status_unavailable: bool = False
+    warnings: list = field(default_factory=list)
     raw: dict = field(default_factory=dict)
 
     @classmethod
@@ -173,6 +178,8 @@ class BrokerActionResult:
             verification=payload.get("verification") or {},
             error_code=error.get("code"),
             message=error.get("message"),
+            status_unavailable=bool(payload.get("status_unavailable")),
+            warnings=list(payload.get("warnings") or []),
             raw=payload,
         )
 

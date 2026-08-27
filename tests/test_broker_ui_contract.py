@@ -169,6 +169,15 @@ class TestJsContract:
     def test_demo_mode_blocks_real_actions(self):
         assert "brokerDemoMode" in JS
 
+    def test_status_unavailable_shown_not_swallowed(self):
+        # 성공 토스트가 status_unavailable 경고를 삼키지 않는다.
+        assert "status_unavailable" in JS
+        assert "brokerSuccessNotice" in JS
+        # 연결 성공 경로가 헬퍼를 쓴다 (경고 미반영 토스트 금지).
+        connect_start = JS.index('broker-connect-btn").addEventListener')
+        connect_block = JS[connect_start:connect_start + 3000]
+        assert "brokerSuccessNotice" in connect_block
+
 
 class FakeDiag:
     def __init__(self):
@@ -301,6 +310,26 @@ class TestApiContract:
         result = api.broker_status("stocklens", provider="mirae")
         assert not result["supported"]
         assert result["error_code"] == "provider_unsupported"
+
+    def test_status_unavailable_and_warnings_reach_api_response(self):
+        # 리뷰 지적: _broker_result 가 status_unavailable·warnings 를
+        # 버려서 UI 가 경고 없이 "연결 완료"를 띄웠다.
+        api = self._api()
+        result = BrokerActionResult.from_json({
+            "ok": True, "contract_version": 1, "action": "verify_and_save",
+            "status": {"active_profile": "real"},
+            "status_unavailable": True,
+            "warnings": ["변경은 저장됐지만 상태 재조회에 실패했습니다"],
+            "verification": {"auth": "ok", "kr_intraday": "available",
+                             "us_intraday": "available"},
+        }, exit_code=0)
+        with patch.object(api_module.orchestrator, "broker_action",
+                          return_value=result), \
+             patch.object(api, "diagnose_one", return_value={}):
+            out = api.broker_connect("stocklens", "real", "k", "s")
+        assert out["ok"]
+        assert out["status_unavailable"] is True
+        assert any("재조회" in w for w in out["warnings"])
 
     def test_open_broker_signup_opens_portal(self):
         api = self._api()

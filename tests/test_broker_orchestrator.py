@@ -184,3 +184,25 @@ class TestBrokerActionResultModel:
         assert not result.ok
         assert result.error_code == "credential_invalid"
         assert result.message == "인증 실패"
+
+
+class TestStatusUnavailablePassthrough:
+    """리뷰 지적: 커밋 성공 + 상태 재조회 실패(status_unavailable)가
+    전달 계층에서 버려져 UI 가 그냥 "연결 완료"를 띄웠다."""
+
+    def test_model_carries_status_unavailable_and_warnings(self):
+        result = BrokerActionResult.from_json({
+            "ok": True, "contract_version": 1, "action": "verify_and_save",
+            "status": {"active_profile": "real"},
+            "status_unavailable": True,
+            "warnings": ["변경은 저장됐지만 상태 재조회에 실패했습니다"],
+        }, exit_code=0)
+        assert result.ok
+        assert result.status_unavailable is True
+        assert any("재조회" in w for w in result.warnings)
+
+    def test_model_defaults_when_absent(self):
+        result = BrokerActionResult.from_json({
+            "ok": True, "status": {}}, exit_code=0)
+        assert result.status_unavailable is False
+        assert result.warnings == []
