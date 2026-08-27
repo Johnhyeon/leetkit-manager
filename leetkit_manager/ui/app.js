@@ -1056,7 +1056,10 @@ function renderBrokerModal(st) {
     const otherReady = !!(profiles[other] && profiles[other].configured);
     switchBtn.textContent =
       active === "real" ? "모의로 변경" : "실전으로 변경";
-    switchBtn.disabled = !otherReady;
+    // 다른 환경의 키가 없으면 누를 수 없는 버튼이다 - 설명 없는 비활성
+    // 버튼은 혼란만 주므로 아예 숨긴다. 모의 추가는 [키 변경]에서 한다.
+    switchBtn.hidden = !otherReady;
+    switchBtn.disabled = false;
     if (brokerEditingKey) {
       setBrokerState("connected", "새 App Key와 App Secret을 입력하면 기존 키를 대체합니다");
       const activeRadio = document.querySelector(
