@@ -464,8 +464,15 @@ class Api:
                 out["broker_cleanup_error"] = (
                     result.message or result.error_code)
                 out["stage"] = "broker"
-                out["error"] = ("증권사 연결 해제에 실패했습니다, "
-                                "자격 증명이 이 컴퓨터에 남아 있습니다")
+                if result.error_code == "cache_cleanup_failed" and \
+                        result.message:
+                    # 자격 증명은 이미 지워진 상태다 - "자격 증명이 남아
+                    # 있다"고 말하면 틀린다. StockLens 의 사실 그대로.
+                    out["error"] = result.message
+                else:
+                    out["error"] = (
+                        "증권사 연결 해제에 실패했습니다, "
+                        "자격 증명이 이 컴퓨터에 남아 있습니다")
                 return out
 
         # 2. MCP 등록 전체 해제 (빈 목록 = 전부 해제)

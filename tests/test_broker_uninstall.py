@@ -165,3 +165,17 @@ class TestFullCleanupOrder:
         assert result["ok"]
         assert result["broker_cleanup_attempted"] is False
         assert calls[0] == "register:[]"
+
+    def test_cache_cleanup_failure_stops_with_accurate_message(self):
+        # StockLens 가 cache_cleanup_failed 를 주면 자격 증명은 이미
+        # 지워진 상태다 - "자격 증명이 남아 있다"고 말하면 틀린다.
+        api, calls, patches = self._api_with_recorder(
+            broker=_failed_broker(code="cache_cleanup_failed",
+                                  message="자격 증명은 삭제됐지만 분봉 캐시 삭제에 실패했습니다"))
+        with patches[0], patches[1], patches[2]:
+            result = api.full_cleanup("stocklens")
+        assert not result["ok"]
+        assert result["stage"] == "broker"
+        assert "캐시" in result["error"]
+        assert "자격 증명이 이 컴퓨터에 남아" not in result["error"]
+        assert calls == ["broker:disconnect_provider"]
