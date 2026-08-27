@@ -61,10 +61,15 @@
   <div class="modal broker-modal">
     <div class="modal-title" id="broker-title">증권사 연결</div>
 
+    <div class="broker-intro-hint">증권사 하나만 연결하면 됩니다<br>여러 증권사 연결은 선택 사항입니다</div>
+
     <!-- 증권사 선택 - 네이티브 select 는 앱 톤과 겉돌아서 pill 탭으로 둔다.
-         새 증권사가 추가되면 여기와 app.js 의 BROKER_PROVIDERS 에 한 줄씩 -->
+         탭 노출 여부는 StockLens describe_providers 응답이 정한다
+         (구 StockLens 연결 시 JS 가 kiwoom·toss 탭을 숨긴다) -->
     <div class="broker-provider-tabs" id="broker-provider">
-      <label class="broker-provider-tab"><input type="radio" name="broker-provider" value="kis" checked><span>한국투자증권</span></label>
+      <label class="broker-provider-tab" data-provider="kis"><input type="radio" name="broker-provider" value="kis" checked><span>한국투자증권</span><span class="broker-tab-state" id="broker-tab-state-kis"></span></label>
+      <label class="broker-provider-tab" data-provider="kiwoom"><input type="radio" name="broker-provider" value="kiwoom"><span>키움증권</span><span class="broker-tab-state" id="broker-tab-state-kiwoom"></span></label>
+      <label class="broker-provider-tab" data-provider="toss"><input type="radio" name="broker-provider" value="toss"><span>토스증권</span><span class="broker-tab-state" id="broker-tab-state-toss"></span></label>
     </div>
 
     <div class="broker-status-box">
@@ -79,6 +84,7 @@
       <div class="broker-manage-row" id="broker-manage-row" hidden>
         <button class="action-btn" id="broker-change-key-btn" hidden>키 변경</button>
         <button class="action-btn" id="broker-switch-btn" hidden>환경 변경</button>
+        <button class="action-btn" id="broker-set-primary-btn" hidden>주 사용으로 변경</button>
         <button class="action-btn warn" id="broker-disconnect-profile-btn" hidden>현재 환경 연결 해제</button>
       </div>
     </div>
@@ -89,15 +95,17 @@
         <label class="broker-radio"><input type="radio" name="broker-profile" value="real" checked> 실전 권장</label>
         <label class="broker-radio"><input type="radio" name="broker-profile" value="demo"> 모의</label>
       </div>
-      <div class="broker-demo-warning" id="broker-demo-warning" hidden>모의 API는 한국투자증권 지원 정책에 따라 일부 시세와 과거 분봉을 가져오지 못할 수 있습니다<br>연결 테스트 후 실제로 쓸 수 있는 기능만 켜집니다</div>
+      <div class="broker-demo-warning" id="broker-demo-warning" hidden>모의 API는 증권사 지원 정책에 따라 일부 시세와 과거 분봉을 가져오지 못할 수 있습니다<br>연결 테스트 후 실제로 쓸 수 있는 기능만 켜집니다</div>
       <ol class="credential-help-steps" id="broker-signup-steps">
-        <li>아래 버튼으로 한국투자증권 API 포털을 열고 로그인</li>
-        <li>"API 신청"에서 앱 등록 후 App Key와 App Secret 발급</li>
-        <li>발급된 두 값을 아래 칸에 붙여넣기</li>
+        <li>아래 버튼으로 증권사 API 포털을 열고 로그인</li>
+        <li>API 신청 메뉴에서 앱 등록 후 키 발급</li>
+        <li>발급된 값을 아래 칸에 붙여넣기</li>
       </ol>
       <button type="button" class="action-btn" id="broker-signup-btn">한국투자증권 API 포털 열기</button>
-      <input type="password" id="broker-appkey" placeholder="App Key를 붙여넣으세요" autocomplete="off">
-      <input type="password" id="broker-appsecret" placeholder="App Secret을 붙여넣으세요" autocomplete="off">
+      <div id="broker-credential-fields">
+        <input type="password" id="broker-appkey" data-credential-field="app_key" placeholder="App Key를 붙여넣으세요" autocomplete="off">
+        <input type="password" id="broker-appsecret" data-credential-field="app_secret" placeholder="App Secret을 붙여넣으세요" autocomplete="off">
+      </div>
     </div>
 
     <div class="modal-field" id="broker-mode-field" hidden>
@@ -105,17 +113,12 @@
       <div class="broker-mode-choices">
         <label class="broker-mode-option">
           <input type="radio" name="broker-mode" value="auto" checked>
-          <span class="broker-mode-text">자동 권장
-            <span class="broker-mode-hint">분봉은 증권사, 일봉과 현재가는 기존 데이터</span></span>
-        </label>
-        <label class="broker-mode-option">
-          <input type="radio" name="broker-mode" value="broker_first">
-          <span class="broker-mode-text">증권사 우선
-            <span class="broker-mode-hint">검증된 증권사 데이터를 먼저 사용</span></span>
+          <span class="broker-mode-text">일반 사용, 권장
+            <span class="broker-mode-hint">분봉은 주 사용 증권사, 일봉과 현재가는 기존 데이터</span></span>
         </label>
         <label class="broker-mode-option">
           <input type="radio" name="broker-mode" value="legacy">
-          <span class="broker-mode-text">기본 데이터 유지
+          <span class="broker-mode-text">기본 데이터만 사용
             <span class="broker-mode-hint">증권사 호출 없이 연결 전과 동일하게 동작</span></span>
         </label>
       </div>

@@ -1846,6 +1846,36 @@ button:focus-visible, input:focus-visible {
   background: var(--ok-dim);
 }
 
+/* 첫 안내 - 하나만 연결해도 충분하다는 사실을 먼저 말해준다 */
+.broker-intro-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 2px 0 10px;
+}
+
+/* 탭 아래 상태 배지 - pill 스타일을 물려받지 않도록 초기화한다 */
+.broker-provider-tab .broker-tab-state,
+.broker-provider-tab:has(input:checked) .broker-tab-state {
+  display: block;
+  padding: 3px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: 0;
+  text-align: center;
+}
+
+.broker-provider-tab .broker-tab-state.primary {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.broker-provider-tab .broker-tab-state.connected {
+  color: var(--text);
+}
+
 /* 상태 카드 - 연결 상태와 능력, 관리 버튼을 한 상자로 묶는다 */
 .broker-status-box {
   background: var(--panel-raised);

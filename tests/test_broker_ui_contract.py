@@ -59,11 +59,15 @@ class TestHtmlContract:
         assert re.search(r"모의[^<]*분봉", HTML) or "과거 분봉" in HTML
 
     def test_data_source_modes(self):
-        for value in ("auto", "broker_first", "legacy"):
+        # 1.0: 사용자에게는 두 가지만 보여준다. broker_first 는 내부
+        # 호환용으로 JS 에만 남는다 (노출 금지).
+        for value in ("auto", "legacy"):
             assert f'value="{value}"' in HTML
-        assert "자동" in HTML
-        assert "증권사 우선" in HTML
-        assert "기본 데이터" in HTML
+        assert 'value="broker_first"' not in HTML
+        assert "일반 사용" in HTML
+        assert "권장" in HTML
+        assert "기본 데이터만 사용" in HTML
+        assert "broker_first" in JS  # 저장된 구 설정 호환
 
     def test_capability_rows_shown_separately(self):
         assert 'id="broker-cap-kr"' in HTML
@@ -91,10 +95,16 @@ class TestHtmlContract:
         assert 'id="broker-mode-save-btn"' in HTML
 
     def test_provider_selector_exists(self):
-        # 다른 증권사 추가를 고려한 구조. 지금은 한국투자증권 하나다.
         assert 'id="broker-provider"' in HTML
         assert 'value="kis"' in HTML
         assert "한국투자증권" in HTML
+
+    def test_all_three_providers_selectable(self):
+        # 1.0 멀티 증권사: 세 공급자 탭. 구 StockLens 연결 시 JS 가
+        # kiwoom·toss 탭을 숨긴다.
+        for value, label in (("kiwoom", "키움증권"), ("toss", "토스증권")):
+            assert f'value="{value}"' in HTML, value
+            assert label in HTML, label
 
     def test_signup_help_and_url_button(self):
         # DART API 키 모달처럼 발급 절차 안내 + 포털 열기 버튼을 함께 둔다.
@@ -177,6 +187,71 @@ class TestJsContract:
         connect_start = JS.index('broker-connect-btn").addEventListener')
         connect_block = JS[connect_start:connect_start + 3000]
         assert "brokerSuccessNotice" in connect_block
+
+
+class TestSinglePrimaryUx:
+    """1.0 Task 22: 하나의 주 사용 증권사 UX."""
+
+    def test_required_copy_present(self):
+        text = HTML + JS
+        for phrase in (
+            "증권사 하나만 연결하면 됩니다",
+            "여러 증권사 연결은 선택 사항입니다",
+            "사용 중",
+            "연결됨",
+            "연결 안 됨, 선택 사항",
+            "데이터 출처를 자동으로 변경하지 않았습니다",
+        ):
+            assert phrase in text, phrase
+
+    def test_set_primary_button_and_relay(self):
+        assert 'id="broker-set-primary-btn"' in HTML
+        assert "주 사용으로 변경" in HTML + JS
+        assert "broker_set_primary" in JS
+
+    def test_descriptor_driven_credential_fields(self):
+        # 자격 증명 입력은 descriptor 의 credential_fields 로 만든다.
+        assert 'id="broker-credential-fields"' in HTML
+        assert "credential_fields" in JS
+        # 동적으로 만든 입력도 password + autocomplete off 다.
+        assert re.search(
+            r"createElement\(\"input\"\)[\s\S]{0,400}type\s*=\s*\"password\"",
+            JS)
+        assert re.search(
+            r"createElement\(\"input\"\)[\s\S]{0,600}autocomplete", JS)
+
+    def test_describe_providers_used_with_legacy_fallback(self):
+        assert "broker_describe_providers" in JS
+        # 구 StockLens(providers=None)면 KIS 전용으로 동작한다.
+        assert "KIS_FALLBACK" in JS or "kisFallback" in JS
+
+    def test_no_demo_assumption_per_provider(self):
+        # supported_profiles 에 demo 가 없으면(토스) 모의 선택지를 숨긴다.
+        assert "supported_profiles" in JS
+        assert re.search(r"supported_profiles[\s\S]{0,400}demo", JS)
+
+    def test_provider_error_messages_use_textcontent(self):
+        # provider 오류 문구는 textContent 로만 그린다 (innerHTML 금지).
+        broker_start = JS.index("const BROKER_STATES")
+        broker_end = JS.index("/* ---------- 활성화 모달")
+        broker_block = JS[broker_start:broker_end]
+        assert "innerHTML" not in broker_block
+
+    def test_no_credential_localstorage(self):
+        for match in re.finditer(r"localStorage\.setItem\(([^)]*)\)", JS):
+            args = match.group(1)
+            assert "BROKER_INTRO_KEY" in args or "secret" not in args.lower()
+            assert "appkey" not in args.lower()
+            assert "credential" not in args.lower()
+
+    def test_inputs_cleared_on_cancel_and_close(self):
+        cancel_start = JS.index('broker-cancel").addEventListener')
+        cancel_block = JS[cancel_start:cancel_start + 800]
+        assert "clearBrokerInputs" in cancel_block
+
+    def test_primary_disconnect_never_auto_switches(self):
+        # 주 사용 해제 후 다른 증권사·Yahoo 로 자동 전환하지 않는다.
+        assert "데이터 출처를 자동으로 변경하지 않았습니다" in JS
 
 
 class FakeDiag:

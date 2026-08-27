@@ -935,9 +935,27 @@ const BROKER_STATES = {
   "error": "오류",
 };
 
-// 다른 증권사가 추가되면 여기에만 늘린다 - id 는 StockLens CLI 의
-// provider 값과 같아야 한다(lens_contract 의 providers 와 동기).
-const BROKER_PROVIDERS = [{ id: "kis", label: "한국투자증권" }];
+// 구 StockLens(describe_providers 미지원) 호환용 내장 KIS descriptor.
+// 새 공급자 정보는 StockLens 의 describe_providers 응답이 단일 출처다.
+const KIS_FALLBACK_DESCRIPTORS = [
+  {
+    provider_id: "kis",
+    display_name: "한국투자증권",
+    supported_profiles: ["real", "demo"],
+    credential_fields: [
+      { name: "app_key", label: "App Key", secret: true },
+      { name: "app_secret", label: "App Secret", secret: true },
+    ],
+  },
+];
+let brokerDescriptors = KIS_FALLBACK_DESCRIPTORS;
+
+function brokerDescriptor() {
+  return (
+    brokerDescriptors.find((d) => d.provider_id === brokerProvider) ||
+    KIS_FALLBACK_DESCRIPTORS[0]
+  );
+}
 
 // 새 기능 첫 1회 강조 - 처음 열어보기 전까지 카드 버튼이 반짝인다.
 const BROKER_INTRO_KEY = "leetkit-manager-broker-intro-seen";
@@ -974,13 +992,47 @@ let brokerEditingKey = false;
 let brokerCurrentMode = null;
 
 function brokerProviderLabel() {
-  const found = BROKER_PROVIDERS.find((p) => p.id === brokerProvider);
-  return found ? found.label : brokerProvider;
+  return brokerDescriptor().display_name || brokerProvider;
 }
 
 function clearBrokerInputs() {
-  document.getElementById("broker-appkey").value = "";
-  document.getElementById("broker-appsecret").value = "";
+  document
+    .querySelectorAll("#broker-credential-fields input")
+    .forEach((input) => {
+      input.value = "";
+    });
+}
+
+// descriptor 의 credential_fields 로 입력칸을 만든다. 필드명은 그대로
+// 쓰고(개명 금지), 전부 password + autocomplete off 다. KIS 필드는
+// 가이드 투어 앵커(#broker-appkey)를 위해 기존 id 를 유지한다.
+function renderCredentialFields(descriptor) {
+  const box = document.getElementById("broker-credential-fields");
+  box.textContent = "";
+  (descriptor.credential_fields || []).forEach((field) => {
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "off";
+    input.dataset.credentialField = field.name;
+    if (field.name === "app_key") input.id = "broker-appkey";
+    else if (field.name === "app_secret") input.id = "broker-appsecret";
+    else input.id = `broker-cred-${field.name}`;
+    input.placeholder = `${field.label || field.name} 값을 붙여넣으세요`;
+    box.appendChild(input);
+  });
+}
+
+function collectCredentialInputs() {
+  const values = {};
+  let missing = false;
+  document
+    .querySelectorAll("#broker-credential-fields input")
+    .forEach((input) => {
+      const value = input.value.trim();
+      if (!value) missing = true;
+      values[input.dataset.credentialField] = value;
+    });
+  return { values, missing };
 }
 
 // 상태별 표시등 색 - 카드의 readiness 3색과 같은 문법을 쓴다.
@@ -1022,6 +1074,35 @@ function renderBrokerCaps(status) {
   );
 }
 
+// 탭별 상태 배지. 주 사용 하나만 "사용 중"이고, 나머지 연결은 "연결됨",
+// 미연결은 "연결 안 됨, 선택 사항"이다 (여러 증권사 연결은 선택 사항).
+function renderBrokerTabs(status) {
+  const known = new Set(brokerDescriptors.map((d) => d.provider_id));
+  const providers = (status || {}).providers || {};
+  const primary = (status || {}).primary_provider || null;
+  document.querySelectorAll(".broker-provider-tab").forEach((tab) => {
+    const id = tab.dataset.provider;
+    // 구 StockLens 는 새 공급자 탭을 숨긴다.
+    tab.hidden = !known.has(id);
+    const badge = document.getElementById(`broker-tab-state-${id}`);
+    if (!badge) return;
+    const record = providers[id] || {};
+    const connectedHere =
+      record.lifecycle === "connected" &&
+      (record.verified_profiles || []).length > 0;
+    if (primary === id) {
+      badge.textContent = "사용 중";
+      badge.className = "broker-tab-state primary";
+    } else if (connectedHere) {
+      badge.textContent = "연결됨";
+      badge.className = "broker-tab-state connected";
+    } else {
+      badge.textContent = "연결 안 됨, 선택 사항";
+      badge.className = "broker-tab-state";
+    }
+  });
+}
+
 function renderBrokerModal(st) {
   const form = document.getElementById("broker-connect-form");
   const modeField = document.getElementById("broker-mode-field");
@@ -1030,14 +1111,34 @@ function renderBrokerModal(st) {
   const manageRow = document.getElementById("broker-manage-row");
   const changeKeyBtn = document.getElementById("broker-change-key-btn");
   const switchBtn = document.getElementById("broker-switch-btn");
+  const setPrimaryBtn = document.getElementById("broker-set-primary-btn");
   const dcProfileBtn = document.getElementById("broker-disconnect-profile-btn");
   const dcProviderBtn = document.getElementById("broker-disconnect-provider-btn");
 
   dcProviderBtn.textContent = `${brokerProviderLabel()} 연결을 모두 해제`;
+  document.getElementById("broker-signup-btn").textContent =
+    `${brokerProviderLabel()} API 포털 열기`;
   const providerRadio = document.querySelector(
     `input[name="broker-provider"][value="${brokerProvider}"]`
   );
   if (providerRadio) providerRadio.checked = true;
+
+  // 모의(demo)를 지원하지 않는 증권사(토스)는 선택지를 숨긴다.
+  const supportsDemo = (brokerDescriptor().supported_profiles || [])
+    .includes("demo");
+  const demoRadio = document.querySelector(
+    'input[name="broker-profile"][value="demo"]'
+  );
+  if (demoRadio) {
+    demoRadio.closest("label").hidden = !supportsDemo;
+    if (!supportsDemo) {
+      const realRadio = document.querySelector(
+        'input[name="broker-profile"][value="real"]'
+      );
+      if (realRadio) realRadio.checked = true;
+      document.getElementById("broker-demo-warning").hidden = true;
+    }
+  }
 
   if (!st || !st.supported) {
     const updateNeeded = st && st.error_code === "update_required";
@@ -1053,13 +1154,16 @@ function renderBrokerModal(st) {
     manageRow.hidden = true;
     changeKeyBtn.hidden = true;
     switchBtn.hidden = true;
+    setPrimaryBtn.hidden = true;
     dcProfileBtn.hidden = true;
     dcProviderBtn.hidden = true;
+    renderBrokerTabs({});
     return;
   }
 
   const status = st.status || {};
   brokerLastStatus = status;
+  renderBrokerTabs(status);
   const profiles = status.profiles || {};
   const active = status.active_profile;
   const connected = !!(active && profiles[active] && profiles[active].configured);
@@ -1076,6 +1180,10 @@ function renderBrokerModal(st) {
   switchBtn.hidden = !connected;
   dcProfileBtn.hidden = !connected;
   dcProviderBtn.hidden = !anyConfigured;
+  // 주 사용 변경: 연결돼 있고 아직 주 사용이 아닐 때만 보인다.
+  setPrimaryBtn.hidden = !(
+    connected && status.primary_provider !== brokerProvider
+  );
 
   if (connected) {
     const other = active === "real" ? "demo" : "real";
@@ -1093,14 +1201,22 @@ function renderBrokerModal(st) {
       );
       if (activeRadio) activeRadio.checked = true;
     } else {
+      const envLabel =
+        active === "real" ? "실전 환경으로 연결되어 있습니다" : "모의 환경으로 연결되어 있습니다";
       setBrokerState(
         "connected",
-        active === "real" ? "실전 환경으로 연결되어 있습니다" : "모의 환경으로 연결되어 있습니다"
+        status.primary_provider === brokerProvider
+          ? `주 사용 증권사입니다, ${envLabel}`
+          : envLabel
       );
     }
     brokerCurrentMode = status.data_source_mode || "auto";
+    // broker_first 는 구 설정 호환값이다. 화면에는 노출하지 않고
+    // "일반 사용"으로 표시한다 (저장은 사용자가 바꿀 때만 일어난다).
+    const displayMode =
+      brokerCurrentMode === "broker_first" ? "auto" : brokerCurrentMode;
     const radio = document.querySelector(
-      `input[name="broker-mode"][value="${brokerCurrentMode}"]`
+      `input[name="broker-mode"][value="${displayMode}"]`
     );
     if (radio) radio.checked = true;
     modeSaveBtn.hidden = true;
@@ -1126,11 +1242,27 @@ async function openBrokerModal(lensName) {
   brokerDemoMode = false;
   brokerEditingKey = false;
   markBrokerIntroSeen();
-  clearBrokerInputs();
   const backdrop = document.getElementById("broker-backdrop");
   backdrop.classList.remove("demo-position");
   backdrop.hidden = false;
   setBrokerState("verifying", "상태를 확인하는 중입니다");
+  try {
+    // 공급자 descriptor 는 StockLens 가 단일 출처다. 구 버전이면
+    // null -> 내장 KIS 로만 동작한다 (새 공급자 숨김).
+    const described = await window.pywebview.api.broker_describe_providers(
+      lensName
+    );
+    brokerDescriptors =
+      described && described.providers
+        ? described.providers
+        : KIS_FALLBACK_DESCRIPTORS;
+  } catch {
+    brokerDescriptors = KIS_FALLBACK_DESCRIPTORS;
+  }
+  if (!brokerDescriptors.some((d) => d.provider_id === brokerProvider)) {
+    brokerProvider = brokerDescriptors[0].provider_id;
+  }
+  renderCredentialFields(brokerDescriptor());
   try {
     await refreshBrokerModal();
   } catch {
@@ -1144,14 +1276,20 @@ async function openBrokerModal(lensName) {
 function openBrokerModalExample() {
   brokerDemoMode = true;
   brokerEditingKey = true; // 입력 폼까지 같이 보여준다
+  brokerProvider = "kis";
   const backdrop = document.getElementById("broker-backdrop");
   backdrop.classList.add("demo-position");
   backdrop.hidden = false;
+  renderCredentialFields(brokerDescriptor());
   renderBrokerModal({
     supported: true,
     status: {
       active_profile: "real",
       data_source_mode: "auto",
+      primary_provider: "kis",
+      providers: {
+        kis: { lifecycle: "connected", verified_profiles: ["real"] },
+      },
       profiles: {
         real: { configured: true },
         demo: { configured: true },
@@ -1176,6 +1314,7 @@ function closeBrokerModalDemo() {
 document.getElementById("broker-provider").addEventListener("change", (e) => {
   brokerProvider = e.target.value;
   brokerEditingKey = false;
+  renderCredentialFields(brokerDescriptor());
   clearBrokerInputs();
   refreshBrokerModal().catch(() => {
     setBrokerState("error", "상태 확인에 실패했습니다");
@@ -1239,10 +1378,9 @@ document.querySelectorAll('input[name="broker-profile"]').forEach((radio) => {
 
 document.getElementById("broker-connect-btn").addEventListener("click", () => {
   brokerCall(async () => {
-    const key = document.getElementById("broker-appkey").value.trim();
-    const secret = document.getElementById("broker-appsecret").value.trim();
-    if (!key || !secret) {
-      setBrokerState("error", "App Key와 App Secret을 모두 입력해주세요");
+    const { values, missing } = collectCredentialInputs();
+    if (missing) {
+      setBrokerState("error", "연결 키를 모두 입력해주세요");
       return;
     }
     const profile = brokerSelectedProfile();
@@ -1250,13 +1388,13 @@ document.getElementById("broker-connect-btn").addEventListener("click", () => {
     const result = await window.pywebview.api.broker_connect(
       brokerLensName,
       profile,
-      key,
-      secret,
+      values,
       brokerProvider
     );
     if (!result.ok) {
       // 실패해도 기존 연결 상태 표시는 유지한다 — 상태를 다시 그리되
-      // 오류 메시지를 위에 얹는다.
+      // 오류 메시지를 위에 얹는다. 입력값은 남기지 않는다 (비밀 보호).
+      clearBrokerInputs();
       try {
         await refreshBrokerModal();
       } catch {}
@@ -1288,6 +1426,30 @@ document.getElementById("broker-connect-btn").addEventListener("click", () => {
     );
   });
 });
+
+document
+  .getElementById("broker-set-primary-btn")
+  .addEventListener("click", () => {
+    brokerCall(async () => {
+      const result = await window.pywebview.api.broker_set_primary(
+        brokerLensName,
+        brokerProvider
+      );
+      if (!result.ok) {
+        setBrokerState(
+          "error",
+          result.error || "주 사용 증권사 변경에 실패했습니다"
+        );
+        return;
+      }
+      if (result.lens) replaceCard(brokerLensName, result.lens);
+      await refreshBrokerModal();
+      brokerSuccessNotice(
+        result,
+        `${brokerProviderLabel()}을(를) 주 사용 증권사로 지정했습니다`
+      );
+    });
+  });
 
 document.getElementById("broker-switch-btn").addEventListener("click", () => {
   brokerCall(async () => {
@@ -1345,8 +1507,23 @@ document
       clearBrokerInputs();
       brokerEditingKey = false;
       if (result.lens) replaceCard(brokerLensName, result.lens);
+      const wasPrimary =
+        (brokerLastStatus || {}).primary_provider === brokerProvider;
       await refreshBrokerModal();
-      brokerSuccessNotice(result, `${brokerProviderLabel()} 연결을 모두 해제하고 관련 캐시를 지웠습니다`);
+      if (wasPrimary) {
+        // 주 사용 해제 후에도 다른 증권사·Yahoo 로 자동 전환하지 않는다.
+        brokerSuccessNotice(
+          result,
+          `${brokerProviderLabel()} 연결을 모두 해제했습니다`
+        );
+        setBrokerState(
+          "not_configured",
+          "주 사용 증권사가 해제되었습니다, 데이터 출처를 자동으로 변경하지 않았습니다\n" +
+            "다른 연결된 증권사를 [주 사용으로 변경]하거나 다시 연결해주세요"
+        );
+      } else {
+        brokerSuccessNotice(result, `${brokerProviderLabel()} 연결을 모두 해제하고 관련 캐시를 지웠습니다`);
+      }
     });
   });
 
@@ -1355,7 +1532,11 @@ document
 document.querySelectorAll('input[name="broker-mode"]').forEach((radio) => {
   radio.addEventListener("change", () => {
     const saveBtn = document.getElementById("broker-mode-save-btn");
-    saveBtn.hidden = radio.value === brokerCurrentMode;
+    // broker_first(구 설정)는 화면상 "일반 사용"으로 표시되므로 auto 로
+    // 되돌아온 경우도 변경 없음으로 본다.
+    saveBtn.hidden =
+      radio.value === brokerCurrentMode ||
+      (brokerCurrentMode === "broker_first" && radio.value === "auto");
   });
 });
 
