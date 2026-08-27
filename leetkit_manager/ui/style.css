@@ -1015,6 +1015,18 @@ body {
   box-shadow: 0 0 0 9999px rgba(10, 11, 12, 0.8);
   transition: left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease;
   pointer-events: none;
+  /* 기본은 페이지 위, 모달(32) 아래 - 상세 데모에서 예시 모달이 밝게 보여야 한다 */
+  z-index: 31;
+}
+
+.tour-highlight[hidden] {
+  display: none;
+}
+
+/* 증권사 데모처럼 모달 "안" 요소를 가리키는 단계 - 모달(32) 위로 올라가
+   스포트라이트 구멍만 밝게 남고 나머지 모달은 어두워진다 */
+.tour-highlight.above-modal {
+  z-index: 33;
 }
 
 .tour-tooltip {

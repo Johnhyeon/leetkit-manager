@@ -350,12 +350,15 @@
 </div>
 
 <div class="tour-overlay" id="tour-overlay" hidden>
-  <div class="tour-highlight" id="tour-highlight"></div>
+  <!-- tour-highlight 는 아래로 이동 - overlay(z30) 안에 있으면 증권사 데모처럼
+       모달(z32) 위 요소를 가리킬 때 스포트라이트가 모달에 가려진다 -->
+
 </div>
 
 <!-- tour-overlay 밖의 형제 요소 — 데모로 실제 모달(#detail-backdrop 등)을 같이 띄우는
      단계에서도 이 툴팁(다음/이전 버튼 포함)이 그 모달보다 위에 남아있어야 하기 때문
      (같은 부모 안에 있으면 tour-overlay 전체의 z-index에 갇혀 모달에 가려짐). -->
+<div class="tour-highlight" id="tour-highlight" hidden></div>
 <div class="tour-tooltip" id="tour-tooltip" hidden>
   <div class="tour-step-label" id="tour-step-label">1 / 6</div>
   <div class="tour-title" id="tour-title"></div>

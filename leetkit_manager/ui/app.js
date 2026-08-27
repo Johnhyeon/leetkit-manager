@@ -2850,6 +2850,9 @@ function positionTour(i) {
   const pad = 6;
 
   const hl = document.getElementById("tour-highlight");
+  // 모달 안 요소를 가리키는 단계에서만 모달 위로 - 상세 데모(모달 전체를
+  // 밝게 보여주는 단계)는 기본 z 그대로 둔다.
+  hl.classList.toggle("above-modal", step.demo === "broker");
   hl.style.left = `${rect.left - pad}px`;
   hl.style.top = `${rect.top - pad}px`;
   hl.style.width = `${rect.width + pad * 2}px`;
@@ -2918,6 +2921,7 @@ function startTour() {
   if (!tourSteps.length) return;
   tourIndex = 0;
   document.getElementById("tour-overlay").hidden = false;
+  document.getElementById("tour-highlight").hidden = false;
   document.getElementById("tour-tooltip").hidden = false;
   positionTour(tourIndex);
 }
@@ -2925,6 +2929,7 @@ function startTour() {
 function endTour() {
   closeTourDemoModals();
   document.getElementById("tour-overlay").hidden = true;
+  document.getElementById("tour-highlight").hidden = true;
   document.getElementById("tour-tooltip").hidden = true;
 }
 
