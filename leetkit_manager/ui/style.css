@@ -1955,11 +1955,6 @@ button:focus-visible, input:focus-visible {
   color: var(--text-dim);
 }
 
-#broker-mode-save-btn {
-  align-self: flex-end;
-  margin-top: 2px;
-}
-
 /* 전체 해제 - 파괴적 동작은 버튼 줄이 아니라 하단에 작게, 경고색 링크로 */
 .broker-danger-link {
   align-self: flex-start;
