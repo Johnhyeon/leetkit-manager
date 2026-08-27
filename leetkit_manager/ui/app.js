@@ -995,6 +995,16 @@ function brokerProviderLabel() {
   return brokerDescriptor().display_name || brokerProvider;
 }
 
+// 선택된 증권사의 활성 프로필. top-level active_profile 은 주 사용
+// 증권사(primary)의 값이라 다른 탭에서 쓰면 안 된다 - 실제로 주 사용
+// KIS=모의 + 토스=실전일 때 토스 탭이 미연결로 표시되는 결함이 있었다.
+function brokerActiveProfile(status) {
+  const record = ((status || {}).providers || {})[brokerProvider];
+  if (record !== undefined) return record.active_profile;
+  // 구 StockLens(providers 맵 없음)는 KIS 전용이라 호환 필드가 곧 답이다.
+  return (status || {}).active_profile;
+}
+
 function clearBrokerInputs() {
   document
     .querySelectorAll("#broker-credential-fields input")
@@ -1064,7 +1074,7 @@ function brokerCapLabel(value) {
 
 function renderBrokerCaps(status) {
   const caps =
-    ((status || {}).capability_results || {})[(status || {}).active_profile] ||
+    ((status || {}).capability_results || {})[brokerActiveProfile(status)] ||
     {};
   document.getElementById("broker-cap-kr").textContent = brokerCapLabel(
     caps.kr_intraday
@@ -1165,7 +1175,7 @@ function renderBrokerModal(st) {
   brokerLastStatus = status;
   renderBrokerTabs(status);
   const profiles = status.profiles || {};
-  const active = status.active_profile;
+  const active = brokerActiveProfile(status);
   const connected = !!(active && profiles[active] && profiles[active].configured);
   const anyConfigured = Object.values(profiles).some((p) => p && p.configured);
 
@@ -1453,7 +1463,7 @@ document
 
 document.getElementById("broker-switch-btn").addEventListener("click", () => {
   brokerCall(async () => {
-    const active = (brokerLastStatus || {}).active_profile;
+    const active = brokerActiveProfile(brokerLastStatus);
     const target = active === "real" ? "demo" : "real";
     const result = await window.pywebview.api.broker_switch_profile(
       brokerLensName,
@@ -1473,7 +1483,7 @@ document
   .getElementById("broker-disconnect-profile-btn")
   .addEventListener("click", () => {
     brokerCall(async () => {
-      const active = (brokerLastStatus || {}).active_profile;
+      const active = brokerActiveProfile(brokerLastStatus);
       if (!active) return;
       setBrokerState("disconnecting", "현재 환경 연결을 해제하는 중입니다");
       const result = await window.pywebview.api.broker_disconnect_profile(

@@ -253,6 +253,23 @@ class TestSinglePrimaryUx:
         # 주 사용 해제 후 다른 증권사·Yahoo 로 자동 전환하지 않는다.
         assert "데이터 출처를 자동으로 변경하지 않았습니다" in JS
 
+    def test_active_profile_is_per_provider_not_primary(self):
+        # 재현된 결함(리뷰): 주 사용 KIS=모의 + 토스=실전 연결 상태에서
+        # 토스 탭이 KIS 의 demo 를 기준으로 판단해 토스를 미연결로 표시.
+        # 활성 프로필은 반드시 선택된 증권사(status.providers[provider])
+        # 에서 읽어야 한다. top-level active_profile 은 primary 호환
+        # 필드일 뿐이다.
+        assert "brokerActiveProfile" in JS
+        assert re.search(
+            r"function brokerActiveProfile[\s\S]{0,400}"
+            r"providers\[brokerProvider\]", JS)
+        # renderBrokerModal 과 전환·해제 핸들러가 helper 를 쓴다.
+        render_start = JS.index("function renderBrokerModal")
+        render_block = JS[render_start:render_start + 4000]
+        assert "brokerActiveProfile" in render_block
+        assert re.search(r"const active = status\.active_profile;",
+                         JS) is None
+
 
 class FakeDiag:
     def __init__(self):
