@@ -394,6 +394,71 @@ class Api:
             lens, "set_data_source_mode", mode=mode)
         return self._broker_result(lens_name, result, rediagnose=True)
 
+    def full_cleanup(self, lens_name: str, force: bool = False) -> dict:
+        """이 컴퓨터에서 완전히 정리. 순서가 고정이다:
+
+            증권사 연결 해제 -> MCP 등록 해제 -> 패키지 삭제 -> 라이선스 삭제
+
+        패키지를 지우면 broker CLI 도 사라져 자격 증명을 지울 방법이 없다.
+        그래서 broker 해제 실패는 중단 사유다 - 조용히 계속하지 않고 남는
+        항목을 알린다. MCP 해제 실패는 사용자가 확인(force)하면 계속한다.
+        """
+        lens = get_lens(lens_name)
+        out: dict = {
+            "ok": False, "stage": None, "error": None,
+            "broker_cleanup_attempted": False,
+            "broker_cleanup_ok": None,
+            "broker_cleanup_error": None,
+            "unregistered": [], "license_removed": False,
+            "blocking_apps": [],
+        }
+
+        # 1. 증권사 연결 해제 (지원 Lens 만)
+        if lens.broker is not None:
+            out["broker_cleanup_attempted"] = True
+            result = orchestrator.broker_action(lens, "disconnect_provider")
+            if result.ok:
+                out["broker_cleanup_ok"] = True
+            elif result.error_code in ("update_required",
+                                       "broker_unsupported"):
+                # 구 StockLens 는 broker 명령 자체가 없다 = 저장된 자격
+                # 증명도 없다. 지울 것이 없으니 계속한다.
+                out["broker_cleanup_ok"] = None
+            else:
+                out["broker_cleanup_ok"] = False
+                out["broker_cleanup_error"] = (
+                    result.message or result.error_code)
+                out["stage"] = "broker"
+                out["error"] = ("증권사 연결 해제에 실패했습니다, "
+                                "자격 증명이 이 컴퓨터에 남아 있습니다")
+                return out
+
+        # 2. MCP 등록 전체 해제 (빈 목록 = 전부 해제)
+        removal = self.register(lens_name, [])
+        if removal.get("ok"):
+            out["unregistered"] = removal.get("removed") or []
+        elif not force:
+            out["stage"] = "unregister"
+            out["error"] = removal.get("error") or "연결 해제에 실패했습니다"
+            return out
+
+        # 3+4. 패키지 삭제 후 라이선스 삭제 (orchestrator 가 순서 보장)
+        result = orchestrator.uninstall_lens(lens, remove_license=True)
+        blocking = _blocking_host_apps(result.uninstall)
+        out["blocking_apps"] = blocking
+        out["license_removed"] = result.license_removed
+        if not result.ok:
+            out["stage"] = "uninstall"
+            out["error"] = (
+                f"{' · '.join(a['label'] for a in blocking)}이(가) 이 파일을 사용 중이라 지울 수 없습니다."
+                if blocking
+                else (redaction.redact(result.uninstall.stderr)
+                      or "삭제에 실패했습니다.")
+            )
+            return out
+        out["ok"] = True
+        return out
+
     def open_dart_api_signup(self) -> None:
         """opendart.fss.or.kr — DartLens를 처음 쓰는 사람이 DART OpenAPI 키를 발급받는
         곳(DartLens 자신의 setup_claude.py/_safe.py가 텍스트로만 안내하던 것과 같은

@@ -560,8 +560,11 @@ async function offerCloseHostAppsAndRetry(lensName, action, apps, fullCleanup = 
     const retry =
       action === "uninstall"
         // 앱을 닫고 다시 시도하는 경로에서도 사용자가 고른 "완전히 정리"를 그대로
-        // 지킨다 — 예전엔 이 인자가 빠져 라이선스만 조용히 남았다.
-        ? await window.pywebview.api.uninstall(lensName, fullCleanup)
+        // 지킨다 — 예전엔 이 인자가 빠져 라이선스만 조용히 남았다. 완전 정리는
+        // 순서 보장이 있는 full_cleanup 으로 다시 태운다(해제류는 idempotent).
+        ? (fullCleanup
+            ? await window.pywebview.api.full_cleanup(lensName, true)
+            : await window.pywebview.api.uninstall(lensName, false))
         : await window.pywebview.api.install_or_update(lensName);
     const lens = await window.pywebview.api.diagnose_one(lensName, false);
     replaceCard(lensName, lens);
@@ -749,43 +752,51 @@ async function runAction(action, lensName, extra, opts = {}) {
       const wasHostIds = hostIdsForTargets(wasTargets);
       const fullCleanup = extra === "full-cleanup";
 
-      // 연결 해제는 **지우기 전에만** 할 수 있다. 해제는 Lens 의 setup 명령이 하는데,
-      // 패키지를 지우면 그 명령도 같이 사라진다 — 그러면 호스트 앱 설정에는 없는
-      // 프로그램을 가리키는 항목만 남고, 매니저는 그걸 영영 지울 수 없다(매니저는
-      // 설정 파일을 직접 건드리지 않는다). 그래서 순서가 이렇게 고정이다.
+      // 완전 정리 순서는 Python(full_cleanup)이 보장한다:
+      //   증권사 연결 해제 -> MCP 등록 해제 -> 패키지 삭제 -> 라이선스 삭제
+      // 패키지를 지우면 broker CLI 도 setup 명령도 같이 사라지므로, 해제류는
+      // 전부 지우기 전에 끝나야 한다. broker 해제 실패는 강행할 수 없다
+      // (자격 증명이 이 컴퓨터에 남는다) - Python 이 중단하고 이유를 준다.
       let unregistered = false;
-      if (fullCleanup && wasTargets.length) {
-        showBusyOverlay(`${displayName} 연결을 해제하는 중…`);
-        let removal;
-        try {
-          removal = await window.pywebview.api.register(lensName, []); // 빈 목록 = 전부 해제
-        } catch {
-          removal = { ok: false, error: "연결 해제 중 오류가 발생했습니다" };
-        }
-        hideBusyOverlay();
-        unregistered = !!(removal && removal.ok);
-        if (!unregistered) {
-          // 여기서 그냥 지워버리면 되돌릴 수 없는 쪽으로 사용자를 끌고 가는 셈이다.
-          // 다만 막아버리면 "호환되지 않는 버전"을 지우려는 사람의 유일한 탈출구가
-          // 사라진다 — 무슨 일이 생기는지 말하고 고르게 한다.
-          const go = confirm(
-            `${wasTargetNames} 연결을 해제하지 못했습니다\n\n` +
-              `${(removal && removal.error) || "원인을 알 수 없습니다"}\n\n` +
-              `지금 지우면 ${wasTargetNames}에는 이름만 남습니다\n\n그래도 지울까요?`
-          );
-          if (!go) {
-            showToast("삭제를 멈췄습니다, 연결은 그대로입니다");
-            return;
-          }
-        }
-      }
-      showBusyOverlay(`${displayName}를 삭제하는 중…`);
       let result, lens;
-      try {
-        result = await window.pywebview.api.uninstall(lensName, fullCleanup);
-        lens = await window.pywebview.api.diagnose_one(lensName, false);
-      } finally {
-        hideBusyOverlay();
+      if (fullCleanup) {
+        showBusyOverlay(`${displayName}를 완전히 정리하는 중…`);
+        try {
+          result = await window.pywebview.api.full_cleanup(lensName);
+          if (!result.ok && result.stage === "unregister") {
+            hideBusyOverlay();
+            // MCP 해제 실패만은 사용자가 고르면 강행할 수 있다 - 막아버리면
+            // "호환되지 않는 버전"을 지우려는 사람의 유일한 탈출구가 사라진다.
+            const go = confirm(
+              `${wasTargetNames} 연결을 해제하지 못했습니다\n\n` +
+                `${result.error || "원인을 알 수 없습니다"}\n\n` +
+                `지금 지우면 ${wasTargetNames}에는 이름만 남습니다\n\n그래도 지울까요?`
+            );
+            if (!go) {
+              showToast("삭제를 멈췄습니다, 연결은 그대로입니다");
+              return;
+            }
+            showBusyOverlay(`${displayName}를 완전히 정리하는 중…`);
+            result = await window.pywebview.api.full_cleanup(lensName, true);
+          }
+          lens = await window.pywebview.api.diagnose_one(lensName, false);
+        } finally {
+          hideBusyOverlay();
+        }
+        unregistered = !!(result.unregistered || []).length;
+        if (!result.ok && result.stage === "broker") {
+          replaceCard(lensName, lens);
+          showToast(result.error || "증권사 연결 해제에 실패했습니다");
+          return;
+        }
+      } else {
+        showBusyOverlay(`${displayName}를 삭제하는 중…`);
+        try {
+          result = await window.pywebview.api.uninstall(lensName, false);
+          lens = await window.pywebview.api.diagnose_one(lensName, false);
+        } finally {
+          hideBusyOverlay();
+        }
       }
       replaceCard(lensName, lens);
       if (result.ok && unregistered) {
@@ -3536,9 +3547,16 @@ function openUninstallModal(lensName) {
   document.getElementById("uninstall-hint-package").textContent = connected
     ? "라이선스 키와 AI 앱 연결은 그대로 둡니다"
     : "라이선스 키는 그대로 둡니다";
+  // StockLens 는 증권사 자격 증명까지 이 컴퓨터에서 지운다는 사실을 밝힌다 —
+  // 패키지를 지우고 나면 지울 방법이 없어지는 항목이라 선택 전에 알아야 한다.
+  const hasBroker = lensName === "stocklens";
   document.getElementById("uninstall-hint-full").textContent = connected
-    ? "AI 앱 연결을 해제하고 라이선스 키도 지웁니다"
-    : "라이선스 키도 함께 지웁니다";
+    ? hasBroker
+      ? "증권사 연결과 AI 앱 연결을 해제하고 라이선스 키도 지웁니다"
+      : "AI 앱 연결을 해제하고 라이선스 키도 지웁니다"
+    : hasBroker
+      ? "증권사 연결을 해제하고 라이선스 키도 지웁니다"
+      : "라이선스 키도 함께 지웁니다";
 
   // 기본은 남기기 — 삭제의 대부분은 "지웠다 다시 깔기"라, 매번 연결과 키를 다시
   // 넣게 하면 안 된다.
