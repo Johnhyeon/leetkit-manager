@@ -69,7 +69,9 @@ STOCKLENS = LensSpec(
     broker=BrokerConnectionSpec(
         command="stocklens-broker",
         contract_version=1,
-        providers=("kis",),
+        # 이 Manager 버전이 아는 공급자 상한. 실제 노출은 StockLens 의
+        # describe_providers 응답(공식 registry 계약)을 따른다.
+        providers=("kis", "kiwoom", "toss"),
     ),
 )
 

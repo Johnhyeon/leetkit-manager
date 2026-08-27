@@ -112,7 +112,10 @@ class TestFullCleanupOrder:
         with patches[0], patches[1], patches[2]:
             result = api.full_cleanup("stocklens")
         assert result["ok"]
+        # 1.0 멀티 증권사: 모든 공급자를 해제한 뒤 등록 해제 -> 삭제.
         assert calls == [
+            "broker:disconnect_provider",
+            "broker:disconnect_provider",
             "broker:disconnect_provider",
             "register:[]",
             "uninstall:remove_license=True",

@@ -436,12 +436,15 @@ def register_api_key(
 
 BROKER_ACTIONS = (
     "status",
+    "describe_providers",
     "verify",
     "verify_and_save",
     "switch_profile",
     "disconnect_profile",
     "disconnect_provider",
     "set_data_source_mode",
+    "set_primary_provider",
+    "recover_cleanup",
 )
 
 _BROKER_CREDENTIAL_ACTIONS = ("verify", "verify_and_save")
@@ -498,16 +501,22 @@ def broker_action(
     if mode is not None:
         request["mode"] = mode
     if action in _BROKER_CREDENTIAL_ACTIONS:
-        if not isinstance(credentials, dict) or \
-                not credentials.get("app_key") or \
-                not credentials.get("app_secret"):
+        # 필드명은 provider 별 credential schema(StockLens describe_providers
+        # 계약)가 정한다. Manager 는 이름을 바꾸거나 복제하지 않고, 빈 값만
+        # 걸러 그대로 stdin 으로 넘긴다.
+        cleaned: dict = {}
+        if isinstance(credentials, dict):
+            for name, value in credentials.items():
+                if isinstance(value, str) and value.strip():
+                    cleaned[str(name)] = value.strip()
+                else:
+                    cleaned = {}
+                    break
+        if not cleaned:
             return BrokerActionResult(
                 ok=False, error_code="invalid_request",
-                message="App Key와 App Secret을 입력해주세요.")
-        request["credentials"] = {
-            "app_key": credentials["app_key"],
-            "app_secret": credentials["app_secret"],
-        }
+                message="증권사 연결 키를 모두 입력해주세요.")
+        request["credentials"] = cleaned
 
     cmd = [package_service.resolve_lens_command(spec.command),
            "--json", "--non-interactive", "--stdin"]
@@ -532,6 +541,23 @@ def broker_action(
             ok=False, error_code="parse_error",
             message=f"broker 응답을 파싱할 수 없습니다 (exit={process.exit_code}).")
     return BrokerActionResult.from_json(payload, exit_code=process.exit_code)
+
+
+def broker_describe_providers(
+    lens: LensSpec, *, timeout: float = DEFAULT_TIMEOUT,
+) -> list | None:
+    """StockLens 의 공개 provider descriptor 목록.
+
+    구 StockLens(action 미지원·명령 부재)는 None 을 돌려준다 - UI 는
+    이 경우 새 공급자를 숨기고 KIS 전용으로 동작한다.
+    """
+    result = broker_action(lens, "describe_providers", timeout=timeout)
+    if not result.ok:
+        return None
+    providers = result.raw.get("providers")
+    if not isinstance(providers, list):
+        return None
+    return providers
 
 
 def repair_lens(

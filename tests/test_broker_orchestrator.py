@@ -49,7 +49,8 @@ class TestBrokerSpec:
         assert spec is not None
         assert spec.command == "stocklens-broker"
         assert spec.contract_version == 1
-        assert spec.providers == ("kis",)
+        # 1.0 멀티 증권사: 이 Manager 가 아는 공급자 상한.
+        assert spec.providers == ("kis", "kiwoom", "toss")
 
     def test_other_lenses_have_no_broker_spec(self):
         assert DARTLENS.broker is None

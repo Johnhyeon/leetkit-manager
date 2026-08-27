@@ -75,21 +75,72 @@
   ],
   "capabilities": {
     "broker_connection_contract": 1,
-    "market_data_router_contract": 1
+    "market_data_router_contract": 1,
+    "broker_provider_registry_contract": 1,
+    "multi_broker_primary_contract": 1,
+    "credential_schema_contract": 1
   },
   "provider_connections": {
     "kis": {
       "status": "connected",
+      "primary": true,
+      "lifecycle": "connected",
       "active_profile": "real",
       "data_source_mode": "auto",
       "profiles": {
         "real": {
           "configured": true,
-          "verified": true
+          "verified": true,
+          "verified_at": null,
+          "capabilities": {
+            "auth": "ok",
+            "kr_intraday": "available",
+            "us_intraday": "available"
+          }
         },
         "demo": {
           "configured": false,
-          "verified": false
+          "verified": false,
+          "verified_at": null,
+          "capabilities": {}
+        }
+      },
+      "storage": "os-keychain"
+    },
+    "kiwoom": {
+      "status": "not_configured",
+      "primary": false,
+      "lifecycle": null,
+      "active_profile": null,
+      "data_source_mode": "auto",
+      "profiles": {
+        "real": {
+          "configured": false,
+          "verified": false,
+          "verified_at": null,
+          "capabilities": {}
+        },
+        "demo": {
+          "configured": false,
+          "verified": false,
+          "verified_at": null,
+          "capabilities": {}
+        }
+      },
+      "storage": "os-keychain"
+    },
+    "toss": {
+      "status": "not_configured",
+      "primary": false,
+      "lifecycle": null,
+      "active_profile": null,
+      "data_source_mode": "auto",
+      "profiles": {
+        "real": {
+          "configured": false,
+          "verified": false,
+          "verified_at": null,
+          "capabilities": {}
         }
       },
       "storage": "os-keychain"

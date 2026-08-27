@@ -103,19 +103,43 @@ class DoctorReport:
             raw=payload,
         )
 
-    @property
-    def broker_connection_contract(self) -> int | None:
-        """doctor 의 additive capabilities 확장. 없으면 구 StockLens 다."""
+    def _capability(self, name: str) -> int | None:
         caps = self.raw.get("capabilities")
         if not isinstance(caps, dict):
             return None
-        value = caps.get("broker_connection_contract")
+        value = caps.get(name)
         return value if isinstance(value, int) else None
+
+    @property
+    def broker_connection_contract(self) -> int | None:
+        """doctor 의 additive capabilities 확장. 없으면 구 StockLens 다."""
+        return self._capability("broker_connection_contract")
+
+    @property
+    def broker_provider_registry_contract(self) -> int | None:
+        """멀티 증권사 registry 계약 (1.0). 없으면 KIS 전용 구 버전이다."""
+        return self._capability("broker_provider_registry_contract")
+
+    @property
+    def multi_broker_primary_contract(self) -> int | None:
+        return self._capability("multi_broker_primary_contract")
+
+    @property
+    def credential_schema_contract(self) -> int | None:
+        return self._capability("credential_schema_contract")
 
     @property
     def provider_connections(self) -> dict:
         value = self.raw.get("provider_connections")
         return value if isinstance(value, dict) else {}
+
+    @property
+    def primary_broker_provider(self) -> str | None:
+        """provider_connections 에서 primary=true 인 공급자 하나."""
+        for pid, entry in self.provider_connections.items():
+            if isinstance(entry, dict) and entry.get("primary"):
+                return pid
+        return None
 
     @property
     def readiness(self) -> str:
