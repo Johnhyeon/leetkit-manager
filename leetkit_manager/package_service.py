@@ -37,6 +37,74 @@ _EXE_SHA256_ASSET = "LeetKitManager.exe.sha256"
 _GITHUB_RELEASES_LATEST_URL = "https://api.github.com/repos/Johnhyeon/leetkit-manager/releases/latest"
 
 
+def _uv_tool_site_packages(package_name: str) -> list[Path]:
+    """uv tool 환경(uv/tools/<패키지>/) 안의 site-packages 후보."""
+    import glob as _glob
+
+    roots: list[Path] = []
+    local = os.environ.get("LOCALAPPDATA")
+    bases = []
+    if local:
+        bases.append(Path(local) / "uv" / "tools" / package_name)
+    bases.append(Path.home() / ".local" / "share" / "uv" / "tools" / package_name)
+    for base in bases:
+        if not base.exists():
+            continue
+        for pat in ("Lib/site-packages", "lib/python*/site-packages"):
+            roots += [Path(x) for x in _glob.glob(str(base / pat))]
+    return [r for r in roots if r.is_dir()]
+
+
+def cleanup_stale_dist_metadata(
+    package_name: str,
+    installed_version: str,
+    *,
+    site_packages: list[Path] | None = None,
+) -> dict:
+    """설치 성공 직후, 같은 패키지의 잔존 배포 메타를 정리한다(TL-01 요구 4).
+
+    실측(UAT): 전역 환경에 "~elegramlens_mcp-*.dist-info"(pip 임시 리네임이
+    깨진 잔재)와 옛 버전 dist-info 가 새 설치 옆에 남아, importlib.metadata 가
+    과거 버전을 보고했다. 지우는 것은 **메타데이터 폴더뿐**이고, 방금 설치한
+    버전의 메타는 절대 건드리지 않는다. 실패는 삼킨다 - 정리가 안 됐다고
+    설치를 실패로 만들지 않는다.
+    """
+    normalized = package_name.replace("-", "_").lower()
+    broken_stem = "~" + normalized[1:]
+    removed: list[str] = []
+    kept: list[str] = []
+    errors: list[str] = []
+    for root in (site_packages if site_packages is not None
+                 else _uv_tool_site_packages(package_name)):
+        root = Path(root)
+        if not root.is_dir():
+            continue
+        for entry in list(root.iterdir()):
+            name = entry.name
+            low = name.lower()
+            target = False
+            if low.startswith(broken_stem):
+                target = True                      # pip 임시 리네임 잔재
+            elif low.endswith(".dist-info"):
+                stem = low[: -len(".dist-info")]
+                pkg, _, ver = stem.rpartition("-")
+                if pkg == normalized:
+                    if ver == installed_version:
+                        kept.append(str(entry))
+                        continue
+                    target = True                  # 같은 패키지의 옛 메타
+            if not target:
+                continue
+            try:
+                import shutil as _shutil
+
+                _shutil.rmtree(entry)
+                removed.append(str(entry))
+            except OSError as e:
+                errors.append(f"{entry}: {type(e).__name__}")
+    return {"removed": removed, "kept": kept, "errors": errors}
+
+
 def _uv_tool_bin_dirs() -> list[Path]:
     """uv tool install이 실행 스크립트를 두는 표준 위치들 — 각 Lens의 setup_claude.py가
     자기 자신의 MCP entry 경로를 정할 때 쓰는 것과 동일한 탐색 순서."""
@@ -199,6 +267,13 @@ def install_version(package_name: str, version: str, *, timeout: float = _INSTAL
         on_line=lambda line: _set_install_progress(_humanize_uv_line(line)),
     )
     _set_install_progress(None)
+    if result.ok:
+        # 설치가 성공했을 때만 잔존 메타를 정리한다(TL-01). 실패한 설치 뒤에
+        # 지우면 어떤 메타가 진짜인지 알 수 없다.
+        try:
+            cleanup_stale_dist_metadata(package_name, version)
+        except Exception:
+            pass
     return result
 
 

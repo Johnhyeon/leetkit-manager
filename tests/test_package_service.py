@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import unittest
+
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -975,3 +977,41 @@ class TestChatgptDesktopOnMacOS:
         """맥 실행 파일 경로는 `/Applications/ChatGPT.app/Contents/MacOS/ChatGPT` 다."""
         mac = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
         assert package_service._is_chatgpt_desktop_exe(mac, pid=None) is True
+class CleanupStaleDistMetadataTests(unittest.TestCase):
+    """TL-01 요구 4: 설치 성공 후 임시 리네임 잔재와 옛 dist-info 를 정리한다."""
+
+    def _site(self, tmp, names):
+        root = Path(tmp)
+        for n in names:
+            (root / n).mkdir(parents=True)
+            ((root / n) / "METADATA").write_text("Name: x", encoding="utf-8")
+        return root
+
+    def test_broken_and_stale_are_removed_current_is_kept(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._site(tmp, [
+                "telegramlens_mcp-0.5.4.dist-info",
+                "telegramlens_mcp-0.4.2.dist-info",
+                "~elegramlens_mcp-0.4.2.dist-info",
+                "other_pkg-1.0.dist-info",
+            ])
+            report = package_service.cleanup_stale_dist_metadata(
+                "telegramlens-mcp", "0.5.4", site_packages=[root])
+            left = sorted(p.name for p in root.iterdir())
+        self.assertEqual(left, ["other_pkg-1.0.dist-info",
+                                "telegramlens_mcp-0.5.4.dist-info"])
+        self.assertEqual(len(report["removed"]), 2)
+        self.assertEqual(len(report["kept"]), 1)
+        self.assertEqual(report["errors"], [])
+
+    def test_nothing_to_clean_is_a_noop(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._site(tmp, ["telegramlens_mcp-0.5.4.dist-info"])
+            report = package_service.cleanup_stale_dist_metadata(
+                "telegramlens-mcp", "0.5.4", site_packages=[root])
+        self.assertEqual(report["removed"], [])
+        self.assertEqual(len(report["kept"]), 1)
