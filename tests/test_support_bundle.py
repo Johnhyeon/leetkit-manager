@@ -346,3 +346,35 @@ class TestSummaryNamesTheManagerVersion:
         """버전 한 줄 때문에 지원 파일 자체가 안 만들어지면 도움을 요청할 방법을 잃는다."""
         with patch.dict("sys.modules", {"leetkit_manager": None}):
             assert support_bundle._manager_version() == "?"
+
+
+class TestBrokerSecretsStayOut:
+    """증권사 자격 증명 관련 항목은 어떤 형태로도 번들에 실리지 않는다 (Task 18).
+
+    broker_state.json 은 비밀 없는 설계지만 자격 증명 상태 파일이므로 수집
+    대상에서 제외한다. KIS 분봉 캐시도 마찬가지다.
+    """
+
+    def test_broker_state_and_kis_cache_never_collected(self, tmp_path, monkeypatch):
+        sl = tmp_path / "sl"
+        (sl / "logs").mkdir(parents=True)
+        (sl / "logs" / "metrics_20260827.jsonl").write_text("{}", encoding="utf-8")
+        (sl / "broker_state.json").write_text("{}", encoding="utf-8")
+        cache = sl / "cache" / "market_data" / "kis" / "real"
+        cache.mkdir(parents=True)
+        (cache / "KR__005930.json").write_text("{}", encoding="utf-8")
+        # autouse _empty_sources 가 빈 곳으로 돌려놓은 것을 이 홈으로 되돌린다.
+        monkeypatch.setattr(
+            support_bundle, "_stocklens_logs_dirs", lambda: [sl / "logs"])
+        monkeypatch.setenv("STOCKLENS_HOME", str(sl))
+
+        collected = [arc for arc, _ in support_bundle._safe_files([])]
+        assert any("metrics_20260827" in a for a in collected)
+        assert not any("broker_state" in a for a in collected)
+        assert not any("market_data" in a for a in collected)
+
+    def test_summary_redacts_broker_credentials(self):
+        sentinel = "PSAsentinelAppKeyValue0018"
+        out = support_bundle.redaction.redact(
+            f'stderr: {{"app_key": "{sentinel}", "appsecret": "{sentinel}"}}')
+        assert sentinel not in out

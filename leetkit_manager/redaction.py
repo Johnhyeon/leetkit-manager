@@ -28,7 +28,23 @@ _BASE32_TOKEN_RE = re.compile(r"\b[A-Z2-7]{40,}\b")
 # 다시 뚫린다. DART는 crtfc_key를 쿼리스트링으로 받으므로 URL이 통째로 로그에 남으면
 # 키도 같이 남는다(확인된 유출 경로).
 _QUERY_SECRET_RE = re.compile(
-    r"((?:crtfc_key|api_key|apikey|api_hash|access_token|token)\s*=\s*)([0-9A-Za-z][0-9A-Za-z\-_]{3,})",
+    r"((?:crtfc_key|api_key|apikey|api_hash|access_token|token"
+    r"|appkey|appsecret|app_key|app_secret|authorization)\s*=\s*)"
+    r"([0-9A-Za-z][0-9A-Za-z\-_]{3,})",
+    re.IGNORECASE,
+)
+# JSON 표기(`"app_key": "..."`)와 HTTP header 표기(`authorization: Bearer ...`).
+# 증권사 App Key·Secret 이 여기 걸리는 대상이다 — 값 모양(길이) 규칙에 기대지
+# 않고 이름으로 지운다. Bearer 접두어는 남겨도 비밀이 아니므로 값만 가린다.
+_JSON_SECRET_RE = re.compile(
+    r"(\"(?:crtfc_key|api_key|apikey|api_hash|access_token|token"
+    r"|appkey|appsecret|app_key|app_secret|authorization)\"\s*:\s*\")"
+    r"([^\"]+)",
+    re.IGNORECASE,
+)
+_HEADER_SECRET_RE = re.compile(
+    r"((?:authorization|appkey|appsecret|app_key|app_secret)\s*:\s*"
+    r"(?:Bearer\s+)?)([0-9A-Za-z][0-9A-Za-z\-_.]{3,})",
     re.IGNORECASE,
 )
 # 점 구분(010.1234.5678)까지 포함 — 실제 로그에서 관찰되는 표기 변형.
@@ -76,7 +92,13 @@ def redact_query_secrets(text: str) -> str:
     구분할 수 있어야 한다. 쪼개진 조각에 걸리면 남는 4자는 키 중간 토막이라 그것만으로
     복원되지 않는다.
     """
-    return _QUERY_SECRET_RE.sub(lambda m: f"{m.group(1)}{_mask_span(m.group(2))}", text)
+    text = _QUERY_SECRET_RE.sub(
+        lambda m: f"{m.group(1)}{_mask_span(m.group(2))}", text)
+    text = _JSON_SECRET_RE.sub(
+        lambda m: f"{m.group(1)}{_mask_span(m.group(2))}", text)
+    text = _HEADER_SECRET_RE.sub(
+        lambda m: f"{m.group(1)}{_mask_span(m.group(2))}", text)
+    return text
 
 
 def redact_phone_numbers(text: str) -> str:

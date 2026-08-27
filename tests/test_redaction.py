@@ -94,3 +94,33 @@ def test_redact_home_username_unix_path():
 def test_redact_leaves_normal_text_alone():
     text = "StockLens 라이선스가 활성화되어 있습니다."
     assert redact(text) == text
+
+
+# ---------- 증권사 자격 증명 (Task 18) ----------
+
+BROKER_SENTINEL = "PSAsentinelAppKeyValue0018"
+
+
+def test_redact_broker_names_in_query_string():
+    for name in ("appkey", "appsecret", "app_key", "app_secret"):
+        out = redact(f"{name}={BROKER_SENTINEL}&x=1")
+        assert BROKER_SENTINEL not in out, name
+
+
+def test_redact_broker_names_in_json():
+    for name in ("appkey", "appsecret", "app_key", "app_secret",
+                 "authorization", "access_token"):
+        out = redact(f'{{"{name}": "{BROKER_SENTINEL}"}}')
+        assert BROKER_SENTINEL not in out, name
+
+
+def test_redact_authorization_header_line():
+    out = redact(f"authorization: Bearer {BROKER_SENTINEL}")
+    assert BROKER_SENTINEL not in out
+
+
+def test_redact_broker_secret_split_across_lines():
+    # 로그 래핑으로 값이 줄바꿈으로 쪼개져도 이름 규칙이 앞 조각을 잡는다.
+    text = f"app_secret={BROKER_SENTINEL[:10]}\n{BROKER_SENTINEL[10:]}"
+    out = redact(text)
+    assert BROKER_SENTINEL[:10] not in out
