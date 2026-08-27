@@ -957,9 +957,20 @@ function clearBrokerInputs() {
   document.getElementById("broker-appsecret").value = "";
 }
 
+// 상태별 표시등 색 - 카드의 readiness 3색과 같은 문법을 쓴다.
+const BROKER_STATE_DOTS = {
+  "connected": "ok",
+  "limited": "warn",
+  "reauth_required": "warn",
+  "error": "fail",
+  "not_supported": "fail",
+};
+
 function setBrokerState(state, message) {
   document.getElementById("broker-state-label").textContent =
     BROKER_STATES[state] || state;
+  document.getElementById("broker-state-dot").className =
+    "broker-status-dot " + (BROKER_STATE_DOTS[state] || "neutral");
   const msg = document.getElementById("broker-msg");
   msg.textContent = message || "";
   msg.className = state === "error" ? "modal-msg fail" : "modal-msg";
@@ -990,14 +1001,17 @@ function renderBrokerModal(st) {
   const modeField = document.getElementById("broker-mode-field");
   const modeSaveBtn = document.getElementById("broker-mode-save-btn");
   const connectBtn = document.getElementById("broker-connect-btn");
+  const manageRow = document.getElementById("broker-manage-row");
   const changeKeyBtn = document.getElementById("broker-change-key-btn");
   const switchBtn = document.getElementById("broker-switch-btn");
   const dcProfileBtn = document.getElementById("broker-disconnect-profile-btn");
   const dcProviderBtn = document.getElementById("broker-disconnect-provider-btn");
 
-  document.getElementById("broker-title").textContent =
-    `${brokerProviderLabel()} 연결`;
   dcProviderBtn.textContent = `${brokerProviderLabel()} 연결을 모두 해제`;
+  const providerRadio = document.querySelector(
+    `input[name="broker-provider"][value="${brokerProvider}"]`
+  );
+  if (providerRadio) providerRadio.checked = true;
 
   if (!st || !st.supported) {
     const updateNeeded = st && st.error_code === "update_required";
@@ -1010,6 +1024,7 @@ function renderBrokerModal(st) {
     form.hidden = true;
     modeField.hidden = true;
     connectBtn.hidden = true;
+    manageRow.hidden = true;
     changeKeyBtn.hidden = true;
     switchBtn.hidden = true;
     dcProfileBtn.hidden = true;
@@ -1029,6 +1044,7 @@ function renderBrokerModal(st) {
   const showForm = !connected || brokerEditingKey;
   form.hidden = !showForm;
   connectBtn.hidden = !showForm;
+  manageRow.hidden = !connected;
   changeKeyBtn.hidden = !connected || brokerEditingKey;
   modeField.hidden = !connected;
   switchBtn.hidden = !connected;
