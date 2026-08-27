@@ -9,14 +9,23 @@
   "checked_at": "2026-08-06T14:32:00+09:00",
   "online": false,
   "duration_ms": 15.0,
-  "license": {"status": "active", "license_id_masked": "****3972"},
-  "targets": ["claude-desktop"],
+  "license": {
+    "status": "active",
+    "license_id_masked": "****3972"
+  },
+  "targets": [
+    "claude-desktop"
+  ],
   "checks": [
     {
       "id": "PACKAGE_IMPORTABLE",
       "status": "ok",
       "summary": "stocklens-mcp import 가능",
-      "details": {"lines": ["위치: D:\\project\\stocklens\\mcp\\stock_mcp_server"]},
+      "details": {
+        "lines": [
+          "위치: D:\\project\\stocklens\\mcp\\stock_mcp_server"
+        ]
+      },
       "repairable": false,
       "repair_id": null,
       "action": null,
@@ -26,7 +35,11 @@
       "id": "MCP_CONFIG_VALID",
       "status": "ok",
       "summary": "Claude Desktop에 정상 등록됨",
-      "details": {"lines": ["등록된 타겟: claude-desktop"]},
+      "details": {
+        "lines": [
+          "등록된 타겟: claude-desktop"
+        ]
+      },
       "repairable": false,
       "repair_id": null,
       "action": null,
@@ -36,7 +49,11 @@
       "id": "LICENSE_ACTIVE",
       "status": "ok",
       "summary": "라이선스 활성화됨",
-      "details": {"lines": ["license_id_masked: ****3972"]},
+      "details": {
+        "lines": [
+          "license_id_masked: ****3972"
+        ]
+      },
       "repairable": false,
       "repair_id": null,
       "action": null,
@@ -46,11 +63,36 @@
       "id": "CACHE_WRITABLE",
       "status": "fail",
       "summary": "캐시/출력 폴더에 쓸 수 없습니다.",
-      "details": {"error_code": "CACHE_NOT_WRITABLE", "impact": "Excel 내보내기, 메트릭 로그 저장이 실패합니다."},
+      "details": {
+        "error_code": "CACHE_NOT_WRITABLE",
+        "impact": "Excel 내보내기, 메트릭 로그 저장이 실패합니다."
+      },
       "repairable": false,
       "repair_id": null,
       "action": "폴더 권한 확인 또는 STOCKLENS_HOME 환경변수로 다른 경로 지정",
       "critical": false
     }
-  ]
+  ],
+  "capabilities": {
+    "broker_connection_contract": 1,
+    "market_data_router_contract": 1
+  },
+  "provider_connections": {
+    "kis": {
+      "status": "connected",
+      "active_profile": "real",
+      "data_source_mode": "auto",
+      "profiles": {
+        "real": {
+          "configured": true,
+          "verified": true
+        },
+        "demo": {
+          "configured": false,
+          "verified": false
+        }
+      },
+      "storage": "os-keychain"
+    }
+  }
 }

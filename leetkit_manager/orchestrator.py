@@ -11,7 +11,12 @@ from pathlib import Path
 
 from leetkit_manager import config_backup, package_service, redaction
 from leetkit_manager.lens_contract import LENSES, LensSpec
-from leetkit_manager.models import ActivateResult, DoctorReport, SetupResult
+from leetkit_manager.models import (
+    ActivateResult,
+    BrokerActionResult,
+    DoctorReport,
+    SetupResult,
+)
 from leetkit_manager.process_runner import DEFAULT_TIMEOUT, ProcessResult, run_json_cli
 
 # Manager가 이해하는 doctor JSON schema_version. 이 범위 밖(또는 파싱 자체가 안 되는)
@@ -425,6 +430,108 @@ def register_api_key(
             error = result.error
             error_code = result.error_code
     return SetupResult(ok=ok, targets=merged_targets, error=error, error_code=error_code, raw=raw)
+
+
+# --- 증권사 연결 (broker connection) ---
+
+BROKER_ACTIONS = (
+    "status",
+    "verify",
+    "verify_and_save",
+    "switch_profile",
+    "disconnect_profile",
+    "disconnect_provider",
+    "set_data_source_mode",
+)
+
+_BROKER_CREDENTIAL_ACTIONS = ("verify", "verify_and_save")
+
+
+def broker_supported(lens: LensSpec, report: DoctorReport) -> bool:
+    """설치된 StockLens 가 증권사 연결 계약을 지원하는가.
+
+    doctor 의 additive capabilities 로 협상한다. 없으면 구 버전이므로
+    UI 는 연결 버튼을 비활성하고 '업데이트 필요'를 보여준다.
+    """
+    spec = lens.broker
+    if spec is None:
+        return False
+    return report.broker_connection_contract == spec.contract_version
+
+
+def broker_action(
+    lens: LensSpec,
+    action: str,
+    *,
+    provider: str = "kis",
+    profile: str | None = None,
+    credentials: dict | None = None,
+    mode: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> BrokerActionResult:
+    """`stocklens-broker --json --non-interactive --stdin` 호출.
+
+    비밀값(App Key·Secret)은 stdin JSON 으로만 전달한다 - 명령행 인자,
+    로그, 반환 메시지 어디에도 원문이 나타나지 않는다. Manager 는 keychain
+    이나 StockLens 홈 파일을 직접 수정하지 않는다.
+    """
+    spec = lens.broker
+    if spec is None:
+        return BrokerActionResult(
+            ok=False, error_code="broker_unsupported",
+            message=f"{lens.display_name}는 증권사 연결을 지원하지 않습니다.")
+    if action not in BROKER_ACTIONS:
+        raise ValueError(
+            f"지원하지 않는 broker action: {action!r} (지원: {BROKER_ACTIONS})")
+    if provider not in spec.providers:
+        raise ValueError(
+            f"{lens.display_name}가 지원하지 않는 provider: {provider!r} "
+            f"(지원: {spec.providers})")
+
+    request: dict = {
+        "contract_version": spec.contract_version,
+        "action": action,
+        "provider": provider,
+    }
+    if profile is not None:
+        request["profile"] = profile
+    if mode is not None:
+        request["mode"] = mode
+    if action in _BROKER_CREDENTIAL_ACTIONS:
+        if not isinstance(credentials, dict) or \
+                not credentials.get("app_key") or \
+                not credentials.get("app_secret"):
+            return BrokerActionResult(
+                ok=False, error_code="invalid_request",
+                message="App Key와 App Secret을 입력해주세요.")
+        request["credentials"] = {
+            "app_key": credentials["app_key"],
+            "app_secret": credentials["app_secret"],
+        }
+
+    cmd = [package_service.resolve_lens_command(spec.command),
+           "--json", "--non-interactive", "--stdin"]
+    import json as _json
+
+    process, payload = run_json_cli(
+        cmd, timeout=timeout,
+        input_text=_json.dumps(request, ensure_ascii=False))
+
+    if process.error == "not_found":
+        return BrokerActionResult(
+            ok=False, error_code="update_required",
+            message=(f"{lens.display_name} 업데이트가 필요합니다. "
+                     "증권사 연결은 새 버전에서 지원됩니다. "
+                     "[지금 업데이트]를 눌러주세요."))
+    if process.error == "blocked":
+        return BrokerActionResult(
+            ok=False, error_code="blocked",
+            message=windows_block_message(process))
+    if payload is None:
+        return BrokerActionResult(
+            ok=False, error_code="parse_error",
+            message=f"broker 응답을 파싱할 수 없습니다 (exit={process.exit_code}).")
+    return BrokerActionResult.from_json(payload, exit_code=process.exit_code)
 
 
 def repair_lens(

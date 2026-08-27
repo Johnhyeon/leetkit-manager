@@ -104,6 +104,20 @@ class DoctorReport:
         )
 
     @property
+    def broker_connection_contract(self) -> int | None:
+        """doctor 의 additive capabilities 확장. 없으면 구 StockLens 다."""
+        caps = self.raw.get("capabilities")
+        if not isinstance(caps, dict):
+            return None
+        value = caps.get("broker_connection_contract")
+        return value if isinstance(value, int) else None
+
+    @property
+    def provider_connections(self) -> dict:
+        value = self.raw.get("provider_connections")
+        return value if isinstance(value, dict) else {}
+
+    @property
     def readiness(self) -> str:
         """대시보드 "핵심 준비 상태" 3단계(정상/주의/조치 필요) — overall을 한글 라벨로."""
         return {"ok": "정상", "degraded": "주의", "fail": "조치 필요"}.get(self.overall, "확인 필요")
@@ -129,6 +143,36 @@ class ActivateResult:
             license_id_masked=payload.get("license_id_masked"),
             error_code=payload.get("error_code"),
             message=payload.get("message") or payload.get("reason"),
+            raw=payload,
+        )
+
+
+@dataclass
+class BrokerActionResult:
+    """stocklens-broker stdin JSON 응답. 비밀값은 절대 실리지 않는다."""
+
+    ok: bool
+    action: str | None = None
+    status: dict = field(default_factory=dict)
+    verification: dict = field(default_factory=dict)
+    error_code: str | None = None
+    message: str | None = None
+    raw: dict = field(default_factory=dict)
+
+    @classmethod
+    def from_json(cls, payload: dict,
+                  *, exit_code: int | None = None) -> "BrokerActionResult":
+        error = payload.get("error") or {}
+        ok = payload.get("ok")
+        if ok is None:
+            ok = exit_code == 0 if exit_code is not None else False
+        return cls(
+            ok=bool(ok),
+            action=payload.get("action"),
+            status=payload.get("status") or {},
+            verification=payload.get("verification") or {},
+            error_code=error.get("code"),
+            message=error.get("message"),
             raw=payload,
         )
 

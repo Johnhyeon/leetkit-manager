@@ -12,6 +12,22 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
+class BrokerConnectionSpec:
+    """증권사 연결 CLI 계약. 시세용 자격 증명(App Key·Secret)만 다룬다.
+
+    extra_credentials(DART API 키 방식)와 섞지 않는다 - 증권사 연결은
+    프로필(real/demo)·검증·해제·데이터 운행 모드가 있는 별도 수명주기라
+    단일 키 등록 모델로 표현할 수 없다. Manager 는 이 계약의 stdin JSON
+    으로만 StockLens 와 대화하고, keychain·StockLens 홈 파일을 직접
+    수정하지 않는다.
+    """
+
+    command: str  # 예: "stocklens-broker"
+    contract_version: int
+    providers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LensSpec:
     name: str  # "stocklens" | "dartlens" | "telegramlens" — DoctorReport.product과 일치
     display_name: str  # 대시보드에 보여줄 이름
@@ -35,6 +51,9 @@ class LensSpec:
     # 이어야 한다. TelegramLens의 "daemon"처럼 Claude Desktop 실행 여부 등 외부 상태에
     # 의존하거나 부작용이 있는 복구는 여기 넣지 않는다(사용자가 카드에서 직접 눌러야 함).
     auto_repair_after_install: tuple[str, ...] = field(default_factory=tuple)
+    # 증권사 연결 CLI 계약. StockLens 만 가진다. 구 StockLens(명령 없음)는
+    # doctor capabilities 부재로 감지해 "업데이트 필요"로 안내한다.
+    broker: BrokerConnectionSpec | None = None
 
 
 STOCKLENS = LensSpec(
@@ -47,6 +66,11 @@ STOCKLENS = LensSpec(
     home_env="STOCKLENS_HOME",
     home_dir=".stocklens",
     repair_ids=(),
+    broker=BrokerConnectionSpec(
+        command="stocklens-broker",
+        contract_version=1,
+        providers=("kis",),
+    ),
 )
 
 DARTLENS = LensSpec(
