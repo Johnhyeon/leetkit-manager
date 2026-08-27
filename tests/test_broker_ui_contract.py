@@ -262,6 +262,18 @@ class TestSinglePrimaryUx:
         caps_block = JS[caps_start:caps_start + 1600]
         assert "release_verified" in caps_block
 
+    def test_toss_shown_as_1_0_unsupported_with_notice(self):
+        # 대표 결정(2026-08-28): 토스 시세는 1.0 미지원. "사용 불가"나
+        # "검증 중"이 아니라 "1.0 미지원"으로, 키 문제로 오해하지 않게
+        # 안내문을 함께 보여준다. 연결 상태 자체는 "연결됨" 그대로다.
+        assert "1.0 미지원" in JS
+        caps_start = JS.index("function renderBrokerCaps")
+        caps_block = JS[caps_start:caps_start + 2200]
+        assert "1.0 미지원" in caps_block
+        assert "토스 자체 시세 기준과 통합 시세 기준이 달라" in JS
+        assert "현재 분석 데이터에는 사용하지 않습니다" in JS
+        assert 'id="broker-cap-notice"' in HTML
+
     def test_active_profile_is_per_provider_not_primary(self):
         # 재현된 결함(리뷰): 주 사용 KIS=모의 + 토스=실전 연결 상태에서
         # 토스 탭이 KIS 의 demo 를 기준으로 판단해 토스를 미연결로 표시.

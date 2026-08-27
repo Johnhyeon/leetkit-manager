@@ -1922,6 +1922,13 @@ button:focus-visible, input:focus-visible {
 .broker-cap-name { color: var(--text-dim); }
 .broker-cap-value { color: var(--text); }
 
+.broker-cap-notice {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
 .broker-manage-row {
   display: flex;
   gap: 8px;

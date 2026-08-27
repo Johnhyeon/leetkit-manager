@@ -1083,6 +1083,11 @@ function renderBrokerCaps(status) {
   const released = record && record.release_verified;
   function label(name) {
     const value = caps[name];
+    // 토스 시세는 1.0 미지원(대표 결정 2026-08-28). 키 문제("사용
+    // 불가")나 "검증 중"이 아니라 범위 문제임을 그대로 보여준다.
+    if (brokerProvider === "toss" && value === "unavailable") {
+      return "1.0 미지원";
+    }
     if (
       value === "available" &&
       released &&
@@ -1096,6 +1101,18 @@ function renderBrokerCaps(status) {
     label("kr_intraday");
   document.getElementById("broker-cap-us").textContent =
     label("us_intraday");
+  const notice = document.getElementById("broker-cap-notice");
+  if (notice) {
+    const tossUnsupported =
+      brokerProvider === "toss" &&
+      (caps.kr_intraday === "unavailable" ||
+        caps.us_intraday === "unavailable");
+    notice.hidden = !tossUnsupported;
+    notice.textContent = tossUnsupported
+      ? "토스 자체 시세 기준과 통합 시세 기준이 달라 " +
+        "현재 분석 데이터에는 사용하지 않습니다"
+      : "";
+  }
 }
 
 // 탭별 상태 배지. 주 사용 하나만 "사용 중"이고, 나머지 연결은 "연결됨",
