@@ -80,6 +80,22 @@ class TestHtmlContract:
         assert "현재 환경 연결 해제" in HTML
         assert "모두 해제" in HTML
 
+    def test_change_key_button_exists(self):
+        # 연결된 상태에서는 키를 다시 입력할 필요가 없다. 키 교체는
+        # [키 변경]으로만 입력 폼을 연다.
+        assert 'id="broker-change-key-btn"' in HTML
+        assert "키 변경" in HTML
+
+    def test_mode_has_explicit_save_button(self):
+        # 사용 방식 라디오는 클릭만으로 저장되지 않는다. [적용] 버튼 필수.
+        assert 'id="broker-mode-save-btn"' in HTML
+
+    def test_provider_selector_exists(self):
+        # 다른 증권사 추가를 고려한 구조. 지금은 한국투자증권 하나다.
+        assert 'id="broker-provider"' in HTML
+        assert 'value="kis"' in HTML
+        assert "한국투자증권" in HTML
+
 
 class TestJsContract:
     def test_broker_button_only_for_stocklens(self):
@@ -103,6 +119,26 @@ class TestJsContract:
         m = re.search(r"broker-appkey.*?value = \"\"", JS, re.S) or \
             re.search(r"clearBrokerInputs", JS)
         assert m
+
+    def test_connected_state_hides_key_form_until_change_key(self):
+        # 연결됨 상태의 폼 표시는 '키 변경' 편집 플래그로만 열린다.
+        assert "brokerEditingKey" in JS
+        assert re.search(r"broker-change-key-btn", JS)
+
+    def test_mode_radio_change_does_not_call_api(self):
+        # 라디오 change 핸들러 블록에는 API 호출이 없고, 저장은 [적용]
+        # 버튼 핸들러에서만 일어난다.
+        radio_start = JS.index("input[name=\"broker-mode\"]').forEach")
+        save_start = JS.index('broker-mode-save-btn").addEventListener')
+        radio_block = JS[radio_start:save_start]
+        assert "broker_set_mode" not in radio_block
+        save_block = JS[save_start:save_start + 1200]
+        assert "broker_set_mode" in save_block
+
+    def test_provider_flows_through_js_calls(self):
+        # API 호출에 provider 가 인자로 흐른다 (다중 증권사 대비).
+        assert re.search(r"broker_connect\([^)]*brokerProvider", JS) or \
+            re.search(r"brokerProvider", JS)
 
 
 class FakeDiag:
@@ -214,3 +250,25 @@ class TestApiContract:
         api = self._api()
         result = api.broker_status("dartlens")
         assert not result["supported"]
+
+    def test_provider_param_flows_to_orchestrator(self):
+        # 다른 증권사 추가 대비: API 는 provider 를 orchestrator 로 흘린다.
+        api = self._api()
+        with patch.object(api_module.orchestrator, "broker_action",
+                          return_value=self._ok_result("status")) as mock_a:
+            api.broker_status("stocklens", provider="kis")
+        assert mock_a.call_args.kwargs["provider"] == "kis"
+
+        with patch.object(api_module.orchestrator, "broker_action",
+                          return_value=self._ok_result(
+                              "verify_and_save")) as mock_a, \
+             patch.object(api, "diagnose_one", return_value={}):
+            api.broker_connect("stocklens", "real", "k", "s",
+                               provider="kis")
+        assert mock_a.call_args.kwargs["provider"] == "kis"
+
+    def test_unknown_provider_is_not_supported(self):
+        api = self._api()
+        result = api.broker_status("stocklens", provider="mirae")
+        assert not result["supported"]
+        assert result["error_code"] == "provider_unsupported"

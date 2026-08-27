@@ -59,7 +59,13 @@
 
 <div class="modal-backdrop" id="broker-backdrop" hidden>
   <div class="modal broker-modal">
-    <div class="modal-title" id="broker-title">한국투자증권 연결</div>
+    <div class="modal-title" id="broker-title">증권사 연결</div>
+    <div class="modal-field" id="broker-provider-field">
+      <div class="field-label">증권사</div>
+      <select id="broker-provider">
+        <option value="kis" selected>한국투자증권</option>
+      </select>
+    </div>
     <div class="broker-status-box">
       <div class="field-row"><span class="field-label">상태</span><span class="field-value emph" id="broker-state-label">확인 중</span></div>
       <div class="field-row"><span class="field-label">국내 분봉</span><span class="field-value" id="broker-cap-kr">확인 전</span></div>
@@ -82,13 +88,15 @@
         <label class="broker-radio"><input type="radio" name="broker-mode" value="broker_first"> 증권사 우선</label>
         <label class="broker-radio"><input type="radio" name="broker-mode" value="legacy"> 기본 데이터 유지</label>
       </div>
+      <button class="action-btn primary" id="broker-mode-save-btn" hidden>적용</button>
     </div>
     <div class="modal-msg" id="broker-msg"></div>
     <div class="modal-actions broker-actions">
       <button class="action-btn" id="broker-cancel">닫기</button>
+      <button class="action-btn" id="broker-change-key-btn" hidden>키 변경</button>
       <button class="action-btn" id="broker-switch-btn" hidden>환경 변경</button>
       <button class="action-btn warn" id="broker-disconnect-profile-btn" hidden>현재 환경 연결 해제</button>
-      <button class="action-btn danger" id="broker-disconnect-provider-btn" hidden>한국투자증권 연결을 모두 해제</button>
+      <button class="action-btn danger" id="broker-disconnect-provider-btn" hidden>연결을 모두 해제</button>
       <button class="action-btn primary" id="broker-connect-btn">연결 시험 후 저장</button>
     </div>
   </div>

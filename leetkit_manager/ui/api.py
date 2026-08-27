@@ -343,13 +343,32 @@ class Api:
                 out["lens"] = None  # 재진단 실패가 연결 결과를 뒤집지 않는다
         return out
 
-    def broker_status(self, lens_name: str) -> dict:
-        """연결 상태 조회. 구 StockLens(명령 없음)는 업데이트 필요로 보고한다."""
+    def _broker_provider_check(self, lens_name: str,
+                               provider: str) -> dict | None:
+        """지원하지 않는 조합이면 오류 dict, 지원하면 None.
+
+        다른 증권사가 추가되면 lens_contract 의 providers 튜플만 늘리면
+        된다. UI 는 여기서 걸러진 provider 를 절대 CLI 로 보내지 않는다.
+        """
         lens = get_lens(lens_name)
         if lens.broker is None:
             return {"supported": False, "error_code": "broker_unsupported",
                     "status": {}, "error": None}
-        result = orchestrator.broker_action(lens, "status")
+        if provider not in lens.broker.providers:
+            return {"supported": False,
+                    "error_code": "provider_unsupported",
+                    "status": {}, "error": f"지원하지 않는 증권사: {provider}"}
+        return None
+
+    def broker_status(self, lens_name: str,
+                      provider: str = "kis") -> dict:
+        """연결 상태 조회. 구 StockLens(명령 없음)는 업데이트 필요로 보고한다."""
+        blocked = self._broker_provider_check(lens_name, provider)
+        if blocked is not None:
+            return blocked
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(
+            lens, "status", provider=provider)
         if not result.ok:
             return {"supported": False,
                     "error_code": result.error_code,
@@ -358,40 +377,48 @@ class Api:
                 "status": result.status}
 
     def broker_connect(self, lens_name: str, profile: str,
-                       app_key: str, app_secret: str) -> dict:
+                       app_key: str, app_secret: str,
+                       provider: str = "kis") -> dict:
         """저장 전 연결 시험까지 한 번에(verify_and_save). 실패하면 기존
         프로필이 그대로 유지된다(StockLens CLI 가 원자성을 보장)."""
+        blocked = self._broker_provider_check(lens_name, provider)
+        if blocked is not None:
+            return {"ok": False, **blocked}
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
-            lens, "verify_and_save", profile=profile,
+            lens, "verify_and_save", provider=provider, profile=profile,
             credentials={"app_key": app_key, "app_secret": app_secret})
         return self._broker_result(lens_name, result, rediagnose=True)
 
-    def broker_switch_profile(self, lens_name: str, profile: str) -> dict:
+    def broker_switch_profile(self, lens_name: str, profile: str,
+                              provider: str = "kis") -> dict:
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
-            lens, "switch_profile", profile=profile)
+            lens, "switch_profile", provider=provider, profile=profile)
         return self._broker_result(lens_name, result, rediagnose=True)
 
-    def broker_disconnect_profile(self, lens_name: str,
-                                  profile: str) -> dict:
+    def broker_disconnect_profile(self, lens_name: str, profile: str,
+                                  provider: str = "kis") -> dict:
         """현재 환경만 해제. 패키지·라이선스·MCP 등록·과거 캐시는 그대로다."""
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
-            lens, "disconnect_profile", profile=profile)
+            lens, "disconnect_profile", provider=provider, profile=profile)
         return self._broker_result(lens_name, result, rediagnose=True)
 
-    def broker_disconnect_provider(self, lens_name: str) -> dict:
-        """KIS 전체 해제. 자격 증명·토큰·KIS 분봉 캐시가 삭제되고
-        패키지·라이선스·MCP 등록·네이버·Yahoo 기능은 유지된다."""
-        lens = get_lens(lens_name)
-        result = orchestrator.broker_action(lens, "disconnect_provider")
-        return self._broker_result(lens_name, result, rediagnose=True)
-
-    def broker_set_mode(self, lens_name: str, mode: str) -> dict:
+    def broker_disconnect_provider(self, lens_name: str,
+                                   provider: str = "kis") -> dict:
+        """해당 증권사 전체 해제. 자격 증명·토큰·그 증권사 분봉 캐시가
+        삭제되고 패키지·라이선스·MCP 등록·네이버·Yahoo 기능은 유지된다."""
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
-            lens, "set_data_source_mode", mode=mode)
+            lens, "disconnect_provider", provider=provider)
+        return self._broker_result(lens_name, result, rediagnose=True)
+
+    def broker_set_mode(self, lens_name: str, mode: str,
+                        provider: str = "kis") -> dict:
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(
+            lens, "set_data_source_mode", provider=provider, mode=mode)
         return self._broker_result(lens_name, result, rediagnose=True)
 
     def full_cleanup(self, lens_name: str, force: bool = False) -> dict:
@@ -413,18 +440,22 @@ class Api:
             "blocking_apps": [],
         }
 
-        # 1. 증권사 연결 해제 (지원 Lens 만)
+        # 1. 증권사 연결 해제 (지원 Lens 의 모든 증권사 순회)
         if lens.broker is not None:
             out["broker_cleanup_attempted"] = True
-            result = orchestrator.broker_action(lens, "disconnect_provider")
-            if result.ok:
-                out["broker_cleanup_ok"] = True
-            elif result.error_code in ("update_required",
-                                       "broker_unsupported"):
-                # 구 StockLens 는 broker 명령 자체가 없다 = 저장된 자격
-                # 증명도 없다. 지울 것이 없으니 계속한다.
-                out["broker_cleanup_ok"] = None
-            else:
+            for provider in lens.broker.providers:
+                result = orchestrator.broker_action(
+                    lens, "disconnect_provider", provider=provider)
+                if result.ok:
+                    out["broker_cleanup_ok"] = True
+                    continue
+                if result.error_code in ("update_required",
+                                         "broker_unsupported"):
+                    # 구 StockLens 는 broker 명령 자체가 없다 = 저장된 자격
+                    # 증명도 없다. 지울 것이 없으니 계속한다.
+                    if out["broker_cleanup_ok"] is not True:
+                        out["broker_cleanup_ok"] = None
+                    continue
                 out["broker_cleanup_ok"] = False
                 out["broker_cleanup_error"] = (
                     result.message or result.error_code)

@@ -934,9 +934,23 @@ const BROKER_STATES = {
   "error": "오류",
 };
 
+// 다른 증권사가 추가되면 여기에만 늘린다 - id 는 StockLens CLI 의
+// provider 값과 같아야 한다(lens_contract 의 providers 와 동기).
+const BROKER_PROVIDERS = [{ id: "kis", label: "한국투자증권" }];
+
 let brokerLensName = null;
 let brokerBusy = false;
 let brokerLastStatus = null;
+let brokerProvider = "kis";
+// 연결된 상태에서 키 입력 폼은 [키 변경]을 눌렀을 때만 열린다.
+let brokerEditingKey = false;
+// 저장된 사용 방식. 라디오가 여기서 벗어나면 [적용] 버튼이 나타난다.
+let brokerCurrentMode = null;
+
+function brokerProviderLabel() {
+  const found = BROKER_PROVIDERS.find((p) => p.id === brokerProvider);
+  return found ? found.label : brokerProvider;
+}
 
 function clearBrokerInputs() {
   document.getElementById("broker-appkey").value = "";
@@ -974,10 +988,16 @@ function renderBrokerCaps(status) {
 function renderBrokerModal(st) {
   const form = document.getElementById("broker-connect-form");
   const modeField = document.getElementById("broker-mode-field");
+  const modeSaveBtn = document.getElementById("broker-mode-save-btn");
   const connectBtn = document.getElementById("broker-connect-btn");
+  const changeKeyBtn = document.getElementById("broker-change-key-btn");
   const switchBtn = document.getElementById("broker-switch-btn");
   const dcProfileBtn = document.getElementById("broker-disconnect-profile-btn");
   const dcProviderBtn = document.getElementById("broker-disconnect-provider-btn");
+
+  document.getElementById("broker-title").textContent =
+    `${brokerProviderLabel()} 연결`;
+  dcProviderBtn.textContent = `${brokerProviderLabel()} 연결을 모두 해제`;
 
   if (!st || !st.supported) {
     const updateNeeded = st && st.error_code === "update_required";
@@ -990,6 +1010,7 @@ function renderBrokerModal(st) {
     form.hidden = true;
     modeField.hidden = true;
     connectBtn.hidden = true;
+    changeKeyBtn.hidden = true;
     switchBtn.hidden = true;
     dcProfileBtn.hidden = true;
     dcProviderBtn.hidden = true;
@@ -1003,8 +1024,12 @@ function renderBrokerModal(st) {
   const connected = !!(active && profiles[active] && profiles[active].configured);
   const anyConfigured = Object.values(profiles).some((p) => p && p.configured);
 
-  form.hidden = false;
-  connectBtn.hidden = false;
+  // 연결된 상태에서 키를 다시 입력할 필요는 없다 - 입력 폼은
+  // [키 변경]으로만 연다. 미연결이면 폼이 곧 연결 화면이다.
+  const showForm = !connected || brokerEditingKey;
+  form.hidden = !showForm;
+  connectBtn.hidden = !showForm;
+  changeKeyBtn.hidden = !connected || brokerEditingKey;
   modeField.hidden = !connected;
   switchBtn.hidden = !connected;
   dcProfileBtn.hidden = !connected;
@@ -1016,15 +1041,24 @@ function renderBrokerModal(st) {
     switchBtn.textContent =
       active === "real" ? "모의로 변경" : "실전으로 변경";
     switchBtn.disabled = !otherReady;
-    setBrokerState(
-      "connected",
-      active === "real" ? "실전 환경으로 연결되어 있습니다" : "모의 환경으로 연결되어 있습니다"
-    );
-    const mode = status.data_source_mode || "auto";
+    if (brokerEditingKey) {
+      setBrokerState("connected", "새 App Key와 App Secret을 입력하면 기존 키를 대체합니다");
+      const activeRadio = document.querySelector(
+        `input[name="broker-profile"][value="${active}"]`
+      );
+      if (activeRadio) activeRadio.checked = true;
+    } else {
+      setBrokerState(
+        "connected",
+        active === "real" ? "실전 환경으로 연결되어 있습니다" : "모의 환경으로 연결되어 있습니다"
+      );
+    }
+    brokerCurrentMode = status.data_source_mode || "auto";
     const radio = document.querySelector(
-      `input[name="broker-mode"][value="${mode}"]`
+      `input[name="broker-mode"][value="${brokerCurrentMode}"]`
     );
     if (radio) radio.checked = true;
+    modeSaveBtn.hidden = true;
   } else if (anyConfigured) {
     setBrokerState("reauth_required", "저장된 환경은 있지만 활성 연결이 없습니다");
   } else {
@@ -1034,13 +1068,18 @@ function renderBrokerModal(st) {
 }
 
 async function refreshBrokerModal() {
-  const st = await window.pywebview.api.broker_status(brokerLensName);
+  const st = await window.pywebview.api.broker_status(
+    brokerLensName,
+    brokerProvider
+  );
   renderBrokerModal(st);
   return st;
 }
 
 async function openBrokerModal(lensName) {
   brokerLensName = lensName;
+  brokerEditingKey = false;
+  clearBrokerInputs();
   document.getElementById("broker-backdrop").hidden = false;
   setBrokerState("verifying", "상태를 확인하는 중입니다");
   try {
@@ -1049,6 +1088,20 @@ async function openBrokerModal(lensName) {
     setBrokerState("error", "상태 확인에 실패했습니다");
   }
 }
+
+document.getElementById("broker-provider").addEventListener("change", (e) => {
+  brokerProvider = e.target.value;
+  brokerEditingKey = false;
+  clearBrokerInputs();
+  refreshBrokerModal().catch(() => {
+    setBrokerState("error", "상태 확인에 실패했습니다");
+  });
+});
+
+document.getElementById("broker-change-key-btn").addEventListener("click", () => {
+  brokerEditingKey = true;
+  renderBrokerModal({ supported: true, status: brokerLastStatus || {} });
+});
 
 // 설치·업데이트·삭제와 같은 잠금(runningActions)을 공유한다 — 설치 중에
 // 연결을 바꾸거나, 연결 시험 중에 삭제가 시작되는 조합을 막는다.
@@ -1090,12 +1143,13 @@ document.getElementById("broker-connect-btn").addEventListener("click", () => {
       return;
     }
     const profile = brokerSelectedProfile();
-    setBrokerState("verifying", "한국투자증권에 연결을 시험하는 중입니다");
+    setBrokerState("verifying", `${brokerProviderLabel()}에 연결을 시험하는 중입니다`);
     const result = await window.pywebview.api.broker_connect(
       brokerLensName,
       profile,
       key,
-      secret
+      secret,
+      brokerProvider
     );
     if (!result.ok) {
       // 실패해도 기존 연결 상태 표시는 유지한다 — 상태를 다시 그리되
@@ -1110,12 +1164,18 @@ document.getElementById("broker-connect-btn").addEventListener("click", () => {
       return;
     }
     clearBrokerInputs();
-    // 연결 완료 사용자의 권장 기본값은 자동이다 — 선택된 모드를 그대로 적용
+    brokerEditingKey = false;
+    // 최초 연결의 권장 기본값은 자동이다. 이 적용은 [연결 시험 후 저장]
+    // 이라는 명시적 저장 동작의 일부다 - 이후 변경은 [적용] 버튼으로만.
     const modeRadio = document.querySelector(
       'input[name="broker-mode"]:checked'
     );
     const mode = modeRadio ? modeRadio.value : "auto";
-    await window.pywebview.api.broker_set_mode(brokerLensName, mode);
+    await window.pywebview.api.broker_set_mode(
+      brokerLensName,
+      mode,
+      brokerProvider
+    );
     if (result.lens) replaceCard(brokerLensName, result.lens);
     await refreshBrokerModal();
     const v = result.verification || {};
@@ -1131,7 +1191,8 @@ document.getElementById("broker-switch-btn").addEventListener("click", () => {
     const target = active === "real" ? "demo" : "real";
     const result = await window.pywebview.api.broker_switch_profile(
       brokerLensName,
-      target
+      target,
+      brokerProvider
     );
     if (!result.ok) {
       setBrokerState("error", result.error || "환경 변경에 실패했습니다");
@@ -1151,7 +1212,8 @@ document
       setBrokerState("disconnecting", "현재 환경 연결을 해제하는 중입니다");
       const result = await window.pywebview.api.broker_disconnect_profile(
         brokerLensName,
-        active
+        active,
+        brokerProvider
       );
       if (!result.ok) {
         setBrokerState("error", result.error || "연결 해제에 실패했습니다");
@@ -1167,39 +1229,56 @@ document
   .getElementById("broker-disconnect-provider-btn")
   .addEventListener("click", () => {
     brokerCall(async () => {
-      setBrokerState("disconnecting", "한국투자증권 연결을 모두 해제하는 중입니다");
+      setBrokerState("disconnecting", `${brokerProviderLabel()} 연결을 모두 해제하는 중입니다`);
       const result = await window.pywebview.api.broker_disconnect_provider(
-        brokerLensName
+        brokerLensName,
+        brokerProvider
       );
       if (!result.ok) {
         setBrokerState("error", result.error || "전체 해제에 실패했습니다");
         return;
       }
       clearBrokerInputs();
+      brokerEditingKey = false;
       if (result.lens) replaceCard(brokerLensName, result.lens);
       await refreshBrokerModal();
-      showToast("한국투자증권 연결을 모두 해제하고 관련 캐시를 지웠습니다");
+      showToast(`${brokerProviderLabel()} 연결을 모두 해제하고 관련 캐시를 지웠습니다`);
     });
   });
 
+// 라디오 클릭만으로는 저장하지 않는다 - 저장된 값과 달라지면 [적용] 버튼을
+// 보여주고, 저장은 그 버튼에서만 일어난다.
 document.querySelectorAll('input[name="broker-mode"]').forEach((radio) => {
   radio.addEventListener("change", () => {
-    brokerCall(async () => {
-      const result = await window.pywebview.api.broker_set_mode(
-        brokerLensName,
-        radio.value
-      );
-      if (!result.ok) {
-        setBrokerState("error", result.error || "데이터 방식 변경에 실패했습니다");
-        return;
-      }
-      showToast("차트 데이터 사용 방식을 바꿨습니다");
-    });
+    const saveBtn = document.getElementById("broker-mode-save-btn");
+    saveBtn.hidden = radio.value === brokerCurrentMode;
+  });
+});
+
+document.getElementById("broker-mode-save-btn").addEventListener("click", () => {
+  brokerCall(async () => {
+    const checked = document.querySelector(
+      'input[name="broker-mode"]:checked'
+    );
+    if (!checked) return;
+    const result = await window.pywebview.api.broker_set_mode(
+      brokerLensName,
+      checked.value,
+      brokerProvider
+    );
+    if (!result.ok) {
+      setBrokerState("error", result.error || "데이터 방식 변경에 실패했습니다");
+      return;
+    }
+    brokerCurrentMode = checked.value;
+    document.getElementById("broker-mode-save-btn").hidden = true;
+    showToast("차트 데이터 사용 방식을 저장했습니다");
   });
 });
 
 document.getElementById("broker-cancel").addEventListener("click", () => {
   document.getElementById("broker-backdrop").hidden = true;
+  brokerEditingKey = false;
   clearBrokerInputs();
 });
 
