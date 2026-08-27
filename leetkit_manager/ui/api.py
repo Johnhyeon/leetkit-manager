@@ -21,9 +21,13 @@ PATCH_NOTES_URL = "https://app.notion.com/p/LeetKit-3b48f7db5c9680639f35fd2655a4
 RELEASES_PAGE_URL = "https://github.com/Johnhyeon/leetkit-manager/releases/latest"
 TELEGRAM_API_SIGNUP_URL = "https://my.telegram.org"
 DART_API_SIGNUP_URL = "https://opendart.fss.or.kr"
-# 증권사별 Open API 발급 포털. 새 증권사가 추가되면 여기에도 한 줄.
+# 증권사별 Open API 발급 포털. 로컬 고정 표만 쓴다 - JS 가 임의 URL 을
+# 열 수 없다. describe_providers 의 signup_url 은 참고용이고, 브라우저를
+# 여는 것은 항상 이 표의 공식 주소다.
 BROKER_SIGNUP_URLS = {
     "kis": "https://apiportal.koreainvestment.com",
+    "kiwoom": "https://openapi.kiwoom.com",
+    "toss": "https://corp.tossinvest.com/ko/open-api",
 }
 
 # MCP 등록 대상 앱이 아직 없는 사용자를 위한 받는 곳. Lens는 이 앱들 위에서만 동작하므로,
@@ -385,18 +389,40 @@ class Api:
                 "status": result.status}
 
     def broker_connect(self, lens_name: str, profile: str,
-                       app_key: str, app_secret: str,
+                       credentials: dict,
                        provider: str = "kis") -> dict:
         """저장 전 연결 시험까지 한 번에(verify_and_save). 실패하면 기존
-        프로필이 그대로 유지된다(StockLens CLI 가 원자성을 보장)."""
-        blocked = self._broker_provider_check(lens_name, provider)
-        if blocked is not None:
-            return {"ok": False, **blocked}
-        lens = get_lens(lens_name)
-        result = orchestrator.broker_action(
-            lens, "verify_and_save", provider=provider, profile=profile,
-            credentials={"app_key": app_key, "app_secret": app_secret})
-        return self._broker_result(lens_name, result, rediagnose=True)
+        프로필이 그대로 유지된다(StockLens CLI 가 원자성을 보장).
+
+        credentials 는 provider descriptor 의 필드명 그대로 받는다
+        (kis: app_key/app_secret, kiwoom: app_key/secret_key,
+        toss: client_id/client_secret). 브리지는 이름을 바꾸지 않으며,
+        성공·실패·예외 어느 경로로 끝나든 받은 dict 를 비운다."""
+        try:
+            blocked = self._broker_provider_check(lens_name, provider)
+            if blocked is not None:
+                return {"ok": False, **blocked}
+            lens = get_lens(lens_name)
+            payload = {
+                str(name): value
+                for name, value in (credentials or {}).items()
+                if isinstance(value, str)
+            }
+            try:
+                result = orchestrator.broker_action(
+                    lens, "verify_and_save", provider=provider,
+                    profile=profile, credentials=payload)
+            finally:
+                payload.clear()
+            return self._broker_result(lens_name, result, rediagnose=True)
+        finally:
+            # JS 가 넘긴 참조를 파이썬 쪽에서도 비운다. 타임아웃·예외
+            # 이후 브리지 버퍼에 비밀이 남지 않게 한다.
+            try:
+                if isinstance(credentials, dict):
+                    credentials.clear()
+            except Exception:  # noqa: BLE001
+                pass
 
     def broker_switch_profile(self, lens_name: str, profile: str,
                               provider: str = "kis") -> dict:
@@ -428,6 +454,32 @@ class Api:
         result = orchestrator.broker_action(
             lens, "set_data_source_mode", provider=provider, mode=mode)
         return self._broker_result(lens_name, result, rediagnose=True)
+
+    def broker_set_primary(self, lens_name: str,
+                           provider: str = "kis") -> dict:
+        """주 사용 증권사 변경. 검증된 연결이 있어야 StockLens 가 받는다."""
+        blocked = self._broker_provider_check(lens_name, provider)
+        if blocked is not None:
+            return {"ok": False, **blocked}
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(
+            lens, "set_primary_provider", provider=provider)
+        return self._broker_result(lens_name, result, rediagnose=True)
+
+    def broker_recover(self, lens_name: str,
+                       provider: str = "kis") -> dict:
+        """중단된 자격 증명 정리를 재개한다 (orphan 슬롯·미완 삭제)."""
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(
+            lens, "recover_cleanup", provider=provider)
+        return self._broker_result(lens_name, result, rediagnose=False)
+
+    def broker_describe_providers(self, lens_name: str) -> dict:
+        """StockLens 의 공개 provider descriptor. 구 버전이면 None -
+        UI 는 KIS 전용으로 동작한다 (새 공급자 숨김)."""
+        lens = get_lens(lens_name)
+        providers = orchestrator.broker_describe_providers(lens)
+        return {"providers": providers}
 
     def full_cleanup(self, lens_name: str, force: bool = False) -> dict:
         """이 컴퓨터에서 완전히 정리. 순서가 고정이다:

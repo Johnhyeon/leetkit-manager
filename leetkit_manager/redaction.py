@@ -29,7 +29,8 @@ _BASE32_TOKEN_RE = re.compile(r"\b[A-Z2-7]{40,}\b")
 # 키도 같이 남는다(확인된 유출 경로).
 _QUERY_SECRET_RE = re.compile(
     r"((?:crtfc_key|api_key|apikey|api_hash|access_token|token"
-    r"|appkey|appsecret|app_key|app_secret|authorization)\s*=\s*)"
+    r"|appkey|appsecret|app_key|app_secret|authorization"
+    r"|secretkey|secret_key|client_id|client_secret)\s*=\s*)"
     r"([0-9A-Za-z][0-9A-Za-z\-_]{3,})",
     re.IGNORECASE,
 )
@@ -38,12 +39,14 @@ _QUERY_SECRET_RE = re.compile(
 # 않고 이름으로 지운다. Bearer 접두어는 남겨도 비밀이 아니므로 값만 가린다.
 _JSON_SECRET_RE = re.compile(
     r"(\"(?:crtfc_key|api_key|apikey|api_hash|access_token|token"
-    r"|appkey|appsecret|app_key|app_secret|authorization)\"\s*:\s*\")"
+    r"|appkey|appsecret|app_key|app_secret|authorization"
+    r"|secretkey|secret_key|client_id|client_secret)\"\s*:\s*\")"
     r"([^\"]+)",
     re.IGNORECASE,
 )
 _HEADER_SECRET_RE = re.compile(
-    r"((?:authorization|appkey|appsecret|app_key|app_secret)\s*:\s*"
+    r"((?:authorization|appkey|appsecret|app_key|app_secret"
+    r"|secretkey|secret_key|client_id|client_secret)\s*:\s*"
     r"(?:Bearer\s+)?)([0-9A-Za-z][0-9A-Za-z\-_.]{3,})",
     re.IGNORECASE,
 )

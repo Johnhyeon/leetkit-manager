@@ -207,23 +207,31 @@ class TestApiContract:
 
     def test_connect_uses_verify_and_save_and_rediagnoses(self):
         api = self._api()
+        captured: dict = {}
+
+        def fake_action(lens, action, **kwargs):
+            # 브리지는 호출 뒤 버퍼를 비우므로(1.0 Task 21) 호출 시점에
+            # 복사해 검증한다.
+            captured["action"] = action
+            captured["profile"] = kwargs.get("profile")
+            captured["credentials"] = dict(kwargs.get("credentials") or {})
+            return self._ok_result(
+                "verify_and_save",
+                verification={"auth": "ok", "kr_intraday": "available",
+                              "us_intraday": "unavailable"})
+
         with patch.object(api_module.orchestrator, "broker_action",
-                          return_value=self._ok_result(
-                              "verify_and_save",
-                              verification={"auth": "ok",
-                                            "kr_intraday": "available",
-                                            "us_intraday": "unavailable"}),
-                          ) as mock_action, \
+                          side_effect=fake_action), \
              patch.object(api, "diagnose_one",
                           return_value={"name": "stocklens"}) as mock_diag:
             result = api.broker_connect(
-                "stocklens", "real", SENTINEL_KEY, SENTINEL_SECRET)
+                "stocklens", "real",
+                {"app_key": SENTINEL_KEY, "app_secret": SENTINEL_SECRET})
 
         assert result["ok"]
-        assert mock_action.call_args.args[1] == "verify_and_save"
-        assert mock_action.call_args.kwargs["profile"] == "real"
-        assert mock_action.call_args.kwargs["credentials"]["app_key"] == \
-            SENTINEL_KEY
+        assert captured["action"] == "verify_and_save"
+        assert captured["profile"] == "real"
+        assert captured["credentials"]["app_key"] == SENTINEL_KEY
         mock_diag.assert_called_once()
         assert result["verification"]["kr_intraday"] == "available"
         assert result["verification"]["us_intraday"] == "unavailable"
@@ -240,7 +248,8 @@ class TestApiContract:
         with patch.object(api_module.orchestrator, "broker_action",
                           return_value=failed), \
              patch.object(api, "diagnose_one") as mock_diag:
-            result = api.broker_connect("stocklens", "real", "k", "s")
+            result = api.broker_connect(
+                "stocklens", "real", {"app_key": "k", "app_secret": "s"})
         assert not result["ok"]
         assert result["error_code"] == "credential_invalid"
         mock_diag.assert_not_called()
@@ -301,8 +310,9 @@ class TestApiContract:
                           return_value=self._ok_result(
                               "verify_and_save")) as mock_a, \
              patch.object(api, "diagnose_one", return_value={}):
-            api.broker_connect("stocklens", "real", "k", "s",
-                               provider="kis")
+            api.broker_connect(
+                "stocklens", "real",
+                {"app_key": "k", "app_secret": "s"}, provider="kis")
         assert mock_a.call_args.kwargs["provider"] == "kis"
 
     def test_unknown_provider_is_not_supported(self):
@@ -326,7 +336,8 @@ class TestApiContract:
         with patch.object(api_module.orchestrator, "broker_action",
                           return_value=result), \
              patch.object(api, "diagnose_one", return_value={}):
-            out = api.broker_connect("stocklens", "real", "k", "s")
+            out = api.broker_connect(
+                "stocklens", "real", {"app_key": "k", "app_secret": "s"})
         assert out["ok"]
         assert out["status_unavailable"] is True
         assert any("재조회" in w for w in out["warnings"])

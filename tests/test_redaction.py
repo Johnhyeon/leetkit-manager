@@ -102,14 +102,17 @@ BROKER_SENTINEL = "PSAsentinelAppKeyValue0018"
 
 
 def test_redact_broker_names_in_query_string():
-    for name in ("appkey", "appsecret", "app_key", "app_secret"):
+    # 1.0 멀티 증권사: 키움(secret_key)·토스(client_id/client_secret) 필드 포함.
+    for name in ("appkey", "appsecret", "app_key", "app_secret",
+                 "secretkey", "secret_key", "client_id", "client_secret"):
         out = redact(f"{name}={BROKER_SENTINEL}&x=1")
         assert BROKER_SENTINEL not in out, name
 
 
 def test_redact_broker_names_in_json():
     for name in ("appkey", "appsecret", "app_key", "app_secret",
-                 "authorization", "access_token"):
+                 "authorization", "access_token",
+                 "secretkey", "secret_key", "client_id", "client_secret"):
         out = redact(f'{{"{name}": "{BROKER_SENTINEL}"}}')
         assert BROKER_SENTINEL not in out, name
 
