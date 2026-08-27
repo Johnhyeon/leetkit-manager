@@ -1,0 +1,216 @@
+"""증권사 연결 UI 계약 테스트 (Task 16).
+
+- 라이선스 활성화와 분리된 진입점
+- real 기본 선택, demo 경고 문구
+- App Key·App Secret 입력, 저장 전 연결 시험
+- 국내·미국 능력 개별 표시, 데이터 모드 3종
+- 연결 시험·환경 변경·현재 환경 해제·전체 해제
+- 구 StockLens 는 업데이트 필요 상태
+- 변경 API 는 broker_action 경유 + 재진단, 비밀값 무노출
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from leetkit_manager.models import BrokerActionResult
+from leetkit_manager.ui import api as api_module
+
+UI = Path(__file__).resolve().parent.parent / "leetkit_manager" / "ui"
+HTML = (UI / "index.html").read_text(encoding="utf-8")
+JS = (UI / "app.js").read_text(encoding="utf-8")
+
+SENTINEL_KEY = "PSA-SENTINEL-APP-KEY-UI16"
+SENTINEL_SECRET = "PSA-SENTINEL-APP-SECRET-UI16"
+
+
+class TestHtmlContract:
+    def test_broker_entry_separate_from_license(self):
+        # 카드 렌더러에 증권사 연결 진입점이 있고, 활성화 버튼과 별개다.
+        assert "증권사 연결" in JS
+        assert 'data-action="broker"' in JS
+        assert 'data-action="activate"' in JS
+
+    def test_modal_has_credential_fields(self):
+        assert 'id="broker-appkey"' in HTML
+        assert 'id="broker-appsecret"' in HTML
+        # 비밀 입력은 화면에 노출되지 않는 password 타입이어야 한다.
+        secret_input = re.search(
+            r'<input[^>]*id="broker-appsecret"[^>]*>', HTML).group(0)
+        assert 'type="password"' in secret_input
+
+    def test_real_profile_is_default(self):
+        real = re.search(
+            r'<input[^>]*name="broker-profile"[^>]*value="real"[^>]*>',
+            HTML).group(0)
+        assert "checked" in real
+        demo = re.search(
+            r'<input[^>]*name="broker-profile"[^>]*value="demo"[^>]*>',
+            HTML).group(0)
+        assert "checked" not in demo
+
+    def test_demo_warning_text(self):
+        assert "모의" in HTML
+        assert re.search(r"모의[^<]*분봉", HTML) or "과거 분봉" in HTML
+
+    def test_data_source_modes(self):
+        for value in ("auto", "broker_first", "legacy"):
+            assert f'value="{value}"' in HTML
+        assert "자동" in HTML
+        assert "증권사 우선" in HTML
+        assert "기본 데이터" in HTML
+
+    def test_capability_rows_shown_separately(self):
+        assert 'id="broker-cap-kr"' in HTML
+        assert 'id="broker-cap-us"' in HTML
+        assert "국내 분봉" in HTML
+        assert "미국 분봉" in HTML
+
+    def test_action_buttons(self):
+        assert 'id="broker-connect-btn"' in HTML
+        assert 'id="broker-switch-btn"' in HTML
+        assert 'id="broker-disconnect-profile-btn"' in HTML
+        assert 'id="broker-disconnect-provider-btn"' in HTML
+        assert "연결 시험" in HTML
+        assert "현재 환경 연결 해제" in HTML
+        assert "모두 해제" in HTML
+
+
+class TestJsContract:
+    def test_broker_button_only_for_stocklens(self):
+        # renderCard 에서 stocklens 조건으로만 버튼을 만든다.
+        m = re.search(r"lens\.name === \"stocklens\"[^;]*증권사 연결",
+                      JS, re.S)
+        assert m, "stocklens 카드에만 증권사 연결 버튼이 있어야 합니다"
+
+    def test_state_machine_states(self):
+        for state in ("not_supported", "not_configured", "verifying",
+                      "connected", "limited", "reauth_required",
+                      "disconnecting", "error"):
+            assert f'"{state}"' in JS, f"BROKER state {state} 누락"
+
+    def test_update_required_copy(self):
+        assert "update_required" in JS
+        assert "업데이트" in JS
+
+    def test_success_clears_inputs(self):
+        # 성공 시 입력칸을 비운다 (비밀값을 화면에 남기지 않는다).
+        m = re.search(r"broker-appkey.*?value = \"\"", JS, re.S) or \
+            re.search(r"clearBrokerInputs", JS)
+        assert m
+
+
+class FakeDiag:
+    def __init__(self):
+        self.report = None
+
+    def to_dict(self):
+        return {"name": "stocklens"}
+
+
+class TestApiContract:
+    def _api(self):
+        return api_module.Api()
+
+    def _ok_result(self, action, **extra):
+        payload = {
+            "ok": True, "contract_version": 1, "action": action,
+            "status": {
+                "provider": "kis", "active_provider": "kis",
+                "active_profile": "real", "data_source_mode": "auto",
+                "connection_generation": 3,
+                "profiles": {"real": {"configured": True},
+                             "demo": {"configured": False}},
+            },
+        }
+        payload.update(extra)
+        return BrokerActionResult.from_json(payload, exit_code=0)
+
+    def test_connect_uses_verify_and_save_and_rediagnoses(self):
+        api = self._api()
+        with patch.object(api_module.orchestrator, "broker_action",
+                          return_value=self._ok_result(
+                              "verify_and_save",
+                              verification={"auth": "ok",
+                                            "kr_intraday": "available",
+                                            "us_intraday": "unavailable"}),
+                          ) as mock_action, \
+             patch.object(api, "diagnose_one",
+                          return_value={"name": "stocklens"}) as mock_diag:
+            result = api.broker_connect(
+                "stocklens", "real", SENTINEL_KEY, SENTINEL_SECRET)
+
+        assert result["ok"]
+        assert mock_action.call_args.args[1] == "verify_and_save"
+        assert mock_action.call_args.kwargs["profile"] == "real"
+        assert mock_action.call_args.kwargs["credentials"]["app_key"] == \
+            SENTINEL_KEY
+        mock_diag.assert_called_once()
+        assert result["verification"]["kr_intraday"] == "available"
+        assert result["verification"]["us_intraday"] == "unavailable"
+        # 반환값 어디에도 비밀 원문이 없다.
+        assert SENTINEL_KEY not in json.dumps(result, ensure_ascii=False)
+        assert SENTINEL_SECRET not in json.dumps(result, ensure_ascii=False)
+
+    def test_connect_failure_keeps_state_no_rediagnosis_needed(self):
+        api = self._api()
+        failed = BrokerActionResult.from_json({
+            "ok": False,
+            "error": {"code": "credential_invalid",
+                      "message": "인증 실패"}}, exit_code=1)
+        with patch.object(api_module.orchestrator, "broker_action",
+                          return_value=failed), \
+             patch.object(api, "diagnose_one") as mock_diag:
+            result = api.broker_connect("stocklens", "real", "k", "s")
+        assert not result["ok"]
+        assert result["error_code"] == "credential_invalid"
+        mock_diag.assert_not_called()
+
+    @pytest.mark.parametrize("method,action,kwargs", [
+        ("broker_switch_profile", "switch_profile", {"profile": "demo"}),
+        ("broker_disconnect_profile", "disconnect_profile",
+         {"profile": "real"}),
+        ("broker_disconnect_provider", "disconnect_provider", {}),
+        ("broker_set_mode", "set_data_source_mode", {"mode": "legacy"}),
+    ])
+    def test_mutating_methods_route_and_rediagnose(self, method, action,
+                                                   kwargs):
+        api = self._api()
+        with patch.object(api_module.orchestrator, "broker_action",
+                          return_value=self._ok_result(action)) as mock_a, \
+             patch.object(api, "diagnose_one",
+                          return_value={"name": "stocklens"}) as mock_diag:
+            result = getattr(api, method)("stocklens", *kwargs.values())
+        assert result["ok"]
+        assert mock_a.call_args.args[1] == action
+        mock_diag.assert_called_once()
+
+    def test_status_reports_support_and_connection(self):
+        api = self._api()
+        with patch.object(api_module.orchestrator, "broker_action",
+                          return_value=self._ok_result("status")):
+            result = api.broker_status("stocklens")
+        assert result["supported"]
+        assert result["status"]["active_profile"] == "real"
+
+    def test_status_update_required_for_old_stocklens(self):
+        api = self._api()
+        old = BrokerActionResult.from_json({
+            "ok": False,
+            "error": {"code": "update_required",
+                      "message": "업데이트가 필요합니다"}}, exit_code=1)
+        with patch.object(api_module.orchestrator, "broker_action",
+                          return_value=old):
+            result = api.broker_status("stocklens")
+        assert not result["supported"]
+        assert result["error_code"] == "update_required"
+
+    def test_non_stocklens_is_not_supported(self):
+        api = self._api()
+        result = api.broker_status("dartlens")
+        assert not result["supported"]

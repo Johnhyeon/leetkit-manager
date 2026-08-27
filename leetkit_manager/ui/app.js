@@ -240,6 +240,13 @@ function renderCard(lens) {
     ? `<button class="action-btn" data-action="purchase" data-lens="${lens.name}">구매</button>`
     : "";
 
+  // 증권사 연결은 StockLens 전용이고 라이선스 활성화와 별개의 수명주기다 —
+  // 시세용 App Key 연결·해제·환경 전환을 이 진입점 하나로 모은다.
+  const brokerBtn =
+    lens.name === "stocklens"
+      ? `<button class="action-btn" data-action="broker" data-lens="${lens.name}">증권사 연결</button>`
+      : "";
+
   // 업데이트로도 안 풀리는 "호환되지 않는 버전"(예: PATH에 uv 관리 밖의 낡은 실행 파일이
   // 남아있는 경우) 대응 — 완전히 지우고 새로 설치할 수 있게. 이미 설치된 것만 지울 게
   // 있으므로 미설치 상태에선 안 보여준다.
@@ -275,6 +282,7 @@ function renderCard(lens) {
         <button class="action-btn" data-action="diagnose" data-lens="${lens.name}">진단</button>
         <button class="action-btn" data-action="register" data-lens="${lens.name}">MCP 등록</button>
         <button class="action-btn" data-action="activate" data-lens="${lens.name}">활성화</button>
+        ${brokerBtn}
         ${purchaseBtn}
         ${telegramLoginBtn}
         ${repairBtn}
@@ -899,6 +907,290 @@ function recomputeSummaryFromCache() {
     action_needed: lenses.filter(lensHasActionableProblem).length,
   });
 }
+
+/* ---------- 증권사 연결 모달 ---------- */
+
+// 상태 머신 — 화면 라벨은 여기서만 정한다. 실패해도 기존 연결 상태 표시는
+// 유지하고 메시지만 바꾼다.
+const BROKER_STATES = {
+  "not_supported": "이 버전에서는 지원되지 않습니다",
+  "not_configured": "연결 안 됨",
+  "verifying": "연결 시험 중",
+  "connected": "연결됨",
+  "limited": "일부 기능만 사용 가능",
+  "reauth_required": "다시 연결이 필요합니다",
+  "disconnecting": "해제 중",
+  "error": "오류",
+};
+
+let brokerLensName = null;
+let brokerBusy = false;
+let brokerLastStatus = null;
+
+function clearBrokerInputs() {
+  document.getElementById("broker-appkey").value = "";
+  document.getElementById("broker-appsecret").value = "";
+}
+
+function setBrokerState(state, message) {
+  document.getElementById("broker-state-label").textContent =
+    BROKER_STATES[state] || state;
+  const msg = document.getElementById("broker-msg");
+  msg.textContent = message || "";
+  msg.className = state === "error" ? "modal-msg fail" : "modal-msg";
+}
+
+function brokerCapLabel(value) {
+  if (value === "available") return "사용 가능";
+  if (value === "limited") return "일부만 가능";
+  if (value === "unavailable") return "사용 불가";
+  if (value === "unverified") return "확인 필요";
+  return "확인 전";
+}
+
+function renderBrokerCaps(status) {
+  const caps =
+    ((status || {}).capability_results || {})[(status || {}).active_profile] ||
+    {};
+  document.getElementById("broker-cap-kr").textContent = brokerCapLabel(
+    caps.kr_intraday
+  );
+  document.getElementById("broker-cap-us").textContent = brokerCapLabel(
+    caps.us_intraday
+  );
+}
+
+function renderBrokerModal(st) {
+  const form = document.getElementById("broker-connect-form");
+  const modeField = document.getElementById("broker-mode-field");
+  const connectBtn = document.getElementById("broker-connect-btn");
+  const switchBtn = document.getElementById("broker-switch-btn");
+  const dcProfileBtn = document.getElementById("broker-disconnect-profile-btn");
+  const dcProviderBtn = document.getElementById("broker-disconnect-provider-btn");
+
+  if (!st || !st.supported) {
+    const updateNeeded = st && st.error_code === "update_required";
+    setBrokerState(
+      "not_supported",
+      updateNeeded
+        ? st.error || "StockLens 업데이트 후 사용할 수 있습니다"
+        : (st && st.error) || ""
+    );
+    form.hidden = true;
+    modeField.hidden = true;
+    connectBtn.hidden = true;
+    switchBtn.hidden = true;
+    dcProfileBtn.hidden = true;
+    dcProviderBtn.hidden = true;
+    return;
+  }
+
+  const status = st.status || {};
+  brokerLastStatus = status;
+  const profiles = status.profiles || {};
+  const active = status.active_profile;
+  const connected = !!(active && profiles[active] && profiles[active].configured);
+  const anyConfigured = Object.values(profiles).some((p) => p && p.configured);
+
+  form.hidden = false;
+  connectBtn.hidden = false;
+  modeField.hidden = !connected;
+  switchBtn.hidden = !connected;
+  dcProfileBtn.hidden = !connected;
+  dcProviderBtn.hidden = !anyConfigured;
+
+  if (connected) {
+    const other = active === "real" ? "demo" : "real";
+    const otherReady = !!(profiles[other] && profiles[other].configured);
+    switchBtn.textContent =
+      active === "real" ? "모의로 변경" : "실전으로 변경";
+    switchBtn.disabled = !otherReady;
+    setBrokerState(
+      "connected",
+      active === "real" ? "실전 환경으로 연결되어 있습니다" : "모의 환경으로 연결되어 있습니다"
+    );
+    const mode = status.data_source_mode || "auto";
+    const radio = document.querySelector(
+      `input[name="broker-mode"][value="${mode}"]`
+    );
+    if (radio) radio.checked = true;
+  } else if (anyConfigured) {
+    setBrokerState("reauth_required", "저장된 환경은 있지만 활성 연결이 없습니다");
+  } else {
+    setBrokerState("not_configured", "App Key와 App Secret을 입력하고 연결 시험을 눌러주세요");
+  }
+  renderBrokerCaps(status);
+}
+
+async function refreshBrokerModal() {
+  const st = await window.pywebview.api.broker_status(brokerLensName);
+  renderBrokerModal(st);
+  return st;
+}
+
+async function openBrokerModal(lensName) {
+  brokerLensName = lensName;
+  document.getElementById("broker-backdrop").hidden = false;
+  setBrokerState("verifying", "상태를 확인하는 중입니다");
+  try {
+    await refreshBrokerModal();
+  } catch {
+    setBrokerState("error", "상태 확인에 실패했습니다");
+  }
+}
+
+// 설치·업데이트·삭제와 같은 잠금(runningActions)을 공유한다 — 설치 중에
+// 연결을 바꾸거나, 연결 시험 중에 삭제가 시작되는 조합을 막는다.
+async function brokerCall(fn) {
+  if (brokerBusy || runningActions.has(brokerLensName)) {
+    showToast("이미 처리 중입니다, 잠시만 기다려주세요");
+    return null;
+  }
+  brokerBusy = true;
+  runningActions.add(brokerLensName);
+  try {
+    return await fn();
+  } finally {
+    brokerBusy = false;
+    runningActions.delete(brokerLensName);
+  }
+}
+
+function brokerSelectedProfile() {
+  const checked = document.querySelector(
+    'input[name="broker-profile"]:checked'
+  );
+  return checked ? checked.value : "real";
+}
+
+document.querySelectorAll('input[name="broker-profile"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    document.getElementById("broker-demo-warning").hidden =
+      brokerSelectedProfile() !== "demo";
+  });
+});
+
+document.getElementById("broker-connect-btn").addEventListener("click", () => {
+  brokerCall(async () => {
+    const key = document.getElementById("broker-appkey").value.trim();
+    const secret = document.getElementById("broker-appsecret").value.trim();
+    if (!key || !secret) {
+      setBrokerState("error", "App Key와 App Secret을 모두 입력해주세요");
+      return;
+    }
+    const profile = brokerSelectedProfile();
+    setBrokerState("verifying", "한국투자증권에 연결을 시험하는 중입니다");
+    const result = await window.pywebview.api.broker_connect(
+      brokerLensName,
+      profile,
+      key,
+      secret
+    );
+    if (!result.ok) {
+      // 실패해도 기존 연결 상태 표시는 유지한다 — 상태를 다시 그리되
+      // 오류 메시지를 위에 얹는다.
+      try {
+        await refreshBrokerModal();
+      } catch {}
+      setBrokerState(
+        "error",
+        result.error || "연결 시험에 실패했습니다, 키를 다시 확인해주세요"
+      );
+      return;
+    }
+    clearBrokerInputs();
+    // 연결 완료 사용자의 권장 기본값은 자동이다 — 선택된 모드를 그대로 적용
+    const modeRadio = document.querySelector(
+      'input[name="broker-mode"]:checked'
+    );
+    const mode = modeRadio ? modeRadio.value : "auto";
+    await window.pywebview.api.broker_set_mode(brokerLensName, mode);
+    if (result.lens) replaceCard(brokerLensName, result.lens);
+    await refreshBrokerModal();
+    const v = result.verification || {};
+    showToast(
+      `연결 완료, 국내 분봉 ${brokerCapLabel(v.kr_intraday)} / 미국 분봉 ${brokerCapLabel(v.us_intraday)}`
+    );
+  });
+});
+
+document.getElementById("broker-switch-btn").addEventListener("click", () => {
+  brokerCall(async () => {
+    const active = (brokerLastStatus || {}).active_profile;
+    const target = active === "real" ? "demo" : "real";
+    const result = await window.pywebview.api.broker_switch_profile(
+      brokerLensName,
+      target
+    );
+    if (!result.ok) {
+      setBrokerState("error", result.error || "환경 변경에 실패했습니다");
+      return;
+    }
+    if (result.lens) replaceCard(brokerLensName, result.lens);
+    await refreshBrokerModal();
+  });
+});
+
+document
+  .getElementById("broker-disconnect-profile-btn")
+  .addEventListener("click", () => {
+    brokerCall(async () => {
+      const active = (brokerLastStatus || {}).active_profile;
+      if (!active) return;
+      setBrokerState("disconnecting", "현재 환경 연결을 해제하는 중입니다");
+      const result = await window.pywebview.api.broker_disconnect_profile(
+        brokerLensName,
+        active
+      );
+      if (!result.ok) {
+        setBrokerState("error", result.error || "연결 해제에 실패했습니다");
+        return;
+      }
+      if (result.lens) replaceCard(brokerLensName, result.lens);
+      await refreshBrokerModal();
+      showToast("현재 환경 연결을 해제했습니다, 프로그램과 라이선스는 그대로입니다");
+    });
+  });
+
+document
+  .getElementById("broker-disconnect-provider-btn")
+  .addEventListener("click", () => {
+    brokerCall(async () => {
+      setBrokerState("disconnecting", "한국투자증권 연결을 모두 해제하는 중입니다");
+      const result = await window.pywebview.api.broker_disconnect_provider(
+        brokerLensName
+      );
+      if (!result.ok) {
+        setBrokerState("error", result.error || "전체 해제에 실패했습니다");
+        return;
+      }
+      clearBrokerInputs();
+      if (result.lens) replaceCard(brokerLensName, result.lens);
+      await refreshBrokerModal();
+      showToast("한국투자증권 연결을 모두 해제하고 관련 캐시를 지웠습니다");
+    });
+  });
+
+document.querySelectorAll('input[name="broker-mode"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    brokerCall(async () => {
+      const result = await window.pywebview.api.broker_set_mode(
+        brokerLensName,
+        radio.value
+      );
+      if (!result.ok) {
+        setBrokerState("error", result.error || "데이터 방식 변경에 실패했습니다");
+        return;
+      }
+      showToast("차트 데이터 사용 방식을 바꿨습니다");
+    });
+  });
+});
+
+document.getElementById("broker-cancel").addEventListener("click", () => {
+  document.getElementById("broker-backdrop").hidden = true;
+  clearBrokerInputs();
+});
 
 /* ---------- 활성화 모달 ---------- */
 
@@ -1643,6 +1935,10 @@ document.addEventListener("click", (e) => {
   }
   if (action === "activate") {
     openActivateModal(lensName);
+    return;
+  }
+  if (action === "broker") {
+    openBrokerModal(lensName);
     return;
   }
   if (action === "register") {

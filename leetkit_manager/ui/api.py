@@ -322,6 +322,78 @@ class Api:
             "key_tail_masked": result.raw.get("key_tail_masked"),
         }
 
+    # ---------- 증권사 연결 (StockLens broker) ----------
+    # UI 는 keychain·StockLens 홈 파일을 절대 직접 만지지 않는다. 모든 변경은
+    # orchestrator.broker_action(stocklens-broker stdin JSON) 경유다. JS 쪽
+    # runningActions 잠금이 카드 단위 동시 작업을 막는다.
+
+    def _broker_result(self, lens_name: str, result,
+                       *, rediagnose: bool) -> dict:
+        out = {
+            "ok": result.ok,
+            "error": result.message,
+            "error_code": result.error_code,
+            "status": result.status,
+            "verification": result.verification,
+        }
+        if result.ok and rediagnose:
+            try:
+                out["lens"] = self.diagnose_one(lens_name)
+            except Exception:
+                out["lens"] = None  # 재진단 실패가 연결 결과를 뒤집지 않는다
+        return out
+
+    def broker_status(self, lens_name: str) -> dict:
+        """연결 상태 조회. 구 StockLens(명령 없음)는 업데이트 필요로 보고한다."""
+        lens = get_lens(lens_name)
+        if lens.broker is None:
+            return {"supported": False, "error_code": "broker_unsupported",
+                    "status": {}, "error": None}
+        result = orchestrator.broker_action(lens, "status")
+        if not result.ok:
+            return {"supported": False,
+                    "error_code": result.error_code,
+                    "error": result.message, "status": {}}
+        return {"supported": True, "error_code": None, "error": None,
+                "status": result.status}
+
+    def broker_connect(self, lens_name: str, profile: str,
+                       app_key: str, app_secret: str) -> dict:
+        """저장 전 연결 시험까지 한 번에(verify_and_save). 실패하면 기존
+        프로필이 그대로 유지된다(StockLens CLI 가 원자성을 보장)."""
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(
+            lens, "verify_and_save", profile=profile,
+            credentials={"app_key": app_key, "app_secret": app_secret})
+        return self._broker_result(lens_name, result, rediagnose=True)
+
+    def broker_switch_profile(self, lens_name: str, profile: str) -> dict:
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(
+            lens, "switch_profile", profile=profile)
+        return self._broker_result(lens_name, result, rediagnose=True)
+
+    def broker_disconnect_profile(self, lens_name: str,
+                                  profile: str) -> dict:
+        """현재 환경만 해제. 패키지·라이선스·MCP 등록·과거 캐시는 그대로다."""
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(
+            lens, "disconnect_profile", profile=profile)
+        return self._broker_result(lens_name, result, rediagnose=True)
+
+    def broker_disconnect_provider(self, lens_name: str) -> dict:
+        """KIS 전체 해제. 자격 증명·토큰·KIS 분봉 캐시가 삭제되고
+        패키지·라이선스·MCP 등록·네이버·Yahoo 기능은 유지된다."""
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(lens, "disconnect_provider")
+        return self._broker_result(lens_name, result, rediagnose=True)
+
+    def broker_set_mode(self, lens_name: str, mode: str) -> dict:
+        lens = get_lens(lens_name)
+        result = orchestrator.broker_action(
+            lens, "set_data_source_mode", mode=mode)
+        return self._broker_result(lens_name, result, rediagnose=True)
+
     def open_dart_api_signup(self) -> None:
         """opendart.fss.or.kr — DartLens를 처음 쓰는 사람이 DART OpenAPI 키를 발급받는
         곳(DartLens 자신의 setup_claude.py/_safe.py가 텍스트로만 안내하던 것과 같은

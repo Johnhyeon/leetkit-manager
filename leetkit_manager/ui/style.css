@@ -1794,3 +1794,34 @@ button:focus-visible, input:focus-visible {
   font-family: var(--font-mono);
   font-size: 0.95em;
 }
+
+/* ---------- 증권사 연결 모달 ---------- */
+/* 주 타겟(40-50대) 가시성: 큰 글자, 고대비, 스크롤 없이 한 화면 */
+.broker-modal { max-width: 460px; }
+.broker-status-box {
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.broker-radio-row { display: flex; gap: 18px; margin: 6px 0 8px; }
+.broker-radio-col { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 8px; }
+.broker-radio { font-size: 15px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.broker-demo-warning {
+  background: #fff7e0;
+  border: 1px solid #e5c56a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  color: #6b5310;
+}
+#broker-appkey, #broker-appsecret {
+  width: 100%;
+  margin-top: 6px;
+  font-size: 15px;
+  padding: 9px 10px;
+  box-sizing: border-box;
+}
+.broker-actions { flex-wrap: wrap; }
