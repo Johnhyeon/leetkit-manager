@@ -1076,12 +1076,26 @@ function renderBrokerCaps(status) {
   const caps =
     ((status || {}).capability_results || {})[brokerActiveProfile(status)] ||
     {};
-  document.getElementById("broker-cap-kr").textContent = brokerCapLabel(
-    caps.kr_intraday
-  );
-  document.getElementById("broker-cap-us").textContent = brokerCapLabel(
-    caps.us_intraday
-  );
+  // 연결 시험 통과(available)와 출시 검증 완료는 다르다. 검증 전이면
+  // "검증 중"으로 보여준다 (구 StockLens 는 release_verified 가 없어
+  // 기존 라벨 그대로 동작한다).
+  const record = ((status || {}).providers || {})[brokerProvider];
+  const released = record && record.release_verified;
+  function label(name) {
+    const value = caps[name];
+    if (
+      value === "available" &&
+      released &&
+      released[name] === false
+    ) {
+      return "검증 중";
+    }
+    return brokerCapLabel(value);
+  }
+  document.getElementById("broker-cap-kr").textContent =
+    label("kr_intraday");
+  document.getElementById("broker-cap-us").textContent =
+    label("us_intraday");
 }
 
 // 탭별 상태 배지. 주 사용 하나만 "사용 중"이고, 나머지 연결은 "연결됨",

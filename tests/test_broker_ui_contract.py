@@ -253,6 +253,15 @@ class TestSinglePrimaryUx:
         # 주 사용 해제 후 다른 증권사·Yahoo 로 자동 전환하지 않는다.
         assert "데이터 출처를 자동으로 변경하지 않았습니다" in JS
 
+    def test_capability_shows_verifying_until_release_verified(self):
+        # 연결 시험 통과(available)여도 출시 검증 전이면 "검증 중"으로
+        # 표시한다 (리뷰 차단 항목 2의 UI 면).
+        assert "release_verified" in JS
+        assert "검증 중" in JS
+        caps_start = JS.index("function renderBrokerCaps")
+        caps_block = JS[caps_start:caps_start + 1600]
+        assert "release_verified" in caps_block
+
     def test_active_profile_is_per_provider_not_primary(self):
         # 재현된 결함(리뷰): 주 사용 KIS=모의 + 토스=실전 연결 상태에서
         # 토스 탭이 KIS 의 demo 를 기준으로 판단해 토스를 미연결로 표시.
