@@ -242,9 +242,10 @@ function renderCard(lens) {
 
   // 증권사 연결은 StockLens 전용이고 라이선스 활성화와 별개의 수명주기다 —
   // 시세용 App Key 연결·해제·환경 전환을 이 진입점 하나로 모은다.
+  // 새로 생긴 버튼이라 처음 열어볼 때까지만 반짝인다(첫 1회 강조).
   const brokerBtn =
     lens.name === "stocklens"
-      ? `<button class="action-btn" data-action="broker" data-lens="${lens.name}">증권사 연결</button>`
+      ? `<button class="action-btn${brokerIntroSeen() ? "" : " new-glow"}" data-action="broker" data-lens="${lens.name}">증권사 연결</button>`
       : "";
 
   // 업데이트로도 안 풀리는 "호환되지 않는 버전"(예: PATH에 uv 관리 밖의 낡은 실행 파일이
@@ -938,6 +939,31 @@ const BROKER_STATES = {
 // provider 값과 같아야 한다(lens_contract 의 providers 와 동기).
 const BROKER_PROVIDERS = [{ id: "kis", label: "한국투자증권" }];
 
+// 새 기능 첫 1회 강조 - 처음 열어보기 전까지 카드 버튼이 반짝인다.
+const BROKER_INTRO_KEY = "leetkit-manager-broker-intro-seen";
+
+function brokerIntroSeen() {
+  try {
+    return localStorage.getItem(BROKER_INTRO_KEY) === "1";
+  } catch {
+    return true; // 저장이 안 되는 환경이면 강조를 반복하지 않는 쪽이 낫다
+  }
+}
+
+function markBrokerIntroSeen() {
+  try {
+    localStorage.setItem(BROKER_INTRO_KEY, "1");
+  } catch {
+    /* 저장 실패는 무시 */
+  }
+  document
+    .querySelectorAll('[data-action="broker"].new-glow')
+    .forEach((b) => b.classList.remove("new-glow"));
+}
+
+// 가이드 투어가 예시로 모달을 띄운 상태 - 실제 API 호출을 막는다.
+let brokerDemoMode = false;
+
 let brokerLensName = null;
 let brokerBusy = false;
 let brokerLastStatus = null;
@@ -1097,15 +1123,54 @@ async function refreshBrokerModal() {
 
 async function openBrokerModal(lensName) {
   brokerLensName = lensName;
+  brokerDemoMode = false;
   brokerEditingKey = false;
+  markBrokerIntroSeen();
   clearBrokerInputs();
-  document.getElementById("broker-backdrop").hidden = false;
+  const backdrop = document.getElementById("broker-backdrop");
+  backdrop.classList.remove("demo-position");
+  backdrop.hidden = false;
   setBrokerState("verifying", "상태를 확인하는 중입니다");
   try {
     await refreshBrokerModal();
   } catch {
     setBrokerState("error", "상태 확인에 실패했습니다");
   }
+}
+
+// 가이드 투어용 예시 - 실제 연결 상태와 무관하게 모든 요소(관리 버튼,
+// 사용 방식, 입력 폼)를 한 화면에 보여준다. 동작 버튼은 눌러도 실행되지
+// 않는다(brokerCall 이 demo 모드를 막는다).
+function openBrokerModalExample() {
+  brokerDemoMode = true;
+  brokerEditingKey = true; // 입력 폼까지 같이 보여준다
+  const backdrop = document.getElementById("broker-backdrop");
+  backdrop.classList.add("demo-position");
+  backdrop.hidden = false;
+  renderBrokerModal({
+    supported: true,
+    status: {
+      active_profile: "real",
+      data_source_mode: "auto",
+      profiles: {
+        real: { configured: true },
+        demo: { configured: true },
+      },
+      capability_results: {
+        real: { kr_intraday: "available", us_intraday: "available" },
+      },
+    },
+  });
+  setBrokerState("connected", "가이드용 예시 화면입니다");
+}
+
+function closeBrokerModalDemo() {
+  if (!brokerDemoMode) return;
+  brokerDemoMode = false;
+  brokerEditingKey = false;
+  const backdrop = document.getElementById("broker-backdrop");
+  backdrop.classList.remove("demo-position");
+  backdrop.hidden = true;
 }
 
 document.getElementById("broker-provider").addEventListener("change", (e) => {
@@ -1125,6 +1190,10 @@ document.getElementById("broker-change-key-btn").addEventListener("click", () =>
 // 설치·업데이트·삭제와 같은 잠금(runningActions)을 공유한다 — 설치 중에
 // 연결을 바꾸거나, 연결 시험 중에 삭제가 시작되는 조합을 막는다.
 async function brokerCall(fn) {
+  if (brokerDemoMode) {
+    showToast("가이드용 예시 화면이라 실제로 실행되지 않습니다");
+    return null;
+  }
   if (brokerBusy || runningActions.has(brokerLensName)) {
     showToast("이미 처리 중입니다, 잠시만 기다려주세요");
     return null;
@@ -1295,8 +1364,16 @@ document.getElementById("broker-mode-save-btn").addEventListener("click", () => 
   });
 });
 
+document.getElementById("broker-signup-btn").addEventListener("click", () => {
+  window.pywebview.api.open_broker_signup(brokerProvider);
+  showToast("브라우저에서 API 포털을 열었습니다");
+});
+
 document.getElementById("broker-cancel").addEventListener("click", () => {
-  document.getElementById("broker-backdrop").hidden = true;
+  const backdrop = document.getElementById("broker-backdrop");
+  backdrop.hidden = true;
+  backdrop.classList.remove("demo-position");
+  brokerDemoMode = false;
   brokerEditingKey = false;
   clearBrokerInputs();
 });
@@ -2546,6 +2623,81 @@ const TOUR_STEPS = [
       "받은 라이선스 키는 그대로라 다시 설치할 수 있습니다\n\n" +
       "결과 복사는 [문제 자세히] 창 안에 있습니다",
   },
+  // --- 증권사 연결 (StockLens 분봉) - 예시 모달을 띄워 요소 하나하나 안내 ---
+  {
+    selector: '[data-card="stocklens"] [data-action="broker"]',
+    fallbackSelector: ".card:first-child .actions",
+    title: "증권사 연결 (새 기능)",
+    desc:
+      "한국투자증권 Open API를 연결하면\nStockLens에서 국내·미국 분봉을 쓸 수 있습니다\n\n" +
+      "시세 조회 전용이라 계좌번호나 주문 기능과는\n전혀 연결되지 않습니다\n\n" +
+      "다음 단계부터 예시 화면으로 하나씩 안내할게요",
+  },
+  {
+    selector: "#broker-provider",
+    demo: "broker",
+    title: "증권사 선택",
+    desc: "연결할 증권사를 고릅니다\n지금은 한국투자증권을 지원하고\n앞으로 늘려갈 예정입니다",
+  },
+  {
+    selector: ".broker-status-box",
+    demo: "broker",
+    title: "연결 상태",
+    desc:
+      "표시등 색으로 연결 상태를 보여줍니다\n틸색이면 연결됨, 주황은 확인 필요, 빨강은 오류\n\n" +
+      "국내 분봉과 미국 분봉은 지원 범위가 달라\n각각 따로 확인해서 보여드립니다",
+  },
+  {
+    selector: "#broker-manage-row",
+    demo: "broker",
+    title: "연결 관리",
+    desc:
+      "키 변경: 새 App Key로 교체합니다\n" +
+      "환경 변경: 실전과 모의를 오갑니다 (둘 다 등록한 경우)\n" +
+      "현재 환경 연결 해제: 지금 환경의 키만 지웁니다\n\n" +
+      "어느 것을 눌러도 프로그램과 라이선스는 그대로입니다",
+  },
+  {
+    selector: "#broker-signup-btn",
+    demo: "broker",
+    title: "App Key 발급",
+    desc:
+      "아직 App Key가 없다면 여기를 눌러\n한국투자증권 API 포털을 여세요\n\n" +
+      "로그인 후 [API 신청]에서 앱을 등록하면\nApp Key와 App Secret이 발급됩니다",
+  },
+  {
+    selector: "#broker-appkey",
+    demo: "broker",
+    title: "키 입력",
+    desc:
+      "발급받은 App Key와 App Secret을\n한 칸씩 붙여넣습니다\n\n" +
+      "입력값은 화면에 표시되지 않고\n이 컴퓨터의 보안 저장소에만 저장됩니다\n파일로는 어디에도 남지 않습니다",
+  },
+  {
+    selector: "#broker-connect-btn",
+    demo: "broker",
+    title: "연결 시험 후 저장",
+    desc:
+      "누르면 저장 전에 실제로 연결을 시험합니다\n\n" +
+      "인증이 성공했을 때만 저장되고\n실패하면 기존 연결이 그대로 유지됩니다",
+  },
+  {
+    selector: "#broker-mode-field",
+    demo: "broker",
+    title: "차트 데이터 사용 방식",
+    desc:
+      "차트 데이터를 어디서 가져올지 고릅니다\n자동을 권장합니다\n\n" +
+      "무언가 이상할 때는 [기본 데이터 유지]를 고르세요\n증권사 연결 전과 완전히 같게 동작합니다\n\n" +
+      "바꾼 뒤에는 아래 [적용]을 눌러야 저장됩니다",
+  },
+  {
+    selector: "#broker-disconnect-provider-btn",
+    demo: "broker",
+    title: "연결을 모두 해제",
+    desc:
+      "이 증권사의 모든 키와 분봉 캐시를 지웁니다\n\n" +
+      "프로그램, 라이선스, AI 앱 연결은 남아서\n언제든 다시 연결할 수 있습니다",
+  },
   // 상단바 버튼은 여기서부터 왼→오른쪽이 아니라 "자주 쓰는 순"으로 설명한다.
   // 예전엔 지원 문의·매니저 업데이트·가이드 셋만 있어서, 정작 제일 많이 누르는
   // 진단 재실행과 문제 해결의 핵심인 "다시 시작"이 설명 없이 놓여 있었다.
@@ -2628,14 +2780,22 @@ function closeTourDemoModals() {
   // 지금은 데모가 상세 모달 하나뿐이지만, 나중에 다른 데모가 늘어도 여기 한 곳만
   // 손보면 되게 일반화해 둔다.
   closeDetailModal();
+  closeBrokerModalDemo();
 }
 
 function applyStepDemo(step) {
+  if (step.demo === "broker" && brokerDemoMode) {
+    // 증권사 단계끼리 넘어갈 때는 모달을 닫았다 다시 열지 않는다 —
+    // 매 단계 깜빡이면 어디를 보고 있었는지 놓친다.
+    return;
+  }
   closeTourDemoModals();
   if (step.demo === "detail") {
     // 실제 첫 카드가 아니라 고정된 예시 데이터를 쓴다 — 마침 문제가 없는 상태에서
     // 가이드를 봐도 "문제 자세히" 창과 조치 클릭-복사 기능을 항상 보여주기 위해서다.
     openDetailModalExample();
+  } else if (step.demo === "broker") {
+    openBrokerModalExample();
   }
 }
 
@@ -2683,6 +2843,9 @@ function placeTooltip(rect, tw, th, pad) {
 
 function positionTour(i) {
   const step = tourSteps[i];
+  // 데모(예시 모달)를 먼저 열어야 모달 안 요소의 자리가 잡힌다 — 순서를
+  // 뒤집으면 첫 표시에서 스포트라이트가 0x0 자리를 가리킨다.
+  applyStepDemo(step);
   const rect = step.el.getBoundingClientRect();
   const pad = 6;
 
@@ -2697,8 +2860,6 @@ function positionTour(i) {
   document.getElementById("tour-desc").textContent = step.desc;
   document.getElementById("tour-prev").style.visibility = i === 0 ? "hidden" : "visible";
   document.getElementById("tour-next").textContent = i === tourSteps.length - 1 ? "완료" : "다음";
-
-  applyStepDemo(step);
 
   const tooltip = document.getElementById("tour-tooltip");
   const tw = tooltip.offsetWidth || 300;

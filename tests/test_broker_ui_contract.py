@@ -96,6 +96,12 @@ class TestHtmlContract:
         assert 'value="kis"' in HTML
         assert "한국투자증권" in HTML
 
+    def test_signup_help_and_url_button(self):
+        # DART API 키 모달처럼 발급 절차 안내 + 포털 열기 버튼을 함께 둔다.
+        assert 'id="broker-signup-btn"' in HTML
+        assert 'id="broker-signup-steps"' in HTML
+        assert "API 포털" in HTML
+
 
 class TestJsContract:
     def test_broker_button_only_for_stocklens(self):
@@ -139,6 +145,29 @@ class TestJsContract:
         # API 호출에 provider 가 인자로 흐른다 (다중 증권사 대비).
         assert re.search(r"broker_connect\([^)]*brokerProvider", JS) or \
             re.search(r"brokerProvider", JS)
+
+    def test_first_time_glow_until_opened(self):
+        # 새로 생긴 버튼은 처음 열 때까지 반짝인다. localStorage 로 1회 관리.
+        assert "BROKER_INTRO_KEY" in JS
+        assert "new-glow" in JS
+        css = (UI / "style.css").read_text(encoding="utf-8")
+        assert "new-glow" in css
+
+    def test_tour_includes_broker_guide(self):
+        # 상단 가이드에 증권사 연결 단계가 있고, 모달을 예시로 띄우는
+        # demo 훅으로 버튼·입력칸을 하나하나 가리킨다.
+        tour_start = JS.index("const TOUR_STEPS")
+        tour_block = JS[tour_start:tour_start + 30000]
+        assert "증권사 연결" in tour_block
+        assert '"broker"' in tour_block
+        for target in ("#broker-provider", "#broker-appkey",
+                       "#broker-connect-btn", "#broker-mode-field",
+                       "#broker-signup-btn", "#broker-manage-row",
+                       "#broker-disconnect-provider-btn"):
+            assert target in tour_block, f"가이드에 {target} 단계 누락"
+
+    def test_demo_mode_blocks_real_actions(self):
+        assert "brokerDemoMode" in JS
 
 
 class FakeDiag:
@@ -272,3 +301,16 @@ class TestApiContract:
         result = api.broker_status("stocklens", provider="mirae")
         assert not result["supported"]
         assert result["error_code"] == "provider_unsupported"
+
+    def test_open_broker_signup_opens_portal(self):
+        api = self._api()
+        with patch.object(api_module.webbrowser, "open") as mock_open:
+            api.open_broker_signup("kis")
+        opened = mock_open.call_args.args[0]
+        assert "apiportal.koreainvestment.com" in opened
+
+    def test_open_broker_signup_unknown_provider_noop(self):
+        api = self._api()
+        with patch.object(api_module.webbrowser, "open") as mock_open:
+            api.open_broker_signup("mirae")
+        mock_open.assert_not_called()

@@ -1955,6 +1955,17 @@ button:focus-visible, input:focus-visible {
   color: var(--text-dim);
 }
 
+/* 새로 생긴 버튼 첫 1회 강조 - 처음 열어보기 전까지만 은은하게 맥동.
+   깜빡임(opacity)은 산만해서 안 쓰고, 상태 표시등과 같은 틸 글로우를 숨 쉬듯 */
+@keyframes broker-new-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(95, 212, 192, 0); border-color: var(--hairline); }
+  50% { box-shadow: 0 0 10px 1px rgba(95, 212, 192, 0.55); border-color: var(--ok); }
+}
+
+.action-btn.new-glow {
+  animation: broker-new-glow 2.2s ease-in-out infinite;
+}
+
 /* 전체 해제 - 파괴적 동작은 버튼 줄이 아니라 하단에 작게, 경고색 링크로 */
 .broker-danger-link {
   align-self: flex-start;

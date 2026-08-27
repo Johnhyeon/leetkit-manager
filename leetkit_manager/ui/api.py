@@ -21,6 +21,10 @@ PATCH_NOTES_URL = "https://app.notion.com/p/LeetKit-3b48f7db5c9680639f35fd2655a4
 RELEASES_PAGE_URL = "https://github.com/Johnhyeon/leetkit-manager/releases/latest"
 TELEGRAM_API_SIGNUP_URL = "https://my.telegram.org"
 DART_API_SIGNUP_URL = "https://opendart.fss.or.kr"
+# 증권사별 Open API 발급 포털. 새 증권사가 추가되면 여기에도 한 줄.
+BROKER_SIGNUP_URLS = {
+    "kis": "https://apiportal.koreainvestment.com",
+}
 
 # MCP 등록 대상 앱이 아직 없는 사용자를 위한 받는 곳. Lens는 이 앱들 위에서만 동작하므로,
 # 없는 사람에게는 "등록"보다 "먼저 받기"를 안내해야 한다.
@@ -489,6 +493,13 @@ class Api:
             return out
         out["ok"] = True
         return out
+
+    def open_broker_signup(self, provider: str = "kis") -> None:
+        """증권사 Open API 발급 페이지를 연다. DART API 가입 버튼과 같은
+        패턴 - 텍스트로 주소를 알려주는 대신 실제로 열어준다."""
+        url = BROKER_SIGNUP_URLS.get(provider)
+        if url:
+            webbrowser.open(url)
 
     def open_dart_api_signup(self) -> None:
         """opendart.fss.or.kr — DartLens를 처음 쓰는 사람이 DART OpenAPI 키를 발급받는
