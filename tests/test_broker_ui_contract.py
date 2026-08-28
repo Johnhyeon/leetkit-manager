@@ -285,6 +285,17 @@ class TestSinglePrimaryUx:
         help_block = JS[help_start:help_start + 700]
         assert "brokerDescriptors" in help_block
 
+    def test_tab_switch_clears_previous_provider_view(self):
+        # 왕복 동안 이전 증권사 상태가 남아 "연결 안 됨"과 "다시 연결이
+        # 필요합니다"가 번갈아 보였다 (2026-08-28 검수).
+        assert "function showBrokerLoading" in JS
+        tab_start = JS.index('broker-provider").addEventListener')
+        tab_block = JS[tab_start:tab_start + 500]
+        assert "showBrokerLoading" in tab_block
+        open_start = JS.index("async function openBrokerModal")
+        open_block = JS[open_start:open_start + 900]
+        assert "showBrokerLoading" in open_block
+
     def test_toggled_panels_respect_the_hidden_attribute(self):
         # display 를 주는 규칙은 hidden 속성을 이긴다 - 2026-08-28 검수에서
         # 도움말 패널이 항상 펼쳐져 있고 물음표가 반응 없어 보였다.

@@ -1144,6 +1144,28 @@ function renderBrokerTabs(status) {
   });
 }
 
+// 탭을 바꾸면 새 상태가 도착하기 전까지 이전 증권사 화면이 그대로
+// 남아, "연결 안 됨"과 "다시 연결이 필요합니다"가 번갈아 보인다
+// (2026-08-28 검수). 왕복 동안에는 어느 증권사 것도 아닌 중립 화면만
+// 보여준다.
+function showBrokerLoading() {
+  const name = document.getElementById("broker-status-provider");
+  if (name) name.textContent = brokerProviderLabel();
+  document.getElementById("broker-cap-kr").textContent = "확인 전";
+  document.getElementById("broker-cap-us").textContent = "확인 전";
+  const notice = document.getElementById("broker-cap-notice");
+  if (notice) {
+    notice.hidden = true;
+    notice.textContent = "";
+  }
+  for (const id of ["broker-connect-form", "broker-mode-field",
+                    "broker-manage-row", "broker-connect-btn"]) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = true;
+  }
+  setBrokerState("verifying", "상태를 확인하는 중입니다");
+}
+
 function renderBrokerModal(st) {
   // 지금 어느 증권사를 보고 있는지 상태 상자에 이름으로 못박는다
   // (탭 선택 표시만으로는 "뭘 선택했는지"가 약하다 - 2026-08-28 검수).
@@ -1291,7 +1313,7 @@ async function openBrokerModal(lensName) {
   const backdrop = document.getElementById("broker-backdrop");
   backdrop.classList.remove("demo-position");
   backdrop.hidden = false;
-  setBrokerState("verifying", "상태를 확인하는 중입니다");
+  showBrokerLoading();
   try {
     // 공급자 descriptor 는 StockLens 가 단일 출처다. 구 버전이면
     // null -> 내장 KIS 로만 동작한다 (새 공급자 숨김).
@@ -1373,6 +1395,7 @@ document.getElementById("broker-provider").addEventListener("change", (e) => {
   brokerEditingKey = false;
   renderCredentialFields(brokerDescriptor());
   clearBrokerInputs();
+  showBrokerLoading();
   refreshBrokerModal().catch(() => {
     setBrokerState("error", "상태 확인에 실패했습니다");
   });
