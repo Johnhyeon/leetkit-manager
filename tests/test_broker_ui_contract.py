@@ -266,6 +266,27 @@ class TestSinglePrimaryUx:
         caps_block = JS[caps_start:caps_start + 1600]
         assert "release_verified" in caps_block
 
+    def test_hidden_providers_never_flash_before_the_list_arrives(self):
+        # 모달은 공급자 목록을 받기 전에 먼저 뜬다. 탭이 HTML 에 정적으로
+        # 보이는 상태면 그 사이 숨겨야 할 공급자가 노출된다 (2026-08-28
+        # rc1 검수에서 토스가 로딩 동안 보였다).
+        for provider in ("kiwoom", "toss"):
+            tab = re.search(
+                rf'<label class="broker-provider-tab" data-provider='
+                rf'"{provider}"[^>]*>', HTML)
+            assert tab, provider
+            assert " hidden" in tab.group(0), (
+                f"{provider} 탭이 기본 노출 상태다")
+        # KIS 는 내장 폴백이라 기본 노출이 맞다.
+        kis = re.search(
+            r'<label class="broker-provider-tab" data-provider="kis"[^>]*>',
+            HTML).group(0)
+        assert " hidden" not in kis
+        # 로딩 화면이 '지금 아는 공급자 집합'을 즉시 적용한다.
+        assert "function applyKnownProviderTabs" in JS
+        loading = JS[JS.index("function showBrokerLoading"):]
+        assert "applyKnownProviderTabs" in loading[:600]
+
     def test_help_button_and_provider_difference_panel(self):
         # 2026-08-28 검수: "증권사별로 뭐가 다른지"가 화면에 없다.
         # 우상단 물음표 -> 차이 안내 패널 (행 노출은 describe_providers

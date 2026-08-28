@@ -1117,6 +1117,15 @@ function renderBrokerCaps(status) {
 
 // 탭별 상태 배지. 주 사용 하나만 "사용 중"이고, 나머지 연결은 "연결됨",
 // 미연결은 "연결 안 됨, 선택 사항"이다 (여러 증권사 연결은 선택 사항).
+// 지금 알고 있는 공급자만 탭으로 노출한다. describe_providers 응답 전에는
+// 내장 KIS 집합이고, 응답 뒤에는 그 목록이다.
+function applyKnownProviderTabs() {
+  const known = new Set(brokerDescriptors.map((d) => d.provider_id));
+  document.querySelectorAll(".broker-provider-tab").forEach((tab) => {
+    tab.hidden = !known.has(tab.dataset.provider);
+  });
+}
+
 function renderBrokerTabs(status) {
   const known = new Set(brokerDescriptors.map((d) => d.provider_id));
   const providers = (status || {}).providers || {};
@@ -1149,6 +1158,10 @@ function renderBrokerTabs(status) {
 // (2026-08-28 검수). 왕복 동안에는 어느 증권사 것도 아닌 중립 화면만
 // 보여준다.
 function showBrokerLoading() {
+  // 공급자 목록을 받기 전에도 탭은 지금 아는 집합만 보여준다. 두 번째
+  // 이후 열 때는 이미 확인된 목록이 있어 깜빡임이 없고, 첫 열림에는
+  // 내장 KIS 만 보인다 (숨겨야 할 공급자가 새어 나오지 않는다).
+  applyKnownProviderTabs();
   const name = document.getElementById("broker-status-provider");
   if (name) name.textContent = brokerProviderLabel();
   document.getElementById("broker-cap-kr").textContent = "확인 전";

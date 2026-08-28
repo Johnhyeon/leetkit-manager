@@ -77,10 +77,14 @@
     <!-- 증권사 선택 - 네이티브 select 는 앱 톤과 겉돌아서 pill 탭으로 둔다.
          탭 노출 여부는 StockLens describe_providers 응답이 정한다
          (구 StockLens 연결 시 JS 가 kiwoom·toss 탭을 숨긴다) -->
+    <!-- KIS 외 탭은 기본 숨김이다. 모달은 공급자 목록을 받기 전에 먼저
+         떠서, 정적으로 적혀 있으면 로딩 동안 숨겨야 할 공급자가 노출된다
+         (2026-08-28 rc1 검수에서 토스가 잠깐 보였다). renderBrokerTabs 가
+         describe_providers 로 확인한 탭만 드러낸다. -->
     <div class="broker-provider-tabs" id="broker-provider">
       <label class="broker-provider-tab" data-provider="kis"><input type="radio" name="broker-provider" value="kis" checked><span>한국투자증권</span><span class="broker-tab-state" id="broker-tab-state-kis"></span></label>
-      <label class="broker-provider-tab" data-provider="kiwoom"><input type="radio" name="broker-provider" value="kiwoom"><span>키움증권</span><span class="broker-tab-state" id="broker-tab-state-kiwoom"></span></label>
-      <label class="broker-provider-tab" data-provider="toss"><input type="radio" name="broker-provider" value="toss"><span>토스증권</span><span class="broker-tab-state" id="broker-tab-state-toss"></span></label>
+      <label class="broker-provider-tab" data-provider="kiwoom" hidden><input type="radio" name="broker-provider" value="kiwoom"><span>키움증권</span><span class="broker-tab-state" id="broker-tab-state-kiwoom"></span></label>
+      <label class="broker-provider-tab" data-provider="toss" hidden><input type="radio" name="broker-provider" value="toss"><span>토스증권</span><span class="broker-tab-state" id="broker-tab-state-toss"></span></label>
     </div>
 
     <div class="broker-status-box">
