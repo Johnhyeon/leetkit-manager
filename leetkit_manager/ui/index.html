@@ -102,7 +102,10 @@
       </div>
     </div>
 
-    <div class="modal-field" id="broker-connect-form">
+    <!-- 기본은 숨김: 상태 조회(0.1~3초)가 끝나기 전에 키 입력 폼이
+         번쩍 보이면 이미 연결한 사용자가 "다시 입력하라는 건가" 하고
+         오해한다 (2026-08-28 검수). 표시는 renderBrokerModal 이 정한다 -->
+    <div class="modal-field" id="broker-connect-form" hidden>
       <div class="field-label">환경 선택</div>
       <div class="broker-radio-row">
         <label class="broker-radio"><input type="radio" name="broker-profile" value="real" checked> 실전 권장</label>
