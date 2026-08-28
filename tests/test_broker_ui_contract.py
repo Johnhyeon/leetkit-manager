@@ -64,9 +64,13 @@ class TestHtmlContract:
         for value in ("auto", "legacy"):
             assert f'value="{value}"' in HTML
         assert 'value="broker_first"' not in HTML
-        assert "일반 사용" in HTML
+        # 라벨은 "무엇이 어디서 오는지"를 말한다 ("일반/기본"은 뜻이
+        # 전달되지 않았다, 2026-08-28 검수).
+        assert "증권사 분봉 사용" in HTML
         assert "권장" in HTML
-        assert "기본 데이터만 사용" in HTML
+        assert "증권사 시세 사용 안 함" in HTML
+        # 일·주·월봉이 왜 증권사 데이터가 아닌지 화면에 사실로 적는다.
+        assert "일·주·월봉은 수정주가와 기업행위 검증" in HTML
         assert "broker_first" in JS  # 저장된 구 설정 호환
 
     def test_capability_rows_shown_separately(self):
@@ -81,7 +85,7 @@ class TestHtmlContract:
         assert 'id="broker-disconnect-profile-btn"' in HTML
         assert 'id="broker-disconnect-provider-btn"' in HTML
         assert "연결 시험" in HTML
-        assert "현재 환경 연결 해제" in HTML
+        assert "연결 해제" in HTML
         assert "모두 해제" in HTML
 
     def test_change_key_button_exists(self):
@@ -280,6 +284,24 @@ class TestSinglePrimaryUx:
         help_start = JS.index('broker-help-btn").addEventListener')
         help_block = JS[help_start:help_start + 700]
         assert "brokerDescriptors" in help_block
+
+    def test_toggled_panels_respect_the_hidden_attribute(self):
+        # display 를 주는 규칙은 hidden 속성을 이긴다 - 2026-08-28 검수에서
+        # 도움말 패널이 항상 펼쳐져 있고 물음표가 반응 없어 보였다.
+        css = (UI / "style.css").read_text(encoding="utf-8")
+        assert ".broker-help-panel[hidden]" in css
+        assert re.search(
+            r"\.broker-help-panel\[hidden\]\s*\{[^}]*display:\s*none", css)
+
+    def test_manage_buttons_stay_visible_and_single_line(self):
+        # 상태 상자와 배경이 같아 버튼 경계가 사라지던 문제 + 긴 라벨이
+        # 두 줄로 접혀 높이가 널뛰던 문제 (2026-08-28 검수).
+        css = (UI / "style.css").read_text(encoding="utf-8")
+        m = re.search(
+            r"\.broker-manage-row \.action-btn \{[^}]*\}", css)
+        assert m, "관리 버튼 전용 규칙이 있어야 합니다"
+        assert "background: var(--panel)" in m.group(0)
+        assert "white-space: nowrap" in m.group(0)
 
     def test_status_box_names_selected_provider(self):
         # "뭘 선택했다는 건지"가 탭 표시만으로 약하다 - 상태 상자에

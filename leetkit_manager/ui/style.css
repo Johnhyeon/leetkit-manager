@@ -1859,6 +1859,11 @@ button:focus-visible, input:focus-visible {
   line-height: 1.55;
 }
 
+/* display 를 주는 규칙은 hidden 속성(UA 의 display:none)을 이긴다 -
+   이게 없으면 패널이 접히지 않아 물음표를 눌러도 반응이 없어 보인다
+   (2026-08-28 검수에서 실제로 그렇게 보였다). */
+.broker-help-panel[hidden] { display: none; }
+
 .broker-help-row {
   display: flex;
   flex-direction: column;
@@ -1991,6 +1996,14 @@ button:focus-visible, input:focus-visible {
 .broker-cap-name { color: var(--text-dim); }
 .broker-cap-value { color: var(--text); }
 
+/* 사용 방식 아래 사실 한 줄 - 왜 일봉이 증권사 데이터가 아닌지 */
+.broker-mode-note {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .broker-cap-notice {
   margin-top: 6px;
   font-size: 14px;
@@ -2004,6 +2017,18 @@ button:focus-visible, input:focus-visible {
   flex-wrap: wrap;
   padding-top: 4px;
   border-top: 1px solid var(--hairline);
+}
+
+/* 상태 상자(panel-raised) 안의 버튼은 배경이 같아 경계가 사라진다 -
+   한 단계 어두운 바탕으로 깔아 버튼임을 드러낸다. 글자는 줄바꿈하지
+   않는다 (한 버튼이 두 줄로 접히면 줄 높이가 널뛴다, 2026-08-28 검수) */
+.broker-manage-row .action-btn {
+  background: var(--panel);
+  white-space: nowrap;
+}
+
+.broker-manage-row .action-btn:hover {
+  background: var(--panel-raised);
 }
 
 .broker-manage-row[hidden] { display: none; }

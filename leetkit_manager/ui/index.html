@@ -98,7 +98,7 @@
         <button class="action-btn" id="broker-change-key-btn" hidden>키 변경</button>
         <button class="action-btn" id="broker-switch-btn" hidden>환경 변경</button>
         <button class="action-btn" id="broker-set-primary-btn" hidden>주 사용으로 변경</button>
-        <button class="action-btn warn" id="broker-disconnect-profile-btn" hidden>현재 환경 연결 해제</button>
+        <button class="action-btn warn" id="broker-disconnect-profile-btn" hidden>연결 해제</button>
       </div>
     </div>
 
@@ -129,15 +129,16 @@
       <div class="broker-mode-choices">
         <label class="broker-mode-option">
           <input type="radio" name="broker-mode" value="auto" checked>
-          <span class="broker-mode-text">일반 사용, 권장
-            <span class="broker-mode-hint">분봉은 주 사용 증권사, 일봉과 현재가는 기존 데이터</span></span>
+          <span class="broker-mode-text">증권사 분봉 사용, 권장
+            <span class="broker-mode-hint">분봉은 주 사용 증권사에서 받고 일봉과 현재가는 기존 데이터를 씁니다</span></span>
         </label>
         <label class="broker-mode-option">
           <input type="radio" name="broker-mode" value="legacy">
-          <span class="broker-mode-text">기본 데이터만 사용
-            <span class="broker-mode-hint">증권사 호출 없이 연결 전과 동일하게 동작</span></span>
+          <span class="broker-mode-text">증권사 시세 사용 안 함
+            <span class="broker-mode-hint">증권사를 호출하지 않고 연결 전과 동일하게 동작합니다</span></span>
         </label>
       </div>
+      <div class="broker-mode-note">일·주·월봉은 수정주가와 기업행위 검증을 마친 뒤 지원할 예정이라 이번 버전에서는 기존 데이터를 씁니다</div>
     </div>
 
     <div class="modal-msg" id="broker-msg"></div>
