@@ -262,6 +262,17 @@ class TestSinglePrimaryUx:
         caps_block = JS[caps_start:caps_start + 1600]
         assert "release_verified" in caps_block
 
+    def test_card_grid_cannot_exceed_window_width(self):
+        # 2026-08-28 검수 실측: repeat(2, 1fr)만 쓰면 카드 내용의
+        # min-content 가 두 단을 함께 부풀려 창 밖으로 밀어낸다
+        # (DartLens 카드 오른쪽 잘림). minmax(0, ...)와 카드 min-width:0
+        # 둘 다 있어야 한다.
+        css = (UI / "style.css").read_text(encoding="utf-8")
+        assert "repeat(2, minmax(0, 1fr))" in css
+        card_start = css.index(".card {")
+        card_block = css[card_start:card_start + 400]
+        assert "min-width: 0" in card_block
+
     def test_toss_shown_as_1_0_unsupported_with_notice(self):
         # 대표 결정(2026-08-28): 토스 시세는 1.0 미지원. "사용 불가"나
         # "검증 중"이 아니라 "1.0 미지원"으로, 키 문제로 오해하지 않게
@@ -303,6 +314,58 @@ class FakeDiag:
 class TestApiContract:
     def _api(self):
         return api_module.Api()
+
+    def test_customer_mode_hides_toss_descriptor(self):
+        providers = [
+            {"provider_id": "kis"},
+            {"provider_id": "kiwoom"},
+            {"provider_id": "toss"},
+        ]
+        with patch.dict("os.environ", {}, clear=False), patch.object(
+            api_module.orchestrator, "broker_describe_providers",
+            return_value=providers,
+        ):
+            import os
+            os.environ.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+            result = self._api().broker_describe_providers("stocklens")
+        assert [x["provider_id"] for x in result["providers"]] == [
+            "kis", "kiwoom"
+        ]
+
+    def test_customer_mode_rejects_hidden_toss_action(self):
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+            result = self._api().broker_status("stocklens", provider="toss")
+        assert result["supported"] is False
+        assert result["error_code"] == "provider_not_public"
+
+    def test_developer_mode_keeps_toss_available(self):
+        providers = [
+            {"provider_id": "kis"},
+            {"provider_id": "kiwoom"},
+            {"provider_id": "toss"},
+        ]
+        with patch.dict(
+            "os.environ",
+            {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"},
+        ), patch.object(
+            api_module.orchestrator, "broker_describe_providers",
+            return_value=providers,
+        ):
+            result = self._api().broker_describe_providers("stocklens")
+        assert [x["provider_id"] for x in result["providers"]] == [
+            "kis", "kiwoom", "toss"
+        ]
+
+    def test_customer_mode_does_not_open_hidden_signup_page(self):
+        with patch.dict("os.environ", {}, clear=False), patch.object(
+            api_module.webbrowser, "open"
+        ) as opened:
+            import os
+            os.environ.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+            self._api().open_broker_signup("toss")
+        opened.assert_not_called()
 
     def _ok_result(self, action, **extra):
         payload = {
