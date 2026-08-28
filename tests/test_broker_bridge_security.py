@@ -62,7 +62,9 @@ class TestGenericConnect:
             kwargs["side_effect"] = side_effect
         else:
             kwargs["return_value"] = result or _ok_result()
-        with patch.object(api_module.orchestrator, "broker_action",
+        with patch.dict(
+                "os.environ", {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"}), \
+             patch.object(api_module.orchestrator, "broker_action",
                           **kwargs) as mock_action, \
              patch.object(api, "diagnose_one", return_value={}):
             out = api.broker_connect(
@@ -88,7 +90,9 @@ class TestGenericConnect:
         # 예외 경로 확인: 별도 호출로 재현
         api = api_module.Api()
         creds = {"client_id": "cid", "client_secret": SENTINEL_SECRET}
-        with patch.object(api_module.orchestrator, "broker_action",
+        with patch.dict(
+                "os.environ", {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"}), \
+             patch.object(api_module.orchestrator, "broker_action",
                           side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError):
                 api.broker_connect("stocklens", "real", creds,
@@ -126,6 +130,51 @@ class TestNewRelays:
                           return_value=None):
             out = api.broker_describe_providers("stocklens")
         assert out["providers"] is None  # 구 StockLens: KIS 전용 동작
+
+
+class TestExperimentalBrokerGate:
+    """고객 모드(플래그 없음)의 실험 공급자 경계 (2026-08-28 리뷰 반영).
+
+    신규 노출 경로(상태·연결·주 사용·발급 URL)는 막고, 기존 자격 증명
+    정리(해제·복구)는 StockLens CLI 계약과 동일하게 통과시킨다.
+    """
+
+    def _no_flag(self):
+        import os
+
+        env = dict(os.environ)
+        env.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+        return patch.dict("os.environ", env, clear=True)
+
+    def test_customer_mode_blocks_new_toss_actions(self):
+        api = api_module.Api()
+        with self._no_flag(), \
+             patch.object(api_module.orchestrator,
+                          "broker_action") as mock_action:
+            st = api.broker_status("stocklens", "toss")
+            conn = api.broker_connect(
+                "stocklens", "real",
+                {"client_id": "cid", "client_secret": SENTINEL_SECRET},
+                "toss")
+            prim = api.broker_set_primary("stocklens", "toss")
+        assert st["error_code"] == "provider_not_public"
+        assert conn["error_code"] == "provider_not_public"
+        assert prim["error_code"] == "provider_not_public"
+        mock_action.assert_not_called()
+
+    def test_customer_mode_allows_hidden_cleanup(self):
+        # 숨김이 정리까지 막으면 "MCP 삭제 없이 증권사별 연결·캐시 정리"
+        # 요구와 충돌한다. 해제·복구는 CLI 로 그대로 통과해야 한다.
+        api = api_module.Api()
+        with self._no_flag(), \
+             patch.object(api_module.orchestrator, "broker_action",
+                          return_value=_ok_result()) as mock_action, \
+             patch.object(api, "diagnose_one", return_value={}):
+            a = api.broker_disconnect_profile("stocklens", "real", "toss")
+            b = api.broker_disconnect_provider("stocklens", "toss")
+            c = api.broker_recover("stocklens", "toss")
+        assert a["ok"] and b["ok"] and c["ok"]
+        assert mock_action.call_count == 3
 
 
 if __name__ == "__main__":

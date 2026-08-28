@@ -119,9 +119,11 @@ class TestNoImplicitPrimaryChange:
         assert "set_primary_provider" not in calls
 
     def test_dedicated_button_is_the_only_primary_path(self):
-        calls = self._record_calls(
-            lambda api: api.broker_set_primary("stocklens",
-                                               provider="toss"))
+        with patch.dict(
+                "os.environ", {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"}):
+            calls = self._record_calls(
+                lambda api: api.broker_set_primary("stocklens",
+                                                   provider="toss"))
         assert calls == ["set_primary_provider"]
 
 

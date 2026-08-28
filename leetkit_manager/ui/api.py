@@ -8,6 +8,7 @@ Python 인메모리 호출로만 전달되고(subprocess 인자·로그를 거�
 
 from __future__ import annotations
 
+import os
 import sys
 import webbrowser
 from pathlib import Path
@@ -29,6 +30,19 @@ BROKER_SIGNUP_URLS = {
     "kiwoom": "https://openapi.kiwoom.com",
     "toss": "https://corp.tossinvest.com/ko/open-api",
 }
+
+# 고객 빌드는 검증이 끝난 연결만 노출한다. 실험 공급자 코드는 삭제하지
+# 않고 개발자 환경에서만 켠다. 값은 명시적인 1만 허용해 오타나 상속된
+# 임의 문자열로 고객 화면이 바뀌지 않게 한다.
+EXPERIMENTAL_BROKER_ENV = "LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"
+EXPERIMENTAL_BROKERS = frozenset({"toss"})
+
+
+def _broker_is_public(provider: str) -> bool:
+    return (
+        provider not in EXPERIMENTAL_BROKERS
+        or os.environ.get(EXPERIMENTAL_BROKER_ENV) == "1"
+    )
 
 # MCP 등록 대상 앱이 아직 없는 사용자를 위한 받는 곳. Lens는 이 앱들 위에서만 동작하므로,
 # 없는 사람에게는 "등록"보다 "먼저 받기"를 안내해야 한다.
@@ -355,17 +369,29 @@ class Api:
                 out["lens"] = None  # 재진단 실패가 연결 결과를 뒤집지 않는다
         return out
 
-    def _broker_provider_check(self, lens_name: str,
-                               provider: str) -> dict | None:
+    def _broker_provider_check(self, lens_name: str, provider: str,
+                               allow_hidden: bool = False) -> dict | None:
         """지원하지 않는 조합이면 오류 dict, 지원하면 None.
 
         다른 증권사가 추가되면 lens_contract 의 providers 튜플만 늘리면
         된다. UI 는 여기서 걸러진 provider 를 절대 CLI 로 보내지 않는다.
+
+        allow_hidden: 정리 계열(해제·복구)만 True. 실험 공급자를 고객
+        모드에서 숨기더라도 기존 자격 증명·캐시 정리는 막지 않는다
+        (StockLens CLI 의 HIDDEN_PROVIDER_CLEANUP_ACTIONS 와 같은 계약,
+        2026-08-28 리뷰).
         """
         lens = get_lens(lens_name)
         if lens.broker is None:
             return {"supported": False, "error_code": "broker_unsupported",
                     "status": {}, "error": None}
+        if not allow_hidden and not _broker_is_public(provider):
+            return {
+                "supported": False,
+                "error_code": "provider_not_public",
+                "status": {},
+                "error": "고객용 버전에서 제공하지 않는 연결입니다",
+            }
         if provider not in lens.broker.providers:
             return {"supported": False,
                     "error_code": "provider_unsupported",
@@ -426,6 +452,9 @@ class Api:
 
     def broker_switch_profile(self, lens_name: str, profile: str,
                               provider: str = "kis") -> dict:
+        blocked = self._broker_provider_check(lens_name, provider)
+        if blocked is not None:
+            return {"ok": False, **blocked}
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
             lens, "switch_profile", provider=provider, profile=profile)
@@ -434,6 +463,10 @@ class Api:
     def broker_disconnect_profile(self, lens_name: str, profile: str,
                                   provider: str = "kis") -> dict:
         """현재 환경만 해제. 패키지·라이선스·MCP 등록·과거 캐시는 그대로다."""
+        blocked = self._broker_provider_check(lens_name, provider,
+                                              allow_hidden=True)
+        if blocked is not None:
+            return {"ok": False, **blocked}
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
             lens, "disconnect_profile", provider=provider, profile=profile)
@@ -443,6 +476,10 @@ class Api:
                                    provider: str = "kis") -> dict:
         """해당 증권사 전체 해제. 자격 증명·토큰·그 증권사 분봉 캐시가
         삭제되고 패키지·라이선스·MCP 등록·네이버·Yahoo 기능은 유지된다."""
+        blocked = self._broker_provider_check(lens_name, provider,
+                                              allow_hidden=True)
+        if blocked is not None:
+            return {"ok": False, **blocked}
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
             lens, "disconnect_provider", provider=provider)
@@ -450,6 +487,9 @@ class Api:
 
     def broker_set_mode(self, lens_name: str, mode: str,
                         provider: str = "kis") -> dict:
+        blocked = self._broker_provider_check(lens_name, provider)
+        if blocked is not None:
+            return {"ok": False, **blocked}
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
             lens, "set_data_source_mode", provider=provider, mode=mode)
@@ -469,6 +509,10 @@ class Api:
     def broker_recover(self, lens_name: str,
                        provider: str = "kis") -> dict:
         """중단된 자격 증명 정리를 재개한다 (orphan 슬롯·미완 삭제)."""
+        blocked = self._broker_provider_check(lens_name, provider,
+                                              allow_hidden=True)
+        if blocked is not None:
+            return {"ok": False, **blocked}
         lens = get_lens(lens_name)
         result = orchestrator.broker_action(
             lens, "recover_cleanup", provider=provider)
@@ -479,6 +523,11 @@ class Api:
         UI 는 KIS 전용으로 동작한다 (새 공급자 숨김)."""
         lens = get_lens(lens_name)
         providers = orchestrator.broker_describe_providers(lens)
+        if providers is not None:
+            providers = [
+                item for item in providers
+                if _broker_is_public(str(item.get("provider_id", "")))
+            ]
         return {"providers": providers}
 
     def full_cleanup(self, lens_name: str, force: bool = False) -> dict:
@@ -560,6 +609,8 @@ class Api:
     def open_broker_signup(self, provider: str = "kis") -> None:
         """증권사 Open API 발급 페이지를 연다. DART API 가입 버튼과 같은
         패턴 - 텍스트로 주소를 알려주는 대신 실제로 열어준다."""
+        if not _broker_is_public(provider):
+            return
         url = BROKER_SIGNUP_URLS.get(provider)
         if url:
             webbrowser.open(url)
