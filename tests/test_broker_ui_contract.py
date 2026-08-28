@@ -262,6 +262,41 @@ class TestSinglePrimaryUx:
         caps_block = JS[caps_start:caps_start + 1600]
         assert "release_verified" in caps_block
 
+    def test_help_button_and_provider_difference_panel(self):
+        # 2026-08-28 검수: "증권사별로 뭐가 다른지"가 화면에 없다.
+        # 우상단 물음표 -> 차이 안내 패널 (행 노출은 describe_providers
+        # 기준 = 고객판에서 토스 행 숨김).
+        assert 'id="broker-help-btn"' in HTML
+        assert 'id="broker-help-panel"' in HTML
+        for provider in ("kis", "kiwoom", "toss"):
+            assert f'class="broker-help-row" data-provider="{provider}"' \
+                in HTML, provider
+        assert "IP 제한이 없어 어디서나 사용" in HTML
+        assert "등록한 IP(장소)에서만 동작" in HTML
+        assert "계정 연결만 지원" in HTML
+        assert "하나만 연결하면 충분합니다" in HTML
+        assert 'broker-help-btn").addEventListener' in JS
+        # 행 필터가 탭과 같은 기준(brokerDescriptors)을 쓴다.
+        help_start = JS.index('broker-help-btn").addEventListener')
+        help_block = JS[help_start:help_start + 700]
+        assert "brokerDescriptors" in help_block
+
+    def test_status_box_names_selected_provider(self):
+        # "뭘 선택했다는 건지"가 탭 표시만으로 약하다 - 상태 상자에
+        # 선택한 증권사 이름을 명시한다.
+        assert 'id="broker-status-provider"' in HTML
+        assert "broker-status-provider" in JS
+        render_start = JS.index("function renderBrokerModal")
+        render_block = JS[render_start:render_start + 800]
+        assert "brokerProviderLabel" in render_block
+
+    def test_modal_height_is_stable_across_tabs(self):
+        # 탭마다 내용 길이가 달라 모달 크기가 널뛰지 않게 고정 바닥.
+        css = (UI / "style.css").read_text(encoding="utf-8")
+        modal_start = css.index(".broker-modal {")
+        modal_block = css[modal_start:modal_start + 400]
+        assert "min-height" in modal_block
+
     def test_card_grid_cannot_exceed_window_width(self):
         # 2026-08-28 검수 실측: repeat(2, 1fr)만 쓰면 카드 내용의
         # min-content 가 두 단을 함께 부풀려 창 밖으로 밀어낸다

@@ -59,9 +59,20 @@
 
 <div class="modal-backdrop" id="broker-backdrop" hidden>
   <div class="modal broker-modal">
-    <div class="modal-title" id="broker-title">증권사 연결</div>
+    <div class="modal-title broker-title-row" id="broker-title">증권사 연결
+      <button type="button" class="broker-help-btn" id="broker-help-btn" aria-label="증권사별 차이 안내" title="증권사별 차이 안내">?</button>
+    </div>
 
     <div class="broker-intro-hint">증권사 하나만 연결하면 됩니다<br>여러 증권사 연결은 선택 사항입니다</div>
+
+    <!-- 물음표 버튼으로 여는 증권사별 차이 안내. 행 노출 여부는 탭과
+         동일하게 describe_providers 가 정한다 (고객판에서 토스 숨김) -->
+    <div class="broker-help-panel" id="broker-help-panel" hidden>
+      <div class="broker-help-row" data-provider="kis"><b>한국투자증권</b><span>국내·미국 분봉 지원 · IP 제한이 없어 어디서나 사용 · 노트북처럼 장소가 바뀌면 이곳을 권장</span></div>
+      <div class="broker-help-row" data-provider="kiwoom"><b>키움증권</b><span>국내·미국 분봉 지원 · 키 발급 시 등록한 IP(장소)에서만 동작</span></div>
+      <div class="broker-help-row" data-provider="toss"><b>토스증권</b><span>계정 연결만 지원 · 시세 데이터는 후속 버전에서 지원 예정</span></div>
+      <div class="broker-help-note">하나만 연결하면 충분합니다<br>여러 곳을 연결해도 분석 데이터는 주 사용 증권사에서만 가져옵니다</div>
+    </div>
 
     <!-- 증권사 선택 - 네이티브 select 는 앱 톤과 겉돌아서 pill 탭으로 둔다.
          탭 노출 여부는 StockLens describe_providers 응답이 정한다
@@ -74,6 +85,7 @@
 
     <div class="broker-status-box">
       <div class="broker-status-head">
+        <span class="broker-status-provider" id="broker-status-provider"></span>
         <span class="broker-status-dot neutral" id="broker-state-dot"></span>
         <span class="broker-status-label" id="broker-state-label">확인 중</span>
       </div>

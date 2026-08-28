@@ -1145,6 +1145,10 @@ function renderBrokerTabs(status) {
 }
 
 function renderBrokerModal(st) {
+  // 지금 어느 증권사를 보고 있는지 상태 상자에 이름으로 못박는다
+  // (탭 선택 표시만으로는 "뭘 선택했는지"가 약하다 - 2026-08-28 검수).
+  const providerName = document.getElementById("broker-status-provider");
+  if (providerName) providerName.textContent = brokerProviderLabel();
   const form = document.getElementById("broker-connect-form");
   const modeField = document.getElementById("broker-mode-field");
   const modeSaveBtn = document.getElementById("broker-mode-save-btn");
@@ -1282,6 +1286,7 @@ async function openBrokerModal(lensName) {
   brokerLensName = lensName;
   brokerDemoMode = false;
   brokerEditingKey = false;
+  document.getElementById("broker-help-panel").hidden = true;
   markBrokerIntroSeen();
   const backdrop = document.getElementById("broker-backdrop");
   backdrop.classList.remove("demo-position");
@@ -1351,6 +1356,17 @@ function closeBrokerModalDemo() {
   backdrop.classList.remove("demo-position");
   backdrop.hidden = true;
 }
+
+// 물음표 도움말: 증권사별 차이(지원 범위·IP 제한·권장)를 한 패널로.
+// 행 노출은 탭과 동일하게 describe_providers 기준이다.
+document.getElementById("broker-help-btn").addEventListener("click", () => {
+  const panel = document.getElementById("broker-help-panel");
+  const known = new Set(brokerDescriptors.map((d) => d.provider_id));
+  panel.querySelectorAll(".broker-help-row").forEach((row) => {
+    row.hidden = !known.has(row.dataset.provider);
+  });
+  panel.hidden = !panel.hidden;
+});
 
 document.getElementById("broker-provider").addEventListener("change", (e) => {
   brokerProvider = e.target.value;
