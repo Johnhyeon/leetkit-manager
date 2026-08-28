@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 from unittest.mock import patch
@@ -26,8 +27,18 @@ class TestVersionSingleSource:
         assert config["path"] == "leetkit_manager/__init__.py"
 
     def test_package_version_looks_like_a_release(self):
-        parts = __version__.split(".")
-        assert len(parts) == 3 and all(p.isdigit() for p in parts), __version__
+        # X.Y.Z 또는 내부 배포용 X.Y.ZrcN (1.0.0rc1 부터 허용).
+        # rc 는 고객에게 공개하지 않는 릴리스 후보 전용이다.
+        assert re.fullmatch(r"\d+\.\d+\.\d+(rc\d+)?", __version__), __version__
+
+    def test_prerelease_never_reads_as_newer_than_the_release(self):
+        # rc 를 허용하는 순간 업데이트 비교가 rc 를 최신으로 뽑으면
+        # 고객이 릴리스 후보로 끌려간다. 그 반대도 안 된다.
+        from leetkit_manager.package_service import version_gt
+
+        assert version_gt("1.0.0", "1.0.0rc1") is True
+        assert version_gt("1.0.0rc1", "1.0.0") is False
+        assert version_gt("1.0.0rc1", "1.0.0rc1") is False
 
 
 class TestWaitForExit:
