@@ -266,6 +266,23 @@ class TestSinglePrimaryUx:
         caps_block = JS[caps_start:caps_start + 1600]
         assert "release_verified" in caps_block
 
+    def test_tour_matches_the_shipped_broker_ui(self):
+        # 가이드가 옛 화면을 설명하면 사용자가 없는 버튼을 찾는다.
+        tour_start = JS.index("const TOUR_STEPS")
+        tour = JS[tour_start:tour_start + 30000]
+        # 물음표 단계가 있고 실제 버튼을 가리킨다.
+        assert '"#broker-help-btn"' in tour
+        assert "증권사별 차이 보기" in tour
+        # 2사 지원과 "하나면 충분"이 안내에 있다.
+        assert "한국투자증권과 키움증권을 지원합니다" in tour
+        assert "하나만 연결하면 충분합니다" in tour
+        # 사용 방식 안내가 현재 라벨과 같은 말을 쓴다.
+        assert "[증권사 분봉 사용]" in tour
+        assert "[증권사 시세 사용 안 함]" in tour
+        # 옛 문구가 남아 있으면 안 된다.
+        assert "지금은 한국투자증권을 지원하고" not in tour
+        assert "[기본 데이터 유지]" not in tour
+
     def test_hidden_providers_never_flash_before_the_list_arrives(self):
         # 모달은 공급자 목록을 받기 전에 먼저 뜬다. 탭이 HTML 에 정적으로
         # 보이는 상태면 그 사이 숨겨야 할 공급자가 노출된다 (2026-08-28
