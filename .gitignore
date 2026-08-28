@@ -11,6 +11,7 @@ venv/
 dist/
 build/
 dist_exe/
+dist_exe_new/
 build_exe/
 *.spec
 .env

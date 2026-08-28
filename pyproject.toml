@@ -55,6 +55,25 @@ path = "leetkit_manager/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["leetkit_manager"]
 
+[tool.hatch.build.targets.sdist]
+# sdist 제외 설정이 아예 없어서 과거 빌드 산출물(dist_exe_new/
+# LeetKitManager.exe 19MB)과 테스트·내부 문서가 통째로 들어갔다
+# (2026-08-28 rc1 검수). 패키지를 다시 빌드하는 데 필요한 것만 남긴다.
+packages = ["leetkit_manager"]
+exclude = [
+    "dist_exe_new/",
+    "dist_exe/",
+    "dist/",
+    "build/",
+    "tests/",
+    "dev/",
+    "packaging/",
+    ".github/",
+    "docs/",
+    "CLAUDE.md",
+    "*.spec",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
