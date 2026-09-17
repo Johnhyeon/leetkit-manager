@@ -769,6 +769,10 @@ class Api:
                 lines.append(f"- [{c.id}] {c.summary}")
                 if c.action:
                     lines.append(f"  조치: {c.action}")
+                # 화면은 명령어·예외 원문이 담긴 줄을 빼고 보여준다(app.js looksLikeCommand,
+                # SUPPORT_ONLY_DETAIL_CHECKS). 그 원문이 지원에 닿는 길은 이 텍스트다.
+                for line in c.detail_lines():
+                    lines.append(f"    {line}")
             for c in in_progress:
                 lines.append(f"- [진행중][{c.id}] {c.summary}")
         return redaction.redact("\n".join(lines))

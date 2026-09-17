@@ -354,6 +354,10 @@ def _summary_text(
                 lines.append("  문제 없음")
             for c in problems:
                 lines.append(f"  - [{c.id}] {c.summary}")
+                # 화면에서 뺀 명령어 모양의 조치·예외 원문이 지원에 닿는 곳이 여기다.
+                if c.action:
+                    lines.append(f"    조치: {c.action}")
+                lines.extend(f"      {line}" for line in c.detail_lines())
             for c in in_progress:
                 lines.append(f"  - [진행중][{c.id}] {c.summary}")
         lines.append("")

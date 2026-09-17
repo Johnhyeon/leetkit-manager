@@ -46,6 +46,16 @@ class CheckResult:
             critical=bool(payload.get("critical", True)),
         )
 
+    def detail_lines(self, limit: int = 8) -> list[str]:
+        """details.lines 중 글자로 된 줄만, 최대 limit줄.
+
+        Lens는 명령어·경로·예외 원문을 이 줄에만 담는다(지원용). Manager 화면은 그런 줄을
+        빼고 보여주므로, [결과 복사]·지원 번들 요약이 이 줄을 실어 날라야 지원에 닿는다."""
+        lines = self.details.get("lines") if isinstance(self.details, dict) else None
+        if not isinstance(lines, list):
+            return []
+        return [str(line) for line in lines if isinstance(line, (str, int, float))][:limit]
+
 
 @dataclass
 class LicenseInfo:

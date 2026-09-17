@@ -570,32 +570,23 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* 조치 명령 — 이 명령어 텍스트만 굵게+1pt 키워서 강조한다(라벨·주변 글자는 그대로). */
+/* 쓸 수는 있지만 일부가 안 되는 항목(warn)은 빨강이 아니라 주의색 — 카드 준비 상태
+   "주의"와 같은 색으로 맞춘다. */
+.check-item.warn .check-id {
+  color: var(--warn);
+}
+
 .check-action {
   margin-top: 6px;
-  font-size: 13px; /* check-detail-lines와 동일 — 여긴 키우지 않음 */
+  font-size: 13px;
   overflow-wrap: anywhere;
 }
 
-.check-action-label {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-  margin-right: 5px;
-}
-
-.check-action-cmd {
-  font-family: var(--font-mono);
-  font-size: 14px; /* 명령어만 1pt 키움 */
-  font-weight: 700;
-  color: var(--ok);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-
-.check-action-cmd:hover {
+/* 해결 버튼이 없는 항목의 할 일 안내. 읽고 따라 하는 글이라 위 요약(14.5px, muted)보다
+   작거나 흐리면 안 된다 — 복사용 명령어 모양(고정폭·점선 밑줄)도 쓰지 않는다. */
+.check-action.check-action-guide {
+  font-size: 15px;
+  line-height: 1.45;
   color: var(--text);
 }
 

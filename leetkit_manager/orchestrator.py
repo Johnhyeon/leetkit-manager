@@ -527,11 +527,14 @@ def broker_action(
         input_text=_json.dumps(request, ensure_ascii=False))
 
     if process.error == "not_found":
+        # 버튼 이름은 이 문구가 뜨는 자리(증권사 연결 창)에서 실제로 누를 수 있는 것으로
+        # 부른다. [지금 업데이트]는 켤 때 한 번 뜨는 업데이트 안내 창에만 있다.
         return BrokerActionResult(
             ok=False, error_code="update_required",
-            message=(f"{lens.display_name} 업데이트가 필요합니다. "
-                     "증권사 연결은 새 버전에서 지원됩니다. "
-                     "[지금 업데이트]를 눌러주세요."))
+            message=(f"{lens.display_name} 업데이트가 필요해요. "
+                     "증권사 연결은 새 버전에서 쓸 수 있어요. "
+                     f"{lens.display_name} 카드의 [업데이트]를 눌러주세요. "
+                     "업데이트 후에도 같으면 상단 [지원 문의]를 눌러주세요."))
     if process.error == "blocked":
         return BrokerActionResult(
             ok=False, error_code="blocked",

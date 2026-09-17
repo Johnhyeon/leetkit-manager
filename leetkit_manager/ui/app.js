@@ -302,8 +302,10 @@ function render(data) {
 
 let detailModalLens = null;
 
-// 가이드 데모용 예시 데이터 — 실제 시스템 상태와 무관하게 항상 "문제 1건 + 조치 명령"을
-// 보여줘서, 지금 마침 문제가 없는 Lens라도 조치 클릭-복사 기능을 확실히 가르쳐준다.
+// 가이드 데모용 예시 데이터 — 실제 시스템 상태와 무관하게 항상 "문제 1건 + 해결 버튼"을
+// 보여줘서, 지금 마침 문제가 없는 Lens라도 [지금 해결하기]가 어디 있는지 가르쳐준다.
+// action은 새 Lens가 주는 모양(카드 버튼 안내)으로 둔다 — 예시가 옛 명령어 모양이면
+// 가이드가 고객에게 터미널 명령을 보여주는 셈이 된다.
 const EXAMPLE_LENS_DATA = {
   name: "__example__",
   display_name: "StockLens (예시)",
@@ -317,9 +319,9 @@ const EXAMPLE_LENS_DATA = {
     {
       id: "MCP_CONFIG_VALID",
       status: "fail",
-      summary: "Claude Code에 아직 등록돼 있지 않습니다",
+      summary: "Claude Code에 아직 등록돼 있지 않아요",
       details: { lines: ["Claude Desktop: 등록됨", "Claude Code: 미등록"] },
-      action: "stocklens-setup --target claude-code",
+      action: "StockLens 카드의 [MCP 등록]을 눌러주세요",
     },
   ],
 };
@@ -348,7 +350,13 @@ const CHECK_ID_LABEL = {
   KR_DATA_REACHABLE: "한국 시세 연결",
   US_DATA_REACHABLE: "미국 시세 연결",
   UPDATE_CHECK_REACHABLE: "업데이트 확인",
+  RECENT_TOOL_FAILURES: "최근 조회 기록",
+  BROKER_DATA_REACHABLE: "증권사 시세 연결",
 };
+
+// 이 항목들의 details.lines는 지원용이다(도구 이름·예외 원문). 화면에는 요약과 할 일만
+// 보여주고, 원문은 [결과 복사]로만 나간다.
+const SUPPORT_ONLY_DETAIL_CHECKS = new Set(["RECENT_TOOL_FAILURES", "BROKER_DATA_REACHABLE"]);
 
 // 이 체크는 앱 안에서 바로 처리할 수 있다 — 어떤 흐름으로 보낼지의 표.
 // 조치 문구를 그대로 터미널에서 실행하는 방식은 쓰지 않는다: 실제 문구 대부분이
@@ -365,35 +373,103 @@ const CHECK_RESOLVER = {
   TELEGRAM_LOGIN: "telegram-login",
 };
 
-function checkResolverFor(c) {
+// 라이선스 항목은 키 상태마다 할 일이 다르다. 사용 중지된 키에 키 입력 창을 열어주면
+// 같은 키를 다시 넣고 또 막힐 뿐이고(환불·결제 취소라 우리 확인이 필요하다), 날짜가
+// 되돌려진 경우는 키가 멀쩡해서 누를 버튼 자체가 없다(시계를 맞추는 게 할 일이다).
+function checkResolverFor(c, lens) {
   if (c.repairable && c.repair_id) return "repair"; // Lens가 스스로 고칠 수 있는 항목
+  if (c.id === "LICENSE_ACTIVE") {
+    const status = lens && lens.license_status;
+    if (status === "revoked") return "support";
+    if (status === "clock") return null;
+  }
   return CHECK_RESOLVER[c.id] || null;
 }
 
-function renderCheckItem(c, lensName) {
-  const detailLines = (c.details && c.details.lines) || [];
+// Lens 진단의 action에는 두 모양이 섞여 온다. 새 Lens는 "StockLens 카드의 [활성화]를…"
+// 같은 안내 글을, 옛 Lens는 `stocklens-activate <라이선스-키>` 같은 터미널 명령을 준다.
+// 명령은 고객 화면에 보이면 안 된다(터미널을 찾다가 막혀 문의로 온다). 그래서 화면에서는
+// 빼고 [결과 복사] 텍스트에만 남긴다. 판정은 이 함수 하나로 한다.
+function looksLikeCommand(text) {
+  const s = String(text || "").trim();
+  if (!s) return false;
+  return [
+    // 대소문자를 가린다 — 명령은 소문자로 오고, "Wi-Fi 연결을…" 같은 안내 글은 걸리면 안 된다.
+    /^[a-z0-9]+(-[a-z0-9]+)+(\s|$)/, // stocklens-setup --target both
+    /\b(stocklens|dartlens|telegramlens)-(activate|doctor|setup|login|broker)\b/i,
+    /^uv\s/i,
+    /\buv (tool|pip|run)\b/i,
+    /\s--[a-z]/i, // 옵션 인자
+    /<[^<>]+>/, // <라이선스-키> 같은 자리표시자
+    /\{[^{}]*\|[^{}]*\}/, // {claude-desktop|claude-code}
+    /\b(irm|iex|curl|pip install)\b/i,
+    /[A-Za-z]:\\|%[A-Z_]+%|\$[A-Z_]{3,}/, // 경로·환경변수
+    /\b[A-Z]+_HOME\b|\bPATH\b|PowerShell|터미널/,
+  ].some((re) => re.test(s));
+}
+
+// 해결 버튼이 없거나 Lens의 action이 명령어라 못 보여줄 때 대신 쓰는 안내. 버튼 이름은
+// 지금 화면 글자 그대로 쓴다.
+function fallbackCheckGuide(c, lens, resolver) {
+  const name = (lens && lens.display_name) || "Lens";
+  const status = lens && lens.license_status;
+  if (c.id === "LICENSE_ACTIVE" && status === "clock") {
+    return "이 컴퓨터의 날짜와 시간을 오늘로 맞춘 뒤 [진단]을 다시 눌러주세요";
+  }
+  if (resolver === "register") return `${name} 카드의 [MCP 등록]을 눌러주세요`;
+  if (resolver === "activate") {
+    if (c.id === "DART_API_KEY") return `${name} 카드의 [활성화]를 눌러 DART 인증키를 넣어주세요`;
+    if (status === "expired") return `${name} 카드의 [구매]를 누르고, 받은 키를 [활성화]로 넣어주세요`;
+    return `${name} 카드의 [활성화]를 눌러 메일로 받은 키를 넣어주세요`;
+  }
+  if (resolver === "telegram-login") return `${name} 카드의 [텔레그램 로그인]을 눌러주세요`;
+  if (resolver === "repair") return `${name} 카드의 [복구]를 눌러주세요`;
+  if (resolver === "support") return "착오라면 상단 [지원 문의]를 눌러주세요";
+  return "상단 [지원 문의]를 누르면 해결 방법을 안내해 드릴게요";
+}
+
+// 고객에게 보여줄 "할 일" 한 줄. Lens가 준 안내 글이 있으면 그걸 쓰고, 명령어뿐이면
+// Manager 안내로 바꾼다. action이 아예 없으면 없는 그대로 둔다(날짜 되돌림만 예외 —
+// 버튼이 없는 상태라 글이 유일한 안내다).
+function checkGuideText(c, lens) {
+  const resolver = checkResolverFor(c, lens);
+  if (c.action && !looksLikeCommand(c.action)) return c.action;
+  const isClock = c.id === "LICENSE_ACTIVE" && lens && lens.license_status === "clock";
+  if (!c.action && !isClock) return "";
+  return fallbackCheckGuide(c, lens, resolver);
+}
+
+function renderCheckItem(c, lens) {
+  const lensName = lens && lens.name;
+  // 명령어 모양의 줄은 화면에서 뺀다(action과 같은 이유). 지원용 항목은 통째로 뺀다.
+  const detailLines = SUPPORT_ONLY_DETAIL_CHECKS.has(c.id)
+    ? []
+    : ((c.details && c.details.lines) || []).filter((l) => !looksLikeCommand(l));
   const linesHtml = detailLines.length
     ? `<ul class="check-detail-lines">${detailLines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>`
     : "";
 
-  const resolver = checkResolverFor(c);
+  const resolver = checkResolverFor(c, lens);
+  // 지원 문의로 보내는 버튼은 누르면 실제로 그 창이 열리므로 이름도 그대로 쓴다.
+  const resolveLabel = resolver === "support" ? "지원 문의" : "지금 해결하기";
   // 가이드의 예시 카드는 실제 Lens가 아니다 — 버튼 모양은 그대로 보여주되 누르면
   // 없는 Lens를 호출하게 되므로 비활성으로 둔다.
   const isExample = lensName === EXAMPLE_LENS_DATA.name;
+  const guide = resolver ? "" : checkGuideText(c, lens);
   const actionHtml = resolver && isExample
     ? `<div class="check-action">
-         <button class="check-resolve-btn" disabled title="예시 화면입니다">지금 해결하기</button>
+         <button class="check-resolve-btn" disabled title="예시 화면입니다">${resolveLabel}</button>
        </div>`
     : resolver
     ? `<div class="check-action">
          <button class="check-resolve-btn" data-action="resolve-check" data-lens="${escapeAttr(lensName || "")}"
                  data-check-id="${escapeAttr(c.id)}" data-resolver="${resolver}"
-                 data-repair-id="${escapeAttr(c.repair_id || "")}">지금 해결하기</button>
+                 data-repair-id="${escapeAttr(c.repair_id || "")}">${resolveLabel}</button>
        </div>`
-    : c.action
-    ? `<div class="check-action"><span class="check-action-label">조치</span><span class="check-action-cmd" data-action="copy-cmd" data-cmd="${escapeAttr(c.action)}" title="눌러서 복사">${escapeHtml(c.action)}</span></div>`
+    : guide
+    ? `<div class="check-action check-action-guide">${escapeHtml(guide)}</div>`
     : "";
-  const cls = c.status === "active" ? "check-item active" : "check-item";
+  const cls = c.status === "active" ? "check-item active" : c.status === "warn" ? "check-item warn" : "check-item";
   const label = CHECK_ID_LABEL[c.id] || escapeHtml(c.id);
   return `<div class="${cls}"><span class="check-id">${label}</span>${escapeHtml(c.summary)}${linesHtml}${actionHtml}</div>`;
 }
@@ -444,10 +520,10 @@ function renderDetailModal(lens) {
   // "진행중"은 문제가 아니므로 별도 섹션으로 — 둘 다 있을 때만 "문제" 소제목을 붙여
   // 구분하고, 하나만 있으면 굳이 소제목으로 나누지 않는다.
   const progressHtml = inProgress.length
-    ? `<div class="detail-progress"><div class="detail-section-label">진행중</div>${inProgress.map((c) => renderCheckItem(c, lens.name)).join("")}</div>`
+    ? `<div class="detail-progress"><div class="detail-section-label">진행중</div>${inProgress.map((c) => renderCheckItem(c, lens)).join("")}</div>`
     : "";
   const problemsHtml = problems.length
-    ? `${inProgress.length ? `<div class="detail-section-label">문제</div>` : ""}${problems.map((c) => renderCheckItem(c, lens.name)).join("")}`
+    ? `${inProgress.length ? `<div class="detail-section-label">문제</div>` : ""}${problems.map((c) => renderCheckItem(c, lens)).join("")}`
     : `<div class="check-item">문제 없음</div>`;
 
   document.getElementById("detail-title").textContent = `${lens.display_name} 상세`;
@@ -694,12 +770,15 @@ async function runAction(action, lensName, extra, opts = {}) {
           // 일괄 처리 중 — 이미 한 번 물어봤으므로 다시 안 묻고 사실만 남긴다.
           showToast(`${displayName}: ${hostAppNames(blockingApps)}이(가) 파일을 쓰고 있어 건너뛰었습니다`);
         } else {
+          // 이유를 먼저 말한다 — 예전엔 "실패했습니다"와 복구 명령뿐이라, 사용자도
+          // 우리도 왜 실패했는지 알 방법이 없었다. 이전 버전 복구 명령(rollback_command)은
+          // 터미널 명령이라 화면에 싣지 않는다 — 고객이 할 일은 같은 버튼 다시 누르기와
+          // 문의뿐이다. 버튼 이름은 카드에 실제로 떠 있던 것으로 부른다.
+          const retryBtn = before.not_installed ? "설치" : before.incompatible ? "재설치" : "업데이트";
+          const reason = String(result.error || "원인을 알 수 없습니다").replace(/[.\s]+$/, "");
           showToast(
-            result.rollback_command
-              // 이유를 먼저 말한다 — 예전엔 "실패했습니다"와 복구 명령뿐이라, 사용자도
-              // 우리도 왜 실패했는지 알 방법이 없었다.
-              ? `설치/업데이트 실패: ${result.error || "원인을 알 수 없습니다"} (이전 버전 복구: ${result.rollback_command})`
-              : `설치/업데이트 실패: ${result.error || "원인을 알 수 없습니다"}`
+            `설치/업데이트 실패: ${reason}, ` +
+              `다시 [${retryBtn}]를 눌러보고 그래도 같으면 상단 [지원 문의]를 눌러주세요`
           );
         }
       } else if (
@@ -890,6 +969,13 @@ async function resolveCheck(lensName, checkId, resolver, repairId) {
   }
   if (resolver === "telegram-login") {
     openTelegramLoginModal(lensName);
+    return;
+  }
+  if (resolver === "support") {
+    // 사용 중지된 키는 우리가 확인해야 풀린다 — 이 자리에서 다시 진단해도 결과가 같으므로
+    // 해결 확인 알림은 걸지 않는다.
+    pendingResolveVerify = null;
+    openSupportModal();
     return;
   }
   pendingResolveVerify = null; // 처리할 방법이 없으면 확인 예약도 취소
@@ -2396,14 +2482,6 @@ document.addEventListener("click", (e) => {
   if (!btn) return;
   const action = btn.dataset.action;
 
-  if (action === "copy-cmd") {
-    const cmd = btn.dataset.cmd;
-    window.pywebview.api.copy_to_clipboard(cmd).then((ok) => {
-      showToast(ok ? "명령어가 복사되었습니다" : "클립보드 복사에 실패했습니다");
-    });
-    return;
-  }
-
   const lensName = btn.dataset.lens;
   if (action === "open-detail") {
     openDetailModal(lensName);
@@ -2742,34 +2820,49 @@ const TROUBLESHOOT_STEPS = [
     async run(setResult) {
       const data = await window.pywebview.api.diagnose(true);
       render(data);
-      const bad = (data.lenses || []).filter(
+      const installed = (data.lenses || []).filter((l) => !l.not_installed);
+      const bad = installed.filter(
         // blocked는 doctor를 아예 못 띄운 상태라 overall이 null이다 — "fail"만 보면
         // 제일 심하게 막힌 Lens가 오히려 목록에서 빠진다.
-        (l) => !l.not_installed && (l.overall === "fail" || l.blocked)
+        (l) => l.overall === "fail" || l.blocked
       );
-      if (!bad.length) {
+      // 쓸 수는 있지만 일부가 안 되는 Lens(주의). 온라인 점검에서만 보이는 항목(최근 조회
+      // 실패·증권사 시세·국내 데이터 일부 실패)이 여기 걸린다 — 이 단계가 "데이터가 실제로
+      // 들어오는가"를 묻는 자리라, 이걸 빼고 "모두 정상"이라고 하면 사실과 다르다.
+      const attention = installed.filter(
+        (l) => !bad.includes(l) && (l.checks || []).some((c) => c.status === "fail" || c.status === "warn")
+      );
+      if (!bad.length && !attention.length) {
         setResult("ok", "모두 정상입니다");
         return;
       }
-      // 무엇이 잘못됐는지(summary)와 무엇을 하면 되는지(action)를 같이 적는다.
-      // 진단 항목마다 둘 다 정의돼 있는데 예전엔 앞만 보여줬다 — 원인만 알려주고
-      // 할 일을 안 적으면 사용자는 결국 우리에게 물어야 하고, 이 창을 만든 의미가 없다.
+      // 무엇이 잘못됐는지(summary)와 무엇을 하면 되는지(할 일)를 같이 적는다.
+      // 원인만 알려주고 할 일을 안 적으면 사용자는 결국 우리에게 물어야 하고, 이 창을
+      // 만든 의미가 없다. 할 일은 상세 창과 같은 판정으로 고른다(명령어는 안 보여준다).
       const lines = [];
+      const pushChecks = (l, checks) => {
+        checks.forEach((c) => {
+          lines.push(`${l.display_name}: ${c.summary}`);
+          // 자동 복구 항목은 아래 [복구] 줄이 할 일이다 — 같은 말을 두 번 하지 않는다.
+          const guide = c.repairable && c.repair_id ? "" : checkGuideText(c, l);
+          if (guide) lines.push(`   → ${guide}`);
+        });
+        if (l.repairable_repair_id) {
+          lines.push(`   → ${l.display_name} 카드의 [복구]를 누르면 바로 고칠 수 있어요`);
+        }
+      };
       bad.forEach((l) => {
         const failed = (l.checks || []).filter((c) => c.status === "fail");
         if (!failed.length) {
           lines.push(`${l.display_name}: ${l.problem_detail || "원인을 확인하지 못했습니다"}`);
           return;
         }
-        failed.forEach((c) => {
-          lines.push(`${l.display_name}: ${c.summary}`);
-          if (c.action) lines.push(`   → ${c.action}`);
-        });
-        if (l.repairable_repair_id) {
-          lines.push("   → 아래 카드의 [고치기] 버튼으로 바로 해결할 수 있습니다");
-        }
+        pushChecks(l, failed);
       });
-      setResult("fail", lines.join("\n"));
+      attention.forEach((l) => {
+        pushChecks(l, (l.checks || []).filter((c) => c.status === "fail" || c.status === "warn"));
+      });
+      setResult(bad.length ? "fail" : "warn", lines.join("\n"));
     },
   },
 ];
@@ -2885,13 +2978,13 @@ const TOUR_STEPS = [
   {
     selector: ".card:first-child",
     title: "문제 자세히 보기",
-    // "명령어를 누르면 복사된다"고 안내하고 있었는데, 지금은 누르면 그 자리에서
-    // 실행되고 끝나면 자동으로 다시 진단한다 — 기능이 바뀐 뒤 설명이 안 따라왔었다.
+    // 예전 설명("[조치] 옆의 굵은 명령어")은 화면에서 명령어가 사라진 뒤에도 남아 있었다.
+    // 지금 화면은 [지금 해결하기] 버튼이거나, 버튼이 없는 항목은 할 일을 글로 적는다.
     desc:
-      "문제가 있으면 카드에 [문제 N건] 블록이 나타나고,\n무엇이 걸렸는지 옆에 같이 보입니다\n" +
-      "누르면 자세한 내용을 따로 창으로 보여줍니다\n\n" +
+      "문제가 있으면 카드에 [문제 N건] 블록이 나타나고,\n무엇이 걸렸는지 옆에 같이 보여요\n" +
+      "누르면 자세한 내용을 따로 창으로 보여드려요\n\n" +
       "지금 이 Lens는 문제가 없어 그 블록이 안 보이지만,\n예시로 그 창을 띄워드릴게요\n\n" +
-      "[조치] 옆의 굵은 명령어를 누르면 그 자리에서 실행되고,\n끝나면 해결됐는지 자동으로 다시 진단합니다",
+      "[지금 해결하기]를 누르면 고치는 창이 바로 열리고,\n끝나면 해결됐는지 자동으로 다시 확인해요",
     demo: "detail",
   },
   {
