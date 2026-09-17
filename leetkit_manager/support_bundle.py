@@ -19,7 +19,8 @@ from pathlib import Path
 from leetkit_manager import orchestrator, redaction
 from leetkit_manager.lens_contract import LENSES
 
-SUPPORT_EMAIL = "osy980315@gmail.com"
+# 대표 결정(2026-09-17): 문의처는 support@leetkey.kr 하나. 예전 gmail 주소도 같은 받은편지함으로 들어온다.
+SUPPORT_EMAIL = "support@leetkey.kr"
 
 # zip 안 폴더 이름(_safe_files가 정하는 접두어) → 화면에 쓰는 Lens 이름.
 _LENS_DISPLAY_BY_DIR = {

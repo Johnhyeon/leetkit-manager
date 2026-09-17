@@ -377,8 +377,6 @@ def test_no_forbidden_text_in_index_html():
 _PY_EXCEPTIONS = {
     # update_lens의 rollback_command. API 결과에만 실리고 화면은 싣지 않는다(app.js 설치 실패 알림).
     ("orchestrator.py", "uv tool install --force "),
-    # 지원 문의 창의 받는 사람 주소. 문의처 이메일 통일은 대표 결정 대기 중이다.
-    ("support_bundle.py", "osy980315@gmail.com"),
 }
 # 명령 이름·환경변수 이름 그 자체(subprocess 인자, os.environ 조회, lens_contract)는 글이 아니다.
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]+$")
