@@ -426,3 +426,65 @@ class TestHostAppDownloads:
         assert codex["install_url"] == api_module.CHATGPT_DOWNLOAD_URL
         assert "chatgpt.com" in codex["install_url"]
         assert "ChatGPT" in codex["label"]
+
+
+class TestQuitEndsTheProcessOnMacos:
+    """맥에서는 창을 닫는 것만으로 프로세스가 끝난다는 보장이 없다.
+
+    pywebview 코코아 백엔드는 마지막 창이 닫힐 때 `NSApplication.stop_()`을 부르는데,
+    그건 "다음 이벤트를 처리한 뒤 run 루프를 빠져나가라"는 예약일 뿐이다. 창이 이미
+    사라진 뒤엔 그 이벤트가 안 와서 창 없는 프로세스가 남고, 그러면 (1) single_instance
+    락 파일이 안 지워지고 (2) 자기 업데이트가 띄운 새 버전이 `--wait-for-exit`로 옛
+    PID를 기다리다 30초를 통째로 버린다. 화면에는 "앱을 다시 시작하는 중…"만 남는다.
+    """
+
+    def test_darwin_schedules_a_force_exit(self):
+        fake_window = MagicMock()
+        with patch("webview.windows", [fake_window]), \
+             patch.object(api_module.sys, "platform", "darwin"), \
+             patch.object(Api, "_force_exit_if_still_alive") as forced:
+            Api().quit()
+
+        fake_window.destroy.assert_called_once()
+        forced.assert_called_once()
+
+    def test_windows_leaves_the_normal_exit_path_alone(self):
+        fake_window = MagicMock()
+        with patch("webview.windows", [fake_window]), \
+             patch.object(api_module.sys, "platform", "win32"), \
+             patch.object(Api, "_force_exit_if_still_alive") as forced:
+            Api().quit()
+
+        fake_window.destroy.assert_called_once()
+        forced.assert_not_called()
+
+    def test_force_exit_timer_is_daemon_and_releases_the_lock_first(self):
+        """타이머 스레드가 daemon이 아니면 정상 종료를 그 스레드가 붙잡아,
+        고치려던 "안 끝나는 프로세스"를 그대로 다시 만든다. 그리고 os._exit는
+        finally를 안 타므로 락 해제가 그보다 먼저여야 한다."""
+        import threading
+
+        from leetkit_manager import single_instance
+
+        created = {}
+
+        class _FakeTimer:
+            def __init__(self, interval, fn):
+                created["interval"] = interval
+                created["fn"] = fn
+                self.daemon = False
+
+            def start(self):
+                created["daemon"] = self.daemon
+
+        order: list[str] = []
+        with patch.object(threading, "Timer", _FakeTimer):
+            Api._force_exit_if_still_alive(grace_s=1.5)
+
+        assert created["interval"] == 1.5
+        assert created["daemon"] is True
+
+        with patch.object(single_instance, "release", lambda: order.append("release")), \
+             patch.object(api_module.os, "_exit", lambda code: order.append(f"exit{code}")):
+            created["fn"]()
+        assert order == ["release", "exit0"]

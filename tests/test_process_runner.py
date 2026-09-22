@@ -87,3 +87,39 @@ class TestLaunchBlockedByWindowsPolicy:
         """FileNotFoundError도 OSError의 자식이다 — 새 except가 먼저 삼키면 안 된다."""
         monkeypatch.setattr("subprocess.run", self._raise(FileNotFoundError(2, "no such file")))
         assert run_cli(["nope"]).error == "not_found"
+
+
+class TestStreamingTimeout:
+    """`run_cli_streaming`의 timeout은 **출력이 한 줄도 안 와도** 걸려야 한다.
+
+    예전 구현은 `for line in proc.stdout:` 루프 안에서만 남은 시간을 쟀다 — 다음 줄이
+    와야 시간을 보는 구조라, 조용히 멈춘 자식(락 대기·네트워크 정지 등) 앞에서는
+    timeout 검사에 영영 도달하지 못했다. 이 함수는 `uv tool install`(Lens 설치·업데이트·
+    Manager 자기 업데이트)의 유일한 실행 경로라, 여기서 매달리면 화면은 "…하는 중"
+    오버레이가 걸린 채 끝나지 않는다.
+    """
+
+    def test_silent_child_still_times_out(self):
+        from leetkit_manager.process_runner import run_cli_streaming
+
+        result = run_cli_streaming(
+            [sys.executable, "-c", "import time; time.sleep(30)"], timeout=1.0
+        )
+        assert result.timed_out is True
+        assert result.error == "timeout"
+        assert result.ok is False
+        assert result.duration_s < 10  # 30초까지 안 기다렸다는 증거
+
+    def test_lines_still_stream_and_exit_code_survives(self):
+        from leetkit_manager.process_runner import run_cli_streaming
+
+        seen: list[str] = []
+        result = run_cli_streaming(
+            [sys.executable, "-c", "print('a'); print('b')"],
+            timeout=20.0,
+            on_line=seen.append,
+        )
+        assert result.ok is True
+        assert result.exit_code == 0
+        assert seen == ["a", "b"]
+        assert "a" in result.stdout and "b" in result.stdout

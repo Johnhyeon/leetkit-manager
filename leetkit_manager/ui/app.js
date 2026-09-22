@@ -567,12 +567,26 @@ document.getElementById("detail-copy").addEventListener("click", (e) => {
 
 async function loadDiagnosis() {
   const btn = document.getElementById("refresh-btn");
+  const readout = document.getElementById("readout-text");
   btn.disabled = true;
-  document.getElementById("readout-text").textContent = "진단 중…";
+  readout.textContent = "진단 중…";
+  // Lens 하나가 응답하지 않으면 그 하나당 30초씩 기다린다 — 셋이 다 그러면 몇 분이
+  // 걸린다. 그동안 화면은 "진단 중…" 한 줄뿐이라 멈춘 것과 구분이 안 됐다(맥에서
+  // "무한 로딩"으로 보고된 화면이 이것이다). 진행 중이라는 사실과 경과 시간을 보여주면
+  // 적어도 "멈춘 게 아니다"를 알 수 있다. 진단 자체를 중간에 끊지는 않는다 — 끊어봐야
+  // 뒤에서 도는 subprocess는 그대로 살아 있고, 늦게 온 결과가 화면을 덮어쓴다.
+  const startedAt = Date.now();
+  const slowTicker = setInterval(() => {
+    const seconds = Math.round((Date.now() - startedAt) / 1000);
+    if (seconds < 45) return;
+    readout.textContent =
+      `진단 중… ${seconds}초 경과, Lens가 응답하지 않으면 몇 분까지 걸릴 수 있습니다`;
+  }, 1000);
   try {
     const data = await window.pywebview.api.diagnose(false);
     render(data);
   } finally {
+    clearInterval(slowTicker);
     btn.disabled = false;
   }
 }
@@ -4629,7 +4643,21 @@ async function runSelfUpdate(btn = null) {
         : `v${result.version} 업데이트 완료, 앱을 다시 시작합니다`
     );
     showBusyOverlay("앱을 다시 시작하는 중…");
-    setTimeout(() => window.pywebview.api.quit(), 1600);
+    setTimeout(() => {
+      // quit()이 성공하면 창이 사라지므로 이 아래 타이머는 의미가 없어진다. 문제는
+      // 실패했을 때다 — 예전엔 오버레이가 화면을 덮은 채 영원히 남았고(맥에서 실제로
+      // 보고됨), 오버레이가 모든 버튼을 막고 있어서 사용자가 할 수 있는 일이 하나도
+      // 없었다. 창이 안 닫히면 오버레이를 걷고 무엇을 해야 하는지 말해준다.
+      const giveUp = setTimeout(() => {
+        hideBusyOverlay();
+        showToast("업데이트는 끝났습니다, 앱을 직접 닫고 바로가기로 다시 열어주세요");
+      }, 8000);
+      Promise.resolve(window.pywebview.api.quit()).catch(() => {
+        clearTimeout(giveUp);
+        hideBusyOverlay();
+        showToast("업데이트는 끝났습니다, 앱을 직접 닫고 바로가기로 다시 열어주세요");
+      });
+    }, 1600);
   } else {
     showToast(result.error || "업데이트에 실패했습니다");
     if (btn) {

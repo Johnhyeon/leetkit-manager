@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 
@@ -207,31 +209,58 @@ def run_cli_streaming(
             duration_s=time.monotonic() - start, error=_launch_error(e),
         )
 
+    # 읽기는 별도 스레드가 한다. 예전엔 이 자리에서 `for line in proc.stdout:`을 직접
+    # 돌면서 루프 **안에서** 남은 시간을 쟀는데, 그러면 다음 줄이 와야만 시간을 본다 —
+    # 자식이 한 글자도 안 뱉은 채 멈추면 timeout 검사에 영영 도달하지 못하고 이 함수가
+    # 그대로 매달린다. 이 함수를 부르는 건 UI의 작업 스레드라, 매달리는 순간 화면은
+    # "…하는 중" 오버레이가 걸린 채 끝나지 않는다(맥에서 보고된 무한 로딩의 후보).
+    # 큐로 받으면 줄이 안 와도 벽시계로 기한을 확인할 수 있다.
     collected: list[str] = []
-    try:
-        for line in proc.stdout:
-            collected.append(line)
-            if on_line:
-                try:
-                    on_line(line.rstrip())
-                except Exception:
-                    pass  # 진행 표시가 실패해도 설치 자체를 망치면 안 된다
-            if time.monotonic() - start > timeout:
-                proc.kill()
-                return ProcessResult(
-                    cmd=cmd, exit_code=None, stdout="".join(collected), stderr="",
-                    timed_out=True, duration_s=time.monotonic() - start, error="timeout",
-                )
-        proc.wait(timeout=max(1.0, timeout - (time.monotonic() - start)))
-    except Exception as e:
+    lines: "queue.Queue[str | None]" = queue.Queue()
+
+    def _pump() -> None:
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                lines.put(line)
+        except Exception:
+            pass
+        finally:
+            lines.put(None)  # 파이프가 닫혔다는 신호 — 정상 종료든 오류든 한 번은 온다
+
+    # daemon: 자식이 끝내 안 죽어 이 스레드가 남더라도 인터프리터 종료를 막지 않는다.
+    threading.Thread(target=_pump, daemon=True, name="run_cli_streaming-reader").start()
+
+    def _timed_out() -> ProcessResult:
         try:
             proc.kill()
         except Exception:
             pass
         return ProcessResult(
-            cmd=cmd, exit_code=None, stdout="".join(collected), stderr=str(e),
-            timed_out=False, duration_s=time.monotonic() - start, error="timeout",
+            cmd=cmd, exit_code=None, stdout="".join(collected), stderr="",
+            timed_out=True, duration_s=time.monotonic() - start, error="timeout",
         )
+
+    while True:
+        remaining = timeout - (time.monotonic() - start)
+        if remaining <= 0:
+            return _timed_out()
+        try:
+            line = lines.get(timeout=min(remaining, 0.5))
+        except queue.Empty:
+            continue
+        if line is None:
+            break
+        collected.append(line)
+        if on_line:
+            try:
+                on_line(line.rstrip())
+            except Exception:
+                pass  # 진행 표시가 실패해도 설치 자체를 망치면 안 된다
+
+    try:
+        proc.wait(timeout=max(1.0, timeout - (time.monotonic() - start)))
+    except Exception:
+        return _timed_out()
 
     return ProcessResult(
         cmd=cmd, exit_code=proc.returncode, stdout="".join(collected), stderr="",

@@ -1027,8 +1027,44 @@ class Api:
 
     def quit(self) -> None:
         """자기 업데이트 설치 후 창을 닫는다 — 반영되려면 재시작이 필요하기 때문
-        (Python은 실행 중 자기 코드를 다시 읽지 않는다). 재실행은 바탕화면 바로가기로."""
+        (Python은 실행 중 자기 코드를 다시 읽지 않는다). 재실행은 바탕화면 바로가기로.
+
+        맥에서는 창을 닫는 것만으로 **프로세스가 끝난다는 보장이 없다**. pywebview의
+        코코아 백엔드는 마지막 창이 닫힐 때 `NSApplication.stop_()`을 부르는데, 이건
+        "다음 이벤트를 처리한 뒤에 run 루프를 빠져나가라"는 예약일 뿐이다. 창이 이미
+        사라진 뒤엔 그 다음 이벤트가 안 오는 경우가 있어서, 창 없는 프로세스가 그대로
+        남는다. 그러면 세 가지가 연달아 틀어진다:
+          1. `single_instance.release()`까지 못 가서 락 파일이 남고,
+          2. 새 버전이 `--wait-for-exit`로 옛 PID를 기다리다 30초를 통째로 버리고,
+          3. 업데이트할 때마다 창 없는 프로세스가 하나씩 쌓인다.
+        화면에서는 "앱을 다시 시작하는 중…"만 남아 아무 일도 안 일어난 것처럼 보인다.
+
+        그래서 맥에서만, 정상 종료 경로에 짧은 유예를 주고도 살아 있으면 직접 끝낸다.
+        os._exit는 finally를 안 타므로 락 해제를 먼저 한다."""
         import webview
 
         if webview.windows:
             webview.windows[0].destroy()
+        if sys.platform == "darwin":
+            self._force_exit_if_still_alive()
+
+    @staticmethod
+    def _force_exit_if_still_alive(grace_s: float = 3.0) -> None:
+        """grace_s 안에 정상 종료가 안 되면 프로세스를 직접 끝낸다(맥 전용 안전망).
+
+        타이머 스레드는 daemon이다 — 정상 경로로 먼저 끝나는 경우에 이 스레드가
+        종료를 붙잡고 있으면 고치려던 문제를 그대로 다시 만든다."""
+        import threading
+
+        from leetkit_manager import single_instance
+
+        def _kill() -> None:
+            try:
+                single_instance.release()
+            except Exception:
+                pass
+            os._exit(0)
+
+        timer = threading.Timer(grace_s, _kill)
+        timer.daemon = True
+        timer.start()
