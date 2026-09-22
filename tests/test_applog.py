@@ -134,3 +134,44 @@ class TestSubprocessLoggingLeavesBodiesOut:
         assert secret not in text  # stdin 원문은 기록에 없다
         assert "MARKER77" not in text  # 자식이 뱉은 본문도 기록에 없다
         assert "run.begin" in text and "run.end" in text
+
+
+class TestThreadCrashesAreRecorded:
+    """2026-09-22 맥: pywebview 로컬 서버 스레드가 포트 충돌로 죽었는데
+    (OSError: [Errno 48] Address already in use) 앱은 그대로 살아서 빈 창을 띄웠다.
+    스레드 예외는 main() 의 크래시 기록에 안 걸리고, .app 번들은 stderr 도 없어
+    어디에도 흔적이 안 남았다."""
+
+    def test_exception_in_a_thread_lands_in_the_log(self, log_home, monkeypatch):
+        import threading
+
+        monkeypatch.setattr(applog, "_thread_hook_installed", False)
+        monkeypatch.setattr(threading, "excepthook", threading.__excepthook__)
+        applog.setup()
+
+        def boom():
+            raise OSError(48, "Address already in use")
+
+        t = threading.Thread(target=boom, name="Thread-1 (<lambda>)")
+        t.start()
+        t.join()
+
+        text = _text(log_home)
+        assert "thread.crash" in text
+        assert "Address already in use" in text
+        assert "Thread-1" in text
+
+    def test_previous_hook_still_runs(self, log_home, monkeypatch):
+        """터미널에서 띄운 경우에는 여전히 화면에도 보여야 한다 — 기록으로 갈음하지 않는다."""
+        import threading
+
+        seen = []
+        monkeypatch.setattr(applog, "_thread_hook_installed", False)
+        monkeypatch.setattr(threading, "excepthook", lambda args: seen.append(args))
+        applog.setup()
+
+        t = threading.Thread(target=lambda: 1 / 0)
+        t.start()
+        t.join()
+
+        assert seen, "원래 훅이 안 불렸다"

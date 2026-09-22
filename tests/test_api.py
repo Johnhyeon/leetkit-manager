@@ -519,3 +519,47 @@ class TestQuitEndsTheProcessOnMacos:
              patch.object(api_module.os, "_exit", lambda code: order.append(f"exit{code}")):
             created["fn"]()
         assert order == ["release", "exit0"]
+
+
+class TestLocalHttpPort:
+    """pywebview 는 private_mode=False 면 http_port 를 안 넘기는 한 **고정 포트 42001**
+    을 쓴다:
+
+        if not _state['private_mode'] and not http_port:
+            http_port = settings['DEFAULT_HTTP_PORT']   # 42001
+
+    우리는 localStorage 를 남겨야 해서 private_mode=False 를 쓴다. 고정이면 Manager
+    프로세스가 둘 겹치는 순간(자기 업데이트가 정확히 그렇다) 뒤에 뜬 쪽이 bind 에
+    실패하고, 실패하는 건 서버 스레드뿐이라 앱은 그대로 살아 **빈 창**을 띄운다.
+    맥에서 보고된 무한 로딩이 이것이었다(2026-09-22 실측).
+    """
+
+    def test_port_is_not_the_fixed_pywebview_default(self):
+        from leetkit_manager.ui.app import _pick_http_port
+
+        assert _pick_http_port() != 42001
+
+    def test_port_avoids_every_os_ephemeral_range(self):
+        """임시 포트 대역에서 고르면, 시작할 때 우리가 날리는 HTTPS 요청이 하필 그
+        번호를 가져갈 수 있다(macOS·윈도우 49152-, 리눅스 32768-)."""
+        from leetkit_manager.ui.app import _EPHEMERAL_FLOOR, _pick_http_port
+
+        for _ in range(20):
+            port = _pick_http_port()
+            assert port is not None
+            assert 1023 < port < _EPHEMERAL_FLOOR
+
+    def test_port_differs_between_runs(self):
+        """매번 같은 번호면 고정 포트와 다를 게 없다 — 겹친 프로세스끼리 또 부딪힌다."""
+        from leetkit_manager.ui.app import _pick_http_port
+
+        assert len({_pick_http_port() for _ in range(12)}) > 1
+
+    def test_start_receives_the_port_we_picked(self):
+        """고르기만 하고 안 넘기면 아무것도 안 고친 것이다."""
+        import inspect
+
+        from leetkit_manager.ui import app as app_module
+
+        src = inspect.getsource(app_module.run)
+        assert "http_port=http_port" in src

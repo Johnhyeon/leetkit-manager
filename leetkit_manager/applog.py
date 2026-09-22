@@ -78,6 +78,7 @@ def setup(role: str = "gui") -> None:
             _disabled = True  # 한 번 실패하면 매 줄마다 다시 시도하지 않는다
             return
     _prune()
+    install_thread_excepthook()
     event(
         "start",
         role=role,
@@ -88,6 +89,42 @@ def setup(role: str = "gui") -> None:
         executable=sys.executable,
         pid=os.getpid(),
     )
+
+
+_thread_hook_installed = False
+
+
+def install_thread_excepthook() -> None:
+    """스레드 안에서 죽은 예외도 기록에 남긴다. 기존 훅은 그대로 이어서 부른다.
+
+    2026-09-22 맥에서 pywebview 의 로컬 서버 스레드가 포트 충돌로 죽었다
+    (OSError: [Errno 48] Address already in use). 그 예외는 스레드 안에서 나기 때문에
+    main() 의 크래시 기록에 안 걸린다. 게다가 **앱은 그대로 살아서 빈 창을 띄운다** —
+    .app 번들은 stderr 가 아예 없어 어디에도 흔적이 안 남았고, 대표가 터미널에서
+    직접 실행해보고 나서야 원인이 드러났다. 그런 걸 다시는 놓치지 않게 한다."""
+    global _thread_hook_installed
+    if _thread_hook_installed:
+        return
+    import traceback
+
+    previous = threading.excepthook
+
+    def _hook(args) -> None:
+        try:
+            event(
+                "thread.crash",
+                thread=getattr(args.thread, "name", None),
+                error=f"{args.exc_type.__name__}: {args.exc_value}",
+                traceback="".join(
+                    traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)
+                ),
+            )
+        except Exception:
+            pass  # 기록이 실패해도 원래 훅은 반드시 돌아야 한다
+        previous(args)
+
+    threading.excepthook = _hook
+    _thread_hook_installed = True
 
 
 def _version() -> str:

@@ -91,6 +91,56 @@ def _accept_first_click_on_macos() -> None:
         pass
 
 
+# 임시(ephemeral) 포트 대역의 하한 — OS 가 바깥으로 나가는 연결에 자동으로 나눠주는
+# 번호다. macOS·윈도우는 49152-65535, 리눅스는 32768-60999. 여기서 고르면 Manager 가
+# 시작하며 날리는 HTTPS 요청(업데이트 확인·진단)이 하필 그 번호를 가져갈 수 있어서,
+# 셋 중 가장 낮은 값을 기준으로 통째로 피한다.
+_EPHEMERAL_FLOOR = 32768
+# 그 아래에서 쓸 대역. 0-1023(well-known)과 개발 도구가 흔히 쓰는 번호(3000·5000·
+# 8000·8080·9000 등)에서 충분히 떨어져 있다. 그래도 겹치는 건 bind 로 걸러낸다.
+_HTTP_PORT_RANGE = (20000, _EPHEMERAL_FLOOR - 64)
+
+
+def _pick_http_port() -> int | None:
+    """pywebview 로컬 서버가 쓸 포트. 못 고르면 None(=pywebview 기본 동작).
+
+    **왜 직접 고르나.** 우리는 private_mode=False 를 쓰는데(localStorage 를 남겨야
+    "가이드 최초 1회만" 판단이 매 실행 초기화되지 않는다), 그러면 pywebview 는
+    http_port 를 안 넘기는 한 **고정 포트 42001** 을 쓴다:
+
+        if not _state['private_mode'] and not http_port:
+            http_port = settings['DEFAULT_HTTP_PORT']   # 42001
+
+    고정이라 Manager 프로세스가 둘 겹치는 순간 뒤에 뜬 쪽이 bind 에 실패한다. 자기
+    업데이트는 옛·새 프로세스가 몇 초 겹치는 구간이 정의상 있고, 맥에서는 창을 닫아도
+    프로세스가 안 끝나는 일이 있어(api.quit 참고) 옛 쪽이 그 포트를 계속 쥔다.
+
+    그리고 실패하는 건 **서버 스레드 하나뿐이라 앱은 그대로 산다** — 창은 뜨는데
+    불러올 서버가 없어 영영 빈 화면이다. .app 번들로 띄우면 stderr 가 없어 아래
+    오류조차 어디에도 안 남는다. 맥에서 보고된 "무한 로딩"이 이것이었다(2026-09-22
+    실측: OSError: [Errno 48] Address already in use).
+
+    매 실행마다 비어 있는 포트를 잡아 넘기면 프로세스가 겹쳐도 서로를 막지 않는다.
+    """
+    import random
+    import socket
+
+    for _ in range(40):
+        port = random.randint(*_HTTP_PORT_RANGE)
+        if port >= _EPHEMERAL_FLOOR:
+            continue
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+        return port
+    # 다 막혀 있는 희귀한 경우 — pywebview 기본값(42001)이라도 쓰게 둔다. 창이 안 뜨는
+    # 것보다는 낫고, 어차피 그 상황이면 기록에 남는다.
+    applog.event("gui.http_port.pick_failed", tried=40)
+    return None
+
+
 def run(*, debug: bool = False) -> None:
     # 중복 실행 판정은 "아이콘을 눌러도 아무 일도 안 일어난다"의 단골 원인이다 —
     # 막혔는지 아닌지를 남겨두지 않으면 그 자리에서 다시 추측이 시작된다.
@@ -166,12 +216,16 @@ def run(*, debug: bool = False) -> None:
         # webview.start()는 창이 닫힐 때까지 안 돌아온다. 그래서 "돌아왔다"는 줄이
         # 없으면 그 실행은 창을 닫고도 프로세스가 안 끝난 것이다 — 맥에서 보고된
         # 증상(ui/api.py quit 참고)이 기록에 남는 자리가 여기다.
-        applog.event("gui.loop.begin", debug=debug)
+        http_port = _pick_http_port()
+        applog.event("gui.loop.begin", debug=debug, http_port=http_port)
         webview.start(
             private_mode=False,
             storage_path=storage_path,
             icon=str(icon_path) if icon_path.exists() else None,
             debug=debug,
+            # 안 넘기면 private_mode=False 탓에 고정 포트 42001 이 된다
+            # (_pick_http_port 참고 — 맥 무한 로딩의 원인이었다).
+            http_port=http_port,
         )
         applog.event("gui.loop.returned")
     finally:
