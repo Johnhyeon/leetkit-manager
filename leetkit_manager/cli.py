@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from leetkit_manager import orchestrator
+from leetkit_manager import applog, orchestrator
 from leetkit_manager.lens_contract import LENSES
 
 
@@ -68,11 +68,22 @@ def _wait_for_pid_exit(pid: int, timeout_s: float = 30.0) -> None:
 
     import psutil
 
-    deadline = time.monotonic() + timeout_s
+    # 여기서 얼마나 기다렸는지가 "옛 프로세스가 제대로 끝났나"의 직접 증거다 — 맥에서는
+    # 창을 닫아도 프로세스가 안 끝나는 경우가 있는데(ui/api.py quit 참고), 그러면 여기서
+    # timeout_s 를 통째로 태우고 그동안 화면엔 아무것도 없다.
+    applog.event("relaunch.wait.begin", waiting_for_pid=pid, timeout_s=timeout_s)
+    start = time.monotonic()
+    deadline = start + timeout_s
     while time.monotonic() < deadline:
         if not psutil.pid_exists(pid):
+            applog.event("relaunch.wait.end", waited=f"{time.monotonic() - start:.1f}s", outcome="exited")
             return
         time.sleep(0.2)
+    applog.event(
+        "relaunch.wait.end",
+        waited=f"{time.monotonic() - start:.1f}s",
+        outcome="still_alive",  # 옛 프로세스가 안 끝났다 — 그대로 진행한다
+    )
 
 
 def _cmd_selftest(args: argparse.Namespace) -> int:
@@ -160,7 +171,21 @@ def main() -> None:
     args = _build_parser().parse_args()
     # 서브커맨드 없이 실행(바로가기 더블클릭 등)하면 gui가 기본 동작.
     func = getattr(args, "func", _cmd_gui)
-    sys.exit(func(args))
+    # 기록은 여기서 딱 한 번 연다 — 모든 진입점이 이 함수를 지난다. 기록 때문에 앱이
+    # 안 뜨는 일은 없어야 하므로 applog 쪽이 모든 예외를 삼킨다.
+    applog.setup(role=getattr(args, "command", None) or "gui")
+    try:
+        exit_code = func(args)
+    except BaseException as e:
+        # --windowed 로 빌드한 exe 와 맥 .app 번들은 stderr 가 아예 없다 — 여기서
+        # 안 남기면 크래시는 어디에도 흔적을 안 남기고, 사용자 눈엔 "아이콘을 눌러도
+        # 아무 일도 안 일어남"이 된다. 남기고 나서 그대로 다시 올린다.
+        import traceback
+
+        applog.event("crash", error=f"{type(e).__name__}: {e}", traceback=traceback.format_exc())
+        raise
+    applog.event("exit", code=exit_code)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

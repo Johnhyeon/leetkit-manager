@@ -5,9 +5,13 @@ Manager가 각 Lens CLI를 subprocess로 부르는 유일한 경로. 여기서 �
 1. 모든 호출은 기본 30초 timeout을 갖는다(공통 수용 기준: 한 Lens doctor가 hang돼도
    30초 후 중단하고 나머지 Lens 진단은 계속되어야 한다).
 2. `activate --stdin`에 넘기는 라이선스 키 원문은 커맨드라인 인자로도, 이 모듈이 남기는
-   어떤 기록에도 나타나지 않는다 — stdin 파이프로만 전달한다. 이 모듈은 애초에 아무것도
-   로그/파일에 쓰지 않으므로(순수 함수), 호출자가 ProcessResult를 그대로 로깅하지 않는 한
-   원문이 새어나갈 경로가 없다.
+   어떤 기록에도 나타나지 않는다 — stdin 파이프로만 전달한다.
+
+기록(applog)에 남기는 것은 **무엇을 언제 얼마나 불렀나**뿐이다: 커맨드(마스킹 통과),
+걸린 시간, 종료 코드, 오류 종류. `input_text`와 자식의 stdout·stderr **본문은 절대 안
+남긴다** — 라이선스 키·API 키가 들어올 수 있는 유일한 통로가 그 셋이기 때문이다.
+시작 줄을 끝 줄보다 먼저 남기는 것도 규칙이다. 끝 줄만 남기면 매달린 호출이 기록에
+아무 흔적도 안 남는데, 그게 정확히 찾고 싶은 상황이다.
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+
+from leetkit_manager import applog
 
 DEFAULT_TIMEOUT = 30.0
 
@@ -86,6 +92,26 @@ class ProcessResult:
         return self.error is None and self.exit_code == 0
 
 
+def _describe(cmd: list[str]) -> str:
+    """기록에 남길 커맨드 표기. 경로가 긴 첫 인자는 파일 이름만 남긴다 — 줄이 읽히려면
+    `stocklens-doctor --json`처럼 보여야지, 홈 경로가 화면의 절반을 먹으면 안 된다."""
+    if not cmd:
+        return "-"
+    head = os.path.basename(cmd[0]) or cmd[0]
+    return " ".join([head, *cmd[1:]])
+
+
+def _log_result(cmd: list[str], result: "ProcessResult") -> "ProcessResult":
+    applog.event(
+        "run.end",
+        cmd=_describe(cmd),
+        elapsed=f"{result.duration_s:.1f}s",
+        exit_code=result.exit_code,
+        error=result.error,
+    )
+    return result
+
+
 def _launch_error(exc: OSError) -> str:
     """자식을 "띄우는" 단계에서 난 OSError를 ProcessResult.error 값으로 옮긴다.
 
@@ -104,11 +130,24 @@ def run_cli(
     timeout: float = DEFAULT_TIMEOUT,
     input_text: str | None = None,
 ) -> ProcessResult:
-    """cmd를 실행한다. input_text가 있으면 stdin으로만 전달한다(로그에 남기지 않는다).
+    """cmd를 실행한다. input_text가 있으면 stdin으로만 전달한다(기록에 남기지 않는다).
 
     취소: 호출자가 별도 스레드/프로세스에서 이 함수를 돌리고 있다면, timeout이 지나면
     이 함수가 자체적으로 자식 프로세스를 죽이고 반환하므로 별도 취소 신호가 필요 없다.
-    """
+
+    기록은 시작·끝 두 줄이 전부다(모듈 문서의 규칙 참고). 반환 경로가 여럿이라
+    구현을 안쪽 함수로 두고 여기서 한 번만 감싼다 — 경로 하나를 빠뜨리면 그 경로로
+    끝난 호출만 기록에서 사라지는데, 하필 그런 경로가 문제일 때가 많다."""
+    applog.event("run.begin", cmd=_describe(cmd), timeout_s=timeout)
+    return _log_result(cmd, _run_cli(cmd, timeout=timeout, input_text=input_text))
+
+
+def _run_cli(
+    cmd: list[str],
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    input_text: str | None = None,
+) -> ProcessResult:
     start = time.monotonic()
     try:
         proc = subprocess.run(
@@ -185,6 +224,16 @@ def run_cli_streaming(
     상황을 stderr에 사람이 읽을 수 있는 형태로 흘리므로 stdout과 합쳐서 읽는다.
     반환값은 run_cli와 동일한 계약이라 호출부가 결과 판정을 똑같이 할 수 있다.
     """
+    applog.event("run.begin", cmd=_describe(cmd), timeout_s=timeout, streaming=True)
+    return _log_result(cmd, _run_cli_streaming(cmd, timeout=timeout, on_line=on_line))
+
+
+def _run_cli_streaming(
+    cmd: list[str],
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    on_line=None,
+) -> ProcessResult:
     start = time.monotonic()
     try:
         proc = subprocess.Popen(

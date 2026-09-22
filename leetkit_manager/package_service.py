@@ -22,6 +22,7 @@ from pathlib import Path
 
 import httpx
 
+from leetkit_manager import applog
 from leetkit_manager.process_runner import ProcessResult, child_env, run_cli, run_cli_streaming
 
 _PYPI_TIMEOUT = 10.0
@@ -1586,15 +1587,19 @@ def relaunch_after_exit() -> bool:
     command = resolve_lens_command("leetkit-manager")
     creationflags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
     try:
-        subprocess.Popen(
+        child = subprocess.Popen(
             [command, "gui", "--wait-for-exit", str(os.getpid())],
             creationflags=creationflags,
             close_fds=True,
             start_new_session=(sys.platform != "win32"),
             env=child_env(),
         )
+        # 새 프로세스의 PID 를 남긴다 — 그 PID 의 기록 파일이 따로 생기므로,
+        # 받아보는 쪽이 옛 실행과 새 실행을 짝지어 볼 수 있다.
+        applog.event("relaunch.spawned", command=command, child_pid=child.pid)
         return True
-    except Exception:
+    except Exception as e:
+        applog.event("relaunch.spawn_failed", command=command, error=f"{type(e).__name__}: {e}")
         return False
 
 

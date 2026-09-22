@@ -7,7 +7,14 @@ from pathlib import Path
 
 import webview
 
-from leetkit_manager import orchestrator, package_service, review_prompt, shortcut, single_instance
+from leetkit_manager import (
+    applog,
+    orchestrator,
+    package_service,
+    review_prompt,
+    shortcut,
+    single_instance,
+)
 from leetkit_manager.ui.api import Api
 
 _UI_DIR = Path(__file__).parent
@@ -85,7 +92,11 @@ def _accept_first_click_on_macos() -> None:
 
 
 def run(*, debug: bool = False) -> None:
-    if single_instance.is_already_running():
+    # 중복 실행 판정은 "아이콘을 눌러도 아무 일도 안 일어난다"의 단골 원인이다 —
+    # 막혔는지 아닌지를 남겨두지 않으면 그 자리에서 다시 추측이 시작된다.
+    blocked = single_instance.is_already_running()
+    applog.event("gui.single_instance", already_running=blocked)
+    if blocked:
         # 창 없는 exe에선 stderr가 없어 print가 사라진다 — 기존 창을 앞으로 가져오거나
         # 최소한 메시지 상자를 띄운다(single_instance.notify_already_running 참고).
         single_instance.notify_already_running()
@@ -152,14 +163,20 @@ def run(*, debug: bool = False) -> None:
         # debug=True면 웹 검사기가 열린다(창에서 우클릭 → 요소 검사). 화면은 그대로인데
         # 버튼만 안 먹는 식의 문제는 자바스크립트 오류가 조용히 삼켜진 경우가 대부분이라,
         # 그 오류를 직접 읽을 방법이 없으면 원인 추측만 하게 된다. 평소엔 꺼둔다.
+        # webview.start()는 창이 닫힐 때까지 안 돌아온다. 그래서 "돌아왔다"는 줄이
+        # 없으면 그 실행은 창을 닫고도 프로세스가 안 끝난 것이다 — 맥에서 보고된
+        # 증상(ui/api.py quit 참고)이 기록에 남는 자리가 여기다.
+        applog.event("gui.loop.begin", debug=debug)
         webview.start(
             private_mode=False,
             storage_path=storage_path,
             icon=str(icon_path) if icon_path.exists() else None,
             debug=debug,
         )
+        applog.event("gui.loop.returned")
     finally:
         single_instance.release()
+        applog.event("gui.released")
 
 
 if __name__ == "__main__":

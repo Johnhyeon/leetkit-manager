@@ -16,7 +16,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from leetkit_manager import orchestrator, redaction
+from leetkit_manager import applog, orchestrator, redaction
 from leetkit_manager.lens_contract import LENSES
 
 # 대표 결정(2026-09-17): 문의처는 support@leetkey.kr 하나. 예전 gmail 주소도 같은 받은편지함으로 들어온다.
@@ -186,6 +186,17 @@ def _safe_files(notes: list[str] | None = None) -> list[tuple[str, Path]]:
     `notes`를 주면 못 읽은 곳을 거기에 적는다(summary.txt에 실린다)."""
     notes = [] if notes is None else notes
     found: list[tuple[str, Path]] = []
+
+    # Manager 자신의 실행 기록. 이게 없던 동안, 맥에서 "업데이트 후 앱을 다시 시작하는
+    # 중에서 멈춘다"는 보고를 받고도 어느 단계에서 멈췄는지 확인할 방법이 아예 없었다 —
+    # 번들이 Lens 로그만 모았기 때문이다. 자기 업데이트는 실행 두 개(옛·새 프로세스)가
+    # 겹치므로 파일도 둘 생긴다. 둘 다 담아야 짝지어 볼 수 있다.
+    manager_logs = applog.recent_files()
+    if manager_logs:
+        for f in manager_logs:
+            found.append((f"manager/{f.name}", f))
+    else:
+        notes.append(f"- Manager 실행 기록: 없음 ({applog.log_dir()})")
 
     # 두 자리를 합쳐서 본다. 같은 이름이면 새 위치가 이긴다.
     # 폴더가 없는 것 자체는 정상이라(한쪽만 있는 게 보통) 그때는 메모를 남기지 않는다 —

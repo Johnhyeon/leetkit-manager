@@ -13,7 +13,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from leetkit_manager import orchestrator, package_service, redaction
+from leetkit_manager import applog, orchestrator, package_service, redaction
 from leetkit_manager.lens_contract import LENSES, get_lens
 from leetkit_manager.models import CheckResult
 from leetkit_manager.orchestrator import LensDiagnosis
@@ -800,6 +800,7 @@ class Api:
         바꿔치기하고 재실행(uv tool install이 아예 관여하지 않음 — 애초에 uv로 깐 게
         아니므로). 두 경우 다 반영되려면 지금 프로세스는 종료해야 해서, 호출자(JS)가
         재시작을 안내하고 창을 닫는다."""
+        applog.event("self_update.begin", frozen=package_service.is_frozen_exe())
         if package_service.is_frozen_exe():
             release = package_service.latest_github_release()
             if not release or not release.get("exe_url"):
@@ -832,14 +833,28 @@ class Api:
             return {"ok": result.ok, "version": release["version"], "error": result.stderr if not result.ok else None}
 
         latest = package_service.latest_pypi_version("leetkit-manager")
+        applog.event("self_update.latest", latest=latest, current=self._current_version())
         if not latest:
             return {"ok": False, "error": "최신 버전을 확인할 수 없습니다(네트워크를 확인하세요)."}
-        result = package_service.install_version("leetkit-manager", latest)
+        with applog.timed("self_update.install", version=latest):
+            result = package_service.install_version("leetkit-manager", latest)
+        applog.event(
+            "self_update.install.result",
+            ok=result.ok, exit_code=result.exit_code, error=result.error,
+        )
         if not result.ok:
             return {"ok": False, "version": latest}
         # 예전엔 여기서 그냥 끝나서, "앱을 다시 시작합니다"라고 안내해놓고 닫히기만 했다
         # (윈도우·맥 공통 — 단일 exe 쪽만 replace_running_exe가 같이 띄우고 있었다).
-        return {"ok": True, "version": latest, "relaunching": package_service.relaunch_after_exit()}
+        relaunching = package_service.relaunch_after_exit()
+        applog.event("self_update.relaunch", scheduled=relaunching, version=latest)
+        return {"ok": True, "version": latest, "relaunching": relaunching}
+
+    @staticmethod
+    def _current_version() -> str:
+        from leetkit_manager import __version__
+
+        return __version__
 
     def create_support_bundle(self) -> dict:
         """지원 문의용 zip 생성(로그·상태 파일 안전 목록만) + 탐색기로 폴더 열기 +
@@ -1029,42 +1044,48 @@ class Api:
         """자기 업데이트 설치 후 창을 닫는다 — 반영되려면 재시작이 필요하기 때문
         (Python은 실행 중 자기 코드를 다시 읽지 않는다). 재실행은 바탕화면 바로가기로.
 
-        맥에서는 창을 닫는 것만으로 **프로세스가 끝난다는 보장이 없다**. pywebview의
-        코코아 백엔드는 마지막 창이 닫힐 때 `NSApplication.stop_()`을 부르는데, 이건
-        "다음 이벤트를 처리한 뒤에 run 루프를 빠져나가라"는 예약일 뿐이다. 창이 이미
-        사라진 뒤엔 그 다음 이벤트가 안 오는 경우가 있어서, 창 없는 프로세스가 그대로
-        남는다. 그러면 세 가지가 연달아 틀어진다:
+        **맥에서 이 자리가 실제로 멈췄다**(2026-09-22 확인: 화면이 "앱을 다시 시작하는
+        중…"에서 더 진행되지 않음). 창을 닫는 것만으로 프로세스가 끝난다는 보장이
+        없어서다. pywebview 코코아 백엔드는 마지막 창이 닫힐 때
+        `NSApplication.stop_()`을 부르는데, 이건 "다음 이벤트를 처리한 뒤에 run 루프를
+        빠져나가라"는 예약일 뿐이다. 창이 사라진 뒤엔 그 이벤트가 안 오는 경우가 있고,
+        그러면 세 가지가 연달아 틀어진다:
           1. `single_instance.release()`까지 못 가서 락 파일이 남고,
           2. 새 버전이 `--wait-for-exit`로 옛 PID를 기다리다 30초를 통째로 버리고,
           3. 업데이트할 때마다 창 없는 프로세스가 하나씩 쌓인다.
-        화면에서는 "앱을 다시 시작하는 중…"만 남아 아무 일도 안 일어난 것처럼 보인다.
 
-        그래서 맥에서만, 정상 종료 경로에 짧은 유예를 주고도 살아 있으면 직접 끝낸다.
-        os._exit는 finally를 안 타므로 락 해제를 먼저 한다."""
+        그래서 맥에서는 **destroy를 부르기 전에** 안전망을 먼저 건다. 순서가 중요하다 —
+        destroy 자체가 안 돌아오는 경우(창이 그대로 남은 채 이 호출이 매달리는 경우)에는
+        뒤에 건 안전망은 영영 안 걸린다. 먼저 걸어두면 어느 쪽이든 빠져나온다."""
         import webview
 
-        if webview.windows:
-            webview.windows[0].destroy()
         if sys.platform == "darwin":
             self._force_exit_if_still_alive()
+        applog.event("quit.destroy.begin", windows=len(getattr(webview, "windows", []) or []))
+        if webview.windows:
+            webview.windows[0].destroy()
+        applog.event("quit.destroy.returned")
 
     @staticmethod
-    def _force_exit_if_still_alive(grace_s: float = 3.0) -> None:
+    def _force_exit_if_still_alive(grace_s: float = 5.0) -> None:
         """grace_s 안에 정상 종료가 안 되면 프로세스를 직접 끝낸다(맥 전용 안전망).
 
         타이머 스레드는 daemon이다 — 정상 경로로 먼저 끝나는 경우에 이 스레드가
-        종료를 붙잡고 있으면 고치려던 문제를 그대로 다시 만든다."""
+        종료를 붙잡고 있으면 고치려던 문제를 그대로 다시 만든다.
+        os._exit는 finally를 안 타므로 락 해제를 먼저 한다."""
         import threading
 
         from leetkit_manager import single_instance
 
         def _kill() -> None:
+            applog.event("quit.force_exit.fired", grace_s=grace_s)
             try:
                 single_instance.release()
             except Exception:
                 pass
             os._exit(0)
 
+        applog.event("quit.force_exit.armed", grace_s=grace_s)
         timer = threading.Timer(grace_s, _kill)
         timer.daemon = True
         timer.start()

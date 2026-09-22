@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from leetkit_manager import orchestrator, review_prompt, shortcut
 from leetkit_manager.lens_contract import STOCKLENS
 from leetkit_manager.process_runner import ProcessResult
@@ -446,6 +448,35 @@ class TestQuitEndsTheProcessOnMacos:
             Api().quit()
 
         fake_window.destroy.assert_called_once()
+        forced.assert_called_once()
+
+    def test_force_exit_is_armed_before_destroy(self):
+        """순서가 계약이다. destroy 자체가 안 돌아오는 경우(창이 그대로 남은 채 이
+        호출이 매달리는 경우)에 안전망을 뒤에 걸어두면 영영 안 걸린다 — 맥에서 보고된
+        증상이 바로 "창이 안 닫힌 채 화면이 그대로"였다."""
+        order: list[str] = []
+        fake_window = MagicMock()
+        fake_window.destroy.side_effect = lambda: order.append("destroy")
+
+        with patch("webview.windows", [fake_window]), \
+             patch.object(api_module.sys, "platform", "darwin"), \
+             patch.object(Api, "_force_exit_if_still_alive",
+                          lambda *a, **k: order.append("armed")):
+            Api().quit()
+
+        assert order == ["armed", "destroy"]
+
+    def test_force_exit_survives_a_destroy_that_never_returns(self):
+        """destroy 가 매달리든 예외로 죽든, 안전망은 이미 걸려 있어야 한다."""
+        fake_window = MagicMock()
+        fake_window.destroy.side_effect = RuntimeError("창이 안 닫힌다")
+
+        with patch("webview.windows", [fake_window]), \
+             patch.object(api_module.sys, "platform", "darwin"), \
+             patch.object(Api, "_force_exit_if_still_alive") as forced:
+            with pytest.raises(RuntimeError):
+                Api().quit()
+
         forced.assert_called_once()
 
     def test_windows_leaves_the_normal_exit_path_alone(self):
